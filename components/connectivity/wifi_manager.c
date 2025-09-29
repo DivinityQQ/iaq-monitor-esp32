@@ -10,6 +10,7 @@
 #include "esp_netif.h"
 
 #include "wifi_manager.h"
+#include "mqtt_manager.h"
 #include "iaq_config.h"
 
 static const char *TAG = "WIFI_MGR";
@@ -63,6 +64,12 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                     g_system_info.wifi_connected = true;
                     xEventGroupSetBits(g_event_group, WIFI_CONNECTED_BIT);
                     xEventGroupClearBits(g_event_group, WIFI_FAIL_BIT);
+
+                    // Restart MQTT if it was previously connected
+                    if (g_system_info.mqtt_connected && !mqtt_manager_is_connected()) {
+                            ESP_LOGI(TAG, "WiFi recovered, restarting MQTT");
+                            mqtt_manager_start();
+                    }
                 }
                 break;
                 
