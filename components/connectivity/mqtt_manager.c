@@ -339,7 +339,12 @@ esp_err_t mqtt_publish_sensor_mcu(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
     cJSON *root = cJSON_CreateObject();
-    if (!isnan(data->mcu_temperature)) cJSON_AddNumberToObject(root, "mcu_temperature", data->mcu_temperature); else cJSON_AddNullToObject(root, "mcu_temperature");
+    if (!isnan(data->mcu_temperature)) {
+        double t = round((double)data->mcu_temperature * 100.0) / 100.0;
+        cJSON_AddNumberToObject(root, "mcu_temperature", t);
+    } else {
+        cJSON_AddNullToObject(root, "mcu_temperature");
+    }
     return publish_json(TOPIC_SENSOR_MCU, root);
 }
 
@@ -347,8 +352,18 @@ esp_err_t mqtt_publish_sensor_sht41(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
     cJSON *root = cJSON_CreateObject();
-    if (!isnan(data->temperature)) cJSON_AddNumberToObject(root, "temperature", data->temperature); else cJSON_AddNullToObject(root, "temperature");
-    if (!isnan(data->humidity))    cJSON_AddNumberToObject(root, "humidity", data->humidity);       else cJSON_AddNullToObject(root, "humidity");
+    if (!isnan(data->temperature)) {
+        double t = round((double)data->temperature * 100.0) / 100.0;
+        cJSON_AddNumberToObject(root, "temperature", t);
+    } else {
+        cJSON_AddNullToObject(root, "temperature");
+    }
+    if (!isnan(data->humidity)) {
+        double h = round((double)data->humidity * 100.0) / 100.0;
+        cJSON_AddNumberToObject(root, "humidity", h);
+    } else {
+        cJSON_AddNullToObject(root, "humidity");
+    }
     return publish_json(TOPIC_SENSOR_SHT41, root);
 }
 
@@ -356,7 +371,12 @@ esp_err_t mqtt_publish_sensor_bmp280(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
     cJSON *root = cJSON_CreateObject();
-    if (!isnan(data->pressure)) cJSON_AddNumberToObject(root, "pressure", data->pressure); else cJSON_AddNullToObject(root, "pressure");
+    if (!isnan(data->pressure)) {
+        double p = round((double)data->pressure * 100.0) / 100.0;
+        cJSON_AddNumberToObject(root, "pressure", p);
+    } else {
+        cJSON_AddNullToObject(root, "pressure");
+    }
     return publish_json(TOPIC_SENSOR_BMP280, root);
 }
 
@@ -373,9 +393,24 @@ esp_err_t mqtt_publish_sensor_pms5003(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
     cJSON *root = cJSON_CreateObject();
-    if (!isnan(data->pm1_0)) cJSON_AddNumberToObject(root, "pm1_0", data->pm1_0); else cJSON_AddNullToObject(root, "pm1_0");
-    if (!isnan(data->pm2_5)) cJSON_AddNumberToObject(root, "pm2_5", data->pm2_5); else cJSON_AddNullToObject(root, "pm2_5");
-    if (!isnan(data->pm10))  cJSON_AddNumberToObject(root, "pm10",  data->pm10);  else cJSON_AddNullToObject(root, "pm10");
+    if (!isnan(data->pm1_0)) {
+        double v = round((double)data->pm1_0 * 100.0) / 100.0;
+        cJSON_AddNumberToObject(root, "pm1_0", v);
+    } else {
+        cJSON_AddNullToObject(root, "pm1_0");
+    }
+    if (!isnan(data->pm2_5)) {
+        double v = round((double)data->pm2_5 * 100.0) / 100.0;
+        cJSON_AddNumberToObject(root, "pm2_5", v);
+    } else {
+        cJSON_AddNullToObject(root, "pm2_5");
+    }
+    if (!isnan(data->pm10)) {
+        double v = round((double)data->pm10 * 100.0) / 100.0;
+        cJSON_AddNumberToObject(root, "pm10", v);
+    } else {
+        cJSON_AddNullToObject(root, "pm10");
+    }
     return publish_json(TOPIC_SENSOR_PMS5003, root);
 }
 
@@ -383,7 +418,12 @@ esp_err_t mqtt_publish_sensor_s8(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
     cJSON *root = cJSON_CreateObject();
-    if (!isnan(data->co2_ppm)) cJSON_AddNumberToObject(root, "co2", data->co2_ppm); else cJSON_AddNullToObject(root, "co2");
+    if (!isnan(data->co2_ppm)) {
+        double c = round((double)data->co2_ppm * 100.0) / 100.0;
+        cJSON_AddNumberToObject(root, "co2", c);
+    } else {
+        cJSON_AddNullToObject(root, "co2");
+    }
     return publish_json(TOPIC_SENSOR_S8, root);
 }
 
