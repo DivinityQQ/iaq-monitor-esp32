@@ -65,11 +65,12 @@ static void ha_publish_sensor_config(cJSON *device, const char *unique_suffix, c
     cJSON *config = cJSON_CreateObject();
     cJSON_AddStringToObject(config, "name", name);
     cJSON_AddStringToObject(config, "state_topic", state_topic);
-    cJSON_AddStringToObject(config, "availability_topic", TOPIC_STATUS);
+    cJSON_AddStringToObject(config, "availability_topic", TOPIC_STATUS); cJSON_AddStringToObject(config, "payload_available", "online"); cJSON_AddStringToObject(config, "payload_not_available", "offline");
     if (device_class) cJSON_AddStringToObject(config, "device_class", device_class);
     if (unit) cJSON_AddStringToObject(config, "unit_of_measurement", unit);
     if (icon) cJSON_AddStringToObject(config, "icon", icon);
-    if (value_template) cJSON_AddStringToObject(config, "value_template", value_template);
+    if (value_template) { cJSON_AddStringToObject(config, "value_template", value_template); }
+    cJSON_AddStringToObject(config, "state_class", "measurement");
     char unique_id[64];
     snprintf(unique_id, sizeof(unique_id), "%s_%s", CONFIG_IAQ_DEVICE_ID, unique_suffix);
     cJSON_AddStringToObject(config, "unique_id", unique_id);
@@ -269,7 +270,7 @@ static void mqtt_publish_ha_discovery(void)
     ESP_LOGD(TAG, "Publishing Home Assistant discovery messages");
 
     cJSON *device = cJSON_CreateObject();
-    cJSON_AddStringToObject(device, "identifiers", CONFIG_IAQ_DEVICE_ID);
+    cJSON *ids = cJSON_CreateArray(); if (ids) { cJSON_AddItemToArray(ids, cJSON_CreateString(CONFIG_IAQ_DEVICE_ID)); cJSON_AddItemToObject(device, "identifiers", ids); } else { cJSON_AddStringToObject(device, "identifiers", CONFIG_IAQ_DEVICE_ID); }
     cJSON_AddStringToObject(device, "name", "IAQ Monitor");
     cJSON_AddStringToObject(device, "model", "ESP32-S3 DIY");
     cJSON_AddStringToObject(device, "manufacturer", "Homemade");
@@ -277,17 +278,17 @@ static void mqtt_publish_ha_discovery(void)
     snprintf(sw_version, sizeof(sw_version), "%d.%d.%d", IAQ_VERSION_MAJOR, IAQ_VERSION_MINOR, IAQ_VERSION_PATCH);
     cJSON_AddStringToObject(device, "sw_version", sw_version);
 
-    ha_publish_sensor_config(device, "temperature",     "Temperature",     TOPIC_SENSOR_SHT41,  "temperature",     "°C",    "{{ value_json.temperature }}",     NULL);
+    ha_publish_sensor_config(device, "temperature",     "Temperature",     TOPIC_SENSOR_SHT41,  "temperature",     "\xC2\xB0""C",    "{{ value_json.temperature }}",     NULL);
     ha_publish_sensor_config(device, "humidity",        "Humidity",        TOPIC_SENSOR_SHT41,  "humidity",        "%",     "{{ value_json.humidity }}",        NULL);
     ha_publish_sensor_config(device, "pressure",        "Pressure",        TOPIC_SENSOR_BMP280, "pressure",        "hPa",   "{{ value_json.pressure }}",        NULL);
     ha_publish_sensor_config(device, "co2",             "CO2",             TOPIC_SENSOR_S8,     "carbon_dioxide",  "ppm",   "{{ value_json.co2 }}",             NULL);
-    ha_publish_sensor_config(device, "pm1",             "PM1.0",           TOPIC_SENSOR_PMS5003,"pm1",             "µg/m3", "{{ value_json.pm1_0 }}",         NULL);
-    ha_publish_sensor_config(device, "pm25",            "PM2.5",           TOPIC_SENSOR_PMS5003,"pm25",            "µg/m3", "{{ value_json.pm2_5 }}",         NULL);
-    ha_publish_sensor_config(device, "pm10",            "PM10",            TOPIC_SENSOR_PMS5003,"pm10",            "µg/m3", "{{ value_json.pm10 }}",          NULL);
+    ha_publish_sensor_config(device, "pm1",         "PM1.0",       TOPIC_SENSOR_PMS5003, "pm1",  "\xC2\xB5g/m\xC2\xB3", "{{ value_json.pm1_0 }}", NULL);
+    ha_publish_sensor_config(device, "pm25",        "PM2.5",       TOPIC_SENSOR_PMS5003, "pm25", "\xC2\xB5g/m\xC2\xB3", "{{ value_json.pm2_5 }}", NULL);
+    ha_publish_sensor_config(device, "pm10",        "PM10",        TOPIC_SENSOR_PMS5003, "pm10", "\xC2\xB5g/m\xC2\xB3", "{{ value_json.pm10 }}",  NULL);
     ha_publish_sensor_config(device, "voc",             "VOC Index",       TOPIC_SENSOR_SGP41,  NULL,               NULL,     "{{ value_json.voc_index }}",       "mdi:chemical-weapon");
     ha_publish_sensor_config(device, "nox",             "NOx Index",       TOPIC_SENSOR_SGP41,  NULL,               NULL,     "{{ value_json.nox_index }}",       "mdi:smog");
     ha_publish_sensor_config(device, "aqi",             "AQI",             TOPIC_SENSOR_DERIVED,"aqi",             NULL,     "{{ value_json.aqi }}",             NULL);
-    ha_publish_sensor_config(device, "mcu_temperature", "MCU Temperature", TOPIC_SENSOR_MCU,    "temperature",     "°C",    "{{ value_json.mcu_temperature }}", NULL);
+    ha_publish_sensor_config(device, "mcu_temp", "MCU Temperature", TOPIC_SENSOR_MCU,    "temperature",     "\xC2\xB0""C",    "{{ value_json.mcu_temperature }}", NULL);
 
     cJSON_Delete(device);
     ESP_LOGI(TAG, "Home Assistant discovery announced");
