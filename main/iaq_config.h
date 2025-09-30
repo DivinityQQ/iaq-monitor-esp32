@@ -10,7 +10,7 @@
  * Version information
  */
 #define IAQ_VERSION_MAJOR  0
-#define IAQ_VERSION_MINOR  2
+#define IAQ_VERSION_MINOR  3
 #define IAQ_VERSION_PATCH  0
 
 /**
@@ -51,9 +51,25 @@
 #define SENSORS_CALIBRATE_BIT       BIT4
 #define DISPLAY_UPDATE_BIT          BIT5
 
+/* Per-sensor update bits (set when a sensor completes a new reading) */
+#define SENSOR_UPDATED_MCU_BIT       BIT6
+#define SENSOR_UPDATED_SHT41_BIT     BIT7
+#define SENSOR_UPDATED_BMP280_BIT    BIT8
+#define SENSOR_UPDATED_SGP41_BIT     BIT9
+#define SENSOR_UPDATED_PMS5003_BIT   BIT10
+#define SENSOR_UPDATED_S8_BIT        BIT11
+
 /**
  * Status publishing interval (milliseconds)
  */
 #define STATUS_PUBLISH_INTERVAL_MS  30000  /* 30 seconds */
+
+/**
+ * Sensor state publish policy
+ * - Coalesce multiple sensor updates within a small window
+ * - Enforce a minimum interval between publishes
+ */
+#define SENSOR_PUBLISH_COALESCE_WINDOW_MS   300   /* wait up to 300ms to batch updates */
+#define SENSOR_PUBLISH_MIN_INTERVAL_MS     1000   /* at most 1 publish per second */
 
 #endif /* IAQ_CONFIG_H */

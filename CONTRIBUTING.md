@@ -36,6 +36,7 @@ Thanks for your interest in contributing to the IAQ Monitor firmware. This docum
   - Floating‑point values set to `NAN` until first valid reading.
   - Integer indices (VOC/NOx/AQI) use `UINT16_MAX` as sentinel.
   - Console prints `n/a`; MQTT publishes JSON `null` for missing values.
+  - Per-sensor timestamps (`updated_at`) are seconds since boot; `0` means "never". Not exposed via MQTT; console prints ages.
 
 ## Sensor Drivers & Coordinator
 - Drivers live in `components/sensor_drivers` and should expose a narrow API: `init/enable/disable/read` (+ optional `reset`/`calibrate`).
@@ -45,12 +46,14 @@ Thanks for your interest in contributing to the IAQ Monitor firmware. This docum
   - Defaults come from Kconfig.
   - Persist changes to NVS (`sensor_cfg` namespace) via `sensor_coordinator_set_cadence()`.
   - Provide `get_cadences()` for observability.
+  - On successful read, set the corresponding `SENSOR_UPDATED_*_BIT` so the network monitor can publish that sensor's payload.
 
 ## Connectivity (Wi‑Fi/MQTT)
 - Wi‑Fi creds in NVS (`wifi_config/{ssid,password}`). Empty SSID disables Wi‑Fi without failure.
 - MQTT config in NVS (`mqtt_config/{broker_url,username,password}`). Reject invalid URLs (must include `mqtt://` or `mqtts://`).
 - MQTT operations should be non‑blocking; use `esp_mqtt_client_enqueue()`.
 - Home Assistant discovery payloads should be retained.
+ - State is published per-sensor to `iaq/<device_id>/sensor/<sensor>` when that sensor updates; avoid redundant publishes.
 
 ## Console Commands
 - Keep commands simple and fail‑safe; return 0 for usage (not an error).

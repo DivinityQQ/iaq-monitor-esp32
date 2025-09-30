@@ -36,16 +36,54 @@ static char s_password[64] = {0};
 /* Topic definitions */
 #define TOPIC_PREFIX    "iaq/" CONFIG_IAQ_DEVICE_ID
 #define TOPIC_STATUS    TOPIC_PREFIX "/status"
-#define TOPIC_STATE     TOPIC_PREFIX "/state"
 #define TOPIC_HEALTH    TOPIC_PREFIX "/health"
 #define TOPIC_COMMAND   TOPIC_PREFIX "/cmd/#"
 #define TOPIC_CMD_RESTART   TOPIC_PREFIX "/cmd/restart"
 #define TOPIC_CMD_CALIBRATE TOPIC_PREFIX "/cmd/calibrate"
 
+/* Per-sensor state topics */
+#define TOPIC_SENSOR_PREFIX   TOPIC_PREFIX "/sensor"
+#define TOPIC_SENSOR_MCU      TOPIC_SENSOR_PREFIX "/mcu"
+#define TOPIC_SENSOR_SHT41    TOPIC_SENSOR_PREFIX "/sht41"
+#define TOPIC_SENSOR_BMP280   TOPIC_SENSOR_PREFIX "/bmp280"
+#define TOPIC_SENSOR_SGP41    TOPIC_SENSOR_PREFIX "/sgp41"
+#define TOPIC_SENSOR_PMS5003  TOPIC_SENSOR_PREFIX "/pms5003"
+#define TOPIC_SENSOR_S8       TOPIC_SENSOR_PREFIX "/s8"
+#define TOPIC_SENSOR_DERIVED  TOPIC_SENSOR_PREFIX "/derived"
+
 /* Forward declarations */
 static void mqtt_publish_ha_discovery(void);
 static void mqtt_handle_command(const char *topic, const char *data, int data_len);
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
+
+/* Helper: publish a single HA sensor discovery config */
+static void ha_publish_sensor_config(cJSON *device, const char *unique_suffix, const char *name,
+                                     const char *state_topic, const char *device_class,
+                                     const char *unit, const char *value_template,
+                                     const char *icon)
+{
+    cJSON *config = cJSON_CreateObject();
+    cJSON_AddStringToObject(config, "name", name);
+    cJSON_AddStringToObject(config, "state_topic", state_topic);
+    cJSON_AddStringToObject(config, "availability_topic", TOPIC_STATUS);
+    if (device_class) cJSON_AddStringToObject(config, "device_class", device_class);
+    if (unit) cJSON_AddStringToObject(config, "unit_of_measurement", unit);
+    if (icon) cJSON_AddStringToObject(config, "icon", icon);
+    if (value_template) cJSON_AddStringToObject(config, "value_template", value_template);
+    char unique_id[64];
+    snprintf(unique_id, sizeof(unique_id), "%s_%s", CONFIG_IAQ_DEVICE_ID, unique_suffix);
+    cJSON_AddStringToObject(config, "unique_id", unique_id);
+    cJSON_AddItemToObject(config, "device", cJSON_Duplicate(device, true));
+
+    char topic[128];
+    snprintf(topic, sizeof(topic), "homeassistant/sensor/%s/config", unique_id);
+    char *json_string = cJSON_PrintUnformatted(config);
+    if (json_string) {
+        esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, 1, 1, true);
+        free(json_string);
+    }
+    cJSON_Delete(config);
+}
 
 /* Simple broker URL validator */
 static bool is_valid_broker_url(const char *url)
@@ -239,76 +277,22 @@ static void mqtt_publish_ha_discovery(void)
     snprintf(sw_version, sizeof(sw_version), "%d.%d.%d", IAQ_VERSION_MAJOR, IAQ_VERSION_MINOR, IAQ_VERSION_PATCH);
     cJSON_AddStringToObject(device, "sw_version", sw_version);
 
-    struct {
-        const char *name;
-        const char *device_class;
-        const char *unit;
-        const char *value_template;
-        const char *unique_suffix;
-        const char *icon;
-    } sensors[] = {
-        {"Temperature", "temperature", "Â°C", "{{ value_json.temperature }}", "temperature", NULL},
-        {"Humidity", "humidity", "%", "{{ value_json.humidity }}", "humidity", NULL},
-        {"Pressure", "pressure", "hPa", "{{ value_json.pressure }}", "pressure", NULL},
-        {"COâ‚‚", "carbon_dioxide", "ppm", "{{ value_json.co2 }}", "co2", NULL},
-        {"PM1.0", "pm1", "Âµg/mÂ³", "{{ value_json.pm1_0 }}", "pm1", NULL},
-        {"PM2.5", "pm25", "Âµg/mÂ³", "{{ value_json.pm2_5 }}", "pm25", NULL},
-        {"PM10", "pm10", "Âµg/mÂ³", "{{ value_json.pm10 }}", "pm10", NULL},
-        {"VOC Index", NULL, NULL, "{{ value_json.voc_index }}", "voc", "mdi:chemical-weapon"},
-        {"NOx Index", NULL, NULL, "{{ value_json.nox_index }}", "nox", "mdi:smog"},
-        {"AQI", "aqi", NULL, "{{ value_json.aqi }}", "aqi", NULL},
-    };
+    ha_publish_sensor_config(device, "temperature",     "Temperature",     TOPIC_SENSOR_SHT41,  "temperature",     "°C",    "{{ value_json.temperature }}",     NULL);
+    ha_publish_sensor_config(device, "humidity",        "Humidity",        TOPIC_SENSOR_SHT41,  "humidity",        "%",     "{{ value_json.humidity }}",        NULL);
+    ha_publish_sensor_config(device, "pressure",        "Pressure",        TOPIC_SENSOR_BMP280, "pressure",        "hPa",   "{{ value_json.pressure }}",        NULL);
+    ha_publish_sensor_config(device, "co2",             "CO2",             TOPIC_SENSOR_S8,     "carbon_dioxide",  "ppm",   "{{ value_json.co2 }}",             NULL);
+    ha_publish_sensor_config(device, "pm1",             "PM1.0",           TOPIC_SENSOR_PMS5003,"pm1",             "µg/m3", "{{ value_json.pm1_0 }}",         NULL);
+    ha_publish_sensor_config(device, "pm25",            "PM2.5",           TOPIC_SENSOR_PMS5003,"pm25",            "µg/m3", "{{ value_json.pm2_5 }}",         NULL);
+    ha_publish_sensor_config(device, "pm10",            "PM10",            TOPIC_SENSOR_PMS5003,"pm10",            "µg/m3", "{{ value_json.pm10 }}",          NULL);
+    ha_publish_sensor_config(device, "voc",             "VOC Index",       TOPIC_SENSOR_SGP41,  NULL,               NULL,     "{{ value_json.voc_index }}",       "mdi:chemical-weapon");
+    ha_publish_sensor_config(device, "nox",             "NOx Index",       TOPIC_SENSOR_SGP41,  NULL,               NULL,     "{{ value_json.nox_index }}",       "mdi:smog");
+    ha_publish_sensor_config(device, "aqi",             "AQI",             TOPIC_SENSOR_DERIVED,"aqi",             NULL,     "{{ value_json.aqi }}",             NULL);
+    ha_publish_sensor_config(device, "mcu_temperature", "MCU Temperature", TOPIC_SENSOR_MCU,    "temperature",     "°C",    "{{ value_json.mcu_temperature }}", NULL);
 
-    for (int i = 0; i < (int)(sizeof(sensors) / sizeof(sensors[0])); i++) {
-        cJSON *config = cJSON_CreateObject();
-        cJSON_AddStringToObject(config, "name", sensors[i].name);
-        cJSON_AddStringToObject(config, "state_topic", TOPIC_STATE);
-        cJSON_AddStringToObject(config, "availability_topic", TOPIC_STATUS);
-        if (sensors[i].device_class) cJSON_AddStringToObject(config, "device_class", sensors[i].device_class);
-        if (sensors[i].unit) cJSON_AddStringToObject(config, "unit_of_measurement", sensors[i].unit);
-        if (sensors[i].icon) cJSON_AddStringToObject(config, "icon", sensors[i].icon);
-        cJSON_AddStringToObject(config, "value_template", sensors[i].value_template);
-
-        char unique_id[64];
-        snprintf(unique_id, sizeof(unique_id), "%s_%s", CONFIG_IAQ_DEVICE_ID, sensors[i].unique_suffix);
-        cJSON_AddStringToObject(config, "unique_id", unique_id);
-        cJSON_AddItemToObject(config, "device", cJSON_Duplicate(device, true));
-
-        char topic[128];
-        snprintf(topic, sizeof(topic), "homeassistant/sensor/%s/config", unique_id);
-        char *json_string = cJSON_PrintUnformatted(config);
-        if (json_string) {
-            esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, 1, 1, true);
-            free(json_string);
-        }
-        cJSON_Delete(config);
-    }
-    /* MCU Temperature sensor discovery */
-    {
-        cJSON *config = cJSON_CreateObject();
-        cJSON_AddStringToObject(config, "name", "MCU Temperature");
-        cJSON_AddStringToObject(config, "state_topic", TOPIC_STATE);
-        cJSON_AddStringToObject(config, "availability_topic", TOPIC_STATUS);
-        cJSON_AddStringToObject(config, "device_class", "temperature");
-        cJSON_AddStringToObject(config, "unit_of_measurement", "Â°C");
-        cJSON_AddStringToObject(config, "value_template", "{{ value_json.mcu_temperature }}");
-        char unique_id[64];
-        snprintf(unique_id, sizeof(unique_id), "%s_%s", CONFIG_IAQ_DEVICE_ID, "mcu_temperature");
-        cJSON_AddStringToObject(config, "unique_id", unique_id);
-        cJSON_AddItemToObject(config, "device", cJSON_Duplicate(device, true));
-
-        char topic[128];
-        snprintf(topic, sizeof(topic), "homeassistant/sensor/%s/config", unique_id);
-        char *json_string = cJSON_PrintUnformatted(config);
-        if (json_string) {
-            esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, 1, 1, true);
-            free(json_string);
-        }
-        cJSON_Delete(config);
-    }
     cJSON_Delete(device);
     ESP_LOGI(TAG, "Home Assistant discovery announced");
 }
+
 
 esp_err_t mqtt_publish_status(const iaq_data_t *data)
 {
@@ -334,31 +318,81 @@ esp_err_t mqtt_publish_status(const iaq_data_t *data)
     return ESP_OK;
 }
 
-esp_err_t mqtt_publish_sensor_data(const iaq_data_t *data)
+/* Aggregated publisher removed in favor of per-sensor topics. */
+
+/* Per-sensor publishers */
+static esp_err_t publish_json(const char *topic, cJSON *obj)
+{
+    if (!s_mqtt_connected || !obj || !topic) { if (obj) cJSON_Delete(obj); return ESP_FAIL; }
+    char *json_string = cJSON_PrintUnformatted(obj);
+    if (json_string) {
+        int msg_id = esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, CONFIG_IAQ_MQTT_QOS, 0, false);
+        ESP_LOGD(TAG, "Enqueued %s, msg_id=%d", topic, msg_id);
+        free(json_string);
+    }
+    cJSON_Delete(obj);
+    return ESP_OK;
+}
+
+esp_err_t mqtt_publish_sensor_mcu(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
     cJSON *root = cJSON_CreateObject();
-    if (!isnan(data->temperature))      cJSON_AddNumberToObject(root, "temperature", data->temperature);       else cJSON_AddNullToObject(root, "temperature");
-    if (!isnan(data->mcu_temperature))  cJSON_AddNumberToObject(root, "mcu_temperature", data->mcu_temperature); else cJSON_AddNullToObject(root, "mcu_temperature");
-    if (!isnan(data->humidity))         cJSON_AddNumberToObject(root, "humidity", data->humidity);             else cJSON_AddNullToObject(root, "humidity");
-    if (!isnan(data->pressure))         cJSON_AddNumberToObject(root, "pressure", data->pressure);             else cJSON_AddNullToObject(root, "pressure");
-    if (!isnan(data->co2_ppm))          cJSON_AddNumberToObject(root, "co2", data->co2_ppm);                   else cJSON_AddNullToObject(root, "co2");
-    if (!isnan(data->pm1_0))            cJSON_AddNumberToObject(root, "pm1_0", data->pm1_0);                   else cJSON_AddNullToObject(root, "pm1_0");
-    if (!isnan(data->pm2_5))            cJSON_AddNumberToObject(root, "pm2_5", data->pm2_5);                   else cJSON_AddNullToObject(root, "pm2_5");
-    if (!isnan(data->pm10))             cJSON_AddNumberToObject(root, "pm10", data->pm10);                     else cJSON_AddNullToObject(root, "pm10");
-    if (data->voc_index != UINT16_MAX)  cJSON_AddNumberToObject(root, "voc_index", data->voc_index);           else cJSON_AddNullToObject(root, "voc_index");
-    if (data->nox_index != UINT16_MAX)  cJSON_AddNumberToObject(root, "nox_index", data->nox_index);           else cJSON_AddNullToObject(root, "nox_index");
-    if (data->aqi != UINT16_MAX)        cJSON_AddNumberToObject(root, "aqi", data->aqi);                       else cJSON_AddNullToObject(root, "aqi");
-    cJSON_AddStringToObject(root, "comfort", data->comfort ? data->comfort : "unknown");
-    cJSON_AddNumberToObject(root, "timestamp", data->last_update);
-    char *json_string = cJSON_PrintUnformatted(root);
-    if (json_string) {
-        int msg_id = esp_mqtt_client_enqueue(s_mqtt_client, TOPIC_STATE, json_string, 0, CONFIG_IAQ_MQTT_QOS, 0, false);
-        ESP_LOGD(TAG, "Enqueued sensor data, msg_id=%d", msg_id);
-        free(json_string);
-    }
-    cJSON_Delete(root);
-    return ESP_OK;
+    if (!isnan(data->mcu_temperature)) cJSON_AddNumberToObject(root, "mcu_temperature", data->mcu_temperature); else cJSON_AddNullToObject(root, "mcu_temperature");
+    return publish_json(TOPIC_SENSOR_MCU, root);
+}
+
+esp_err_t mqtt_publish_sensor_sht41(const iaq_data_t *data)
+{
+    if (!s_mqtt_connected || !data) return ESP_FAIL;
+    cJSON *root = cJSON_CreateObject();
+    if (!isnan(data->temperature)) cJSON_AddNumberToObject(root, "temperature", data->temperature); else cJSON_AddNullToObject(root, "temperature");
+    if (!isnan(data->humidity))    cJSON_AddNumberToObject(root, "humidity", data->humidity);       else cJSON_AddNullToObject(root, "humidity");
+    return publish_json(TOPIC_SENSOR_SHT41, root);
+}
+
+esp_err_t mqtt_publish_sensor_bmp280(const iaq_data_t *data)
+{
+    if (!s_mqtt_connected || !data) return ESP_FAIL;
+    cJSON *root = cJSON_CreateObject();
+    if (!isnan(data->pressure)) cJSON_AddNumberToObject(root, "pressure", data->pressure); else cJSON_AddNullToObject(root, "pressure");
+    return publish_json(TOPIC_SENSOR_BMP280, root);
+}
+
+esp_err_t mqtt_publish_sensor_sgp41(const iaq_data_t *data)
+{
+    if (!s_mqtt_connected || !data) return ESP_FAIL;
+    cJSON *root = cJSON_CreateObject();
+    if (data->voc_index != UINT16_MAX) cJSON_AddNumberToObject(root, "voc_index", data->voc_index); else cJSON_AddNullToObject(root, "voc_index");
+    if (data->nox_index != UINT16_MAX) cJSON_AddNumberToObject(root, "nox_index", data->nox_index); else cJSON_AddNullToObject(root, "nox_index");
+    return publish_json(TOPIC_SENSOR_SGP41, root);
+}
+
+esp_err_t mqtt_publish_sensor_pms5003(const iaq_data_t *data)
+{
+    if (!s_mqtt_connected || !data) return ESP_FAIL;
+    cJSON *root = cJSON_CreateObject();
+    if (!isnan(data->pm1_0)) cJSON_AddNumberToObject(root, "pm1_0", data->pm1_0); else cJSON_AddNullToObject(root, "pm1_0");
+    if (!isnan(data->pm2_5)) cJSON_AddNumberToObject(root, "pm2_5", data->pm2_5); else cJSON_AddNullToObject(root, "pm2_5");
+    if (!isnan(data->pm10))  cJSON_AddNumberToObject(root, "pm10",  data->pm10);  else cJSON_AddNullToObject(root, "pm10");
+    return publish_json(TOPIC_SENSOR_PMS5003, root);
+}
+
+esp_err_t mqtt_publish_sensor_s8(const iaq_data_t *data)
+{
+    if (!s_mqtt_connected || !data) return ESP_FAIL;
+    cJSON *root = cJSON_CreateObject();
+    if (!isnan(data->co2_ppm)) cJSON_AddNumberToObject(root, "co2", data->co2_ppm); else cJSON_AddNullToObject(root, "co2");
+    return publish_json(TOPIC_SENSOR_S8, root);
+}
+
+esp_err_t mqtt_publish_sensor_derived(const iaq_data_t *data)
+{
+    if (!s_mqtt_connected || !data) return ESP_FAIL;
+    cJSON *root = cJSON_CreateObject();
+    if (data->aqi != UINT16_MAX) cJSON_AddNumberToObject(root, "aqi", data->aqi); else cJSON_AddNullToObject(root, "aqi");
+    if (data->comfort) cJSON_AddStringToObject(root, "comfort", data->comfort); else cJSON_AddNullToObject(root, "comfort");
+    return publish_json(TOPIC_SENSOR_DERIVED, root);
 }
 
 bool mqtt_manager_is_connected(void)
@@ -466,3 +500,6 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             break;
     }
 }
+
+
+

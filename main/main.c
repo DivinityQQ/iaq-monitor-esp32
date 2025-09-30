@@ -77,21 +77,36 @@ static void network_monitor_task(void *arg)
     ESP_LOGI(TAG, "Network monitor task started");
 
     while (1) {
-        /* Check if new sensor data is available */
+        /* Wait for any per-sensor update bits */
+        const EventBits_t sensor_bits_mask =
+            SENSOR_UPDATED_MCU_BIT |
+            SENSOR_UPDATED_SHT41_BIT |
+            SENSOR_UPDATED_BMP280_BIT |
+            SENSOR_UPDATED_SGP41_BIT |
+            SENSOR_UPDATED_PMS5003_BIT |
+            SENSOR_UPDATED_S8_BIT;
+
         EventBits_t bits = xEventGroupWaitBits(
             g_event_group,
-            SENSORS_DATA_READY_BIT,
-            pdTRUE,   /* Clear bit on exit */
+            sensor_bits_mask,
+            pdTRUE,   /* Clear bits on exit */
             pdFALSE,  /* Wait for any bit */
             pdMS_TO_TICKS(5000)  /* Timeout after 5 seconds */
         );
 
-        /* If data ready and MQTT connected, publish it */
-        if ((bits & SENSORS_DATA_READY_BIT) && mqtt_manager_is_connected()) {
+        if ((bits & sensor_bits_mask) && mqtt_manager_is_connected()) {
             IAQ_DATA_WITH_LOCK() {
-                mqtt_publish_sensor_data(iaq_data_get());
+                iaq_data_t *data = iaq_data_get();
+                if (bits & SENSOR_UPDATED_MCU_BIT)     (void)mqtt_publish_sensor_mcu(data);
+                if (bits & SENSOR_UPDATED_SHT41_BIT)   (void)mqtt_publish_sensor_sht41(data);
+                if (bits & SENSOR_UPDATED_BMP280_BIT)  (void)mqtt_publish_sensor_bmp280(data);
+                if (bits & SENSOR_UPDATED_SGP41_BIT)   (void)mqtt_publish_sensor_sgp41(data);
+                if (bits & SENSOR_UPDATED_PMS5003_BIT) (void)mqtt_publish_sensor_pms5003(data);
+                if (bits & SENSOR_UPDATED_S8_BIT)      (void)mqtt_publish_sensor_s8(data);
+                /* Derived metrics may change with any sensor update */
+                (void)mqtt_publish_sensor_derived(data);
             }
-            ESP_LOGD(TAG, "Published sensor data to MQTT");
+            ESP_LOGD(TAG, "Published per-sensor updates to MQTT");
         }
 
         /* Small delay to prevent tight loop */

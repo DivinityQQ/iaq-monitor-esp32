@@ -124,9 +124,11 @@ static void sensor_coordinator_task(void *arg)
                             IAQ_DATA_WITH_LOCK() {
                                 iaq_data_t *data = iaq_data_get();
                                 data->mcu_temperature = t;
-                                data->last_update = esp_timer_get_time() / 1000000;
+                                data->updated_at.mcu = esp_timer_get_time() / 1000000;
                                 data->warming_up = false;
                             }
+                            /* Signal MCU sensor update */
+                            xEventGroupSetBits(g_event_group, SENSOR_UPDATED_MCU_BIT);
                             /* Data ready signaled on successful reads */
                         } else {
                             // keep op_res as error
@@ -159,10 +161,10 @@ static void sensor_coordinator_task(void *arg)
                 IAQ_DATA_WITH_LOCK() {
                     iaq_data_t *data = iaq_data_get();
                     data->mcu_temperature = t;
-                    data->last_update = esp_timer_get_time() / 1000000;
+                    data->updated_at.mcu = esp_timer_get_time() / 1000000;
                     data->warming_up = false;
                 }
-                xEventGroupSetBits(g_event_group, SENSORS_DATA_READY_BIT);
+                xEventGroupSetBits(g_event_group, SENSORS_DATA_READY_BIT | SENSOR_UPDATED_MCU_BIT);
             }
             s_schedule[SENSOR_ID_MCU].next_due = now + s_schedule[SENSOR_ID_MCU].period_ticks;
         }

@@ -65,8 +65,12 @@ sensor cadence set <sensor> <ms>
 
 ## Home Assistant
 - Auto‑discovery (retained) published on MQTT connect
-- State JSON publishes `null` for missing values so HA shows “unknown”
-- Topics: `iaq/{device_id}/state`, `.../health`, `.../status`, `.../cmd/#`
+- State JSON publishes `null` for missing values so HA shows “unknown"�
+- Topics:
+  - Per-sensor state: `iaq/{device_id}/sensor/<sensor>` (e.g., `sht41`, `bmp280`, `sgp41`, `pms5003`, `s8`, `mcu`, `derived`)
+  - Health: `iaq/{device_id}/health`
+  - Status (LWT): `iaq/{device_id}/status`
+  - Commands: `iaq/{device_id}/cmd/#`
 
 ## Logging
 - App/component logs at INFO by default
@@ -88,4 +92,5 @@ sensor cadence set <sensor> <ms>
 - Add dependency‑aware startup (enable SGP41 after SHT41/BMP280 baselines)
 - Optional: persistent MQTT session, better console arg parsing (quoted args)
 - Optional: display/LED tasks (placeholders pre‑defined)
+
 

@@ -250,12 +250,15 @@ static int cmd_mqtt_publish_test(int argc, char **argv)
 
     IAQ_DATA_WITH_LOCK() {
         iaq_data_t *data = iaq_data_get();
-        esp_err_t ret = mqtt_publish_sensor_data(data);
-        if (ret == ESP_OK) {
-            printf("Test message published successfully\n");
-        } else {
-            printf("Failed to publish test message\n");
-        }
+        esp_err_t ret = ESP_OK;
+        ret |= mqtt_publish_sensor_mcu(data);
+        ret |= mqtt_publish_sensor_sht41(data);
+        ret |= mqtt_publish_sensor_bmp280(data);
+        ret |= mqtt_publish_sensor_sgp41(data);
+        ret |= mqtt_publish_sensor_pms5003(data);
+        ret |= mqtt_publish_sensor_s8(data);
+        if (ret == ESP_OK) printf("Per-sensor test messages published\n");
+        else printf("Some per-sensor test publishes may have failed\n");
     }
 
     return 0;
@@ -355,8 +358,32 @@ static int cmd_sensor_status(int argc, char **argv)
         iaq_data_t *data = iaq_data_get();
 
         printf("Warming up: %s\n", data->warming_up ? "Yes" : "No");
-        printf("Last update: %lld seconds ago\n",
-               (long long)((esp_timer_get_time() / 1000000) - data->last_update));
+        long long now_s = (long long)(esp_timer_get_time() / 1000000);
+        printf("Last update per sensor:\n");
+        if (data->updated_at.mcu)
+            printf("  mcu:      %lld seconds ago\n", now_s - (long long)data->updated_at.mcu);
+        else
+            printf("  mcu:      n/a\n");
+        if (data->updated_at.sht41)
+            printf("  sht41:    %lld seconds ago\n", now_s - (long long)data->updated_at.sht41);
+        else
+            printf("  sht41:    n/a\n");
+        if (data->updated_at.bmp280)
+            printf("  bmp280:   %lld seconds ago\n", now_s - (long long)data->updated_at.bmp280);
+        else
+            printf("  bmp280:   n/a\n");
+        if (data->updated_at.sgp41)
+            printf("  sgp41:    %lld seconds ago\n", now_s - (long long)data->updated_at.sgp41);
+        else
+            printf("  sgp41:    n/a\n");
+        if (data->updated_at.pms5003)
+            printf("  pms5003:  %lld seconds ago\n", now_s - (long long)data->updated_at.pms5003);
+        else
+            printf("  pms5003:  n/a\n");
+        if (data->updated_at.s8)
+            printf("  s8:       %lld seconds ago\n", now_s - (long long)data->updated_at.s8);
+        else
+            printf("  s8:       n/a\n");
 
         printf("\nSensor Health:\n");
         printf("  SHT41:   %s\n", data->health.sht41_ok ? "OK" : "FAULT");

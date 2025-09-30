@@ -34,7 +34,15 @@ typedef struct {
     const char *comfort;        // Comfort level string
 
     /* Metadata */
-    uint32_t last_update;       // Timestamp of last update (seconds since boot)
+    struct {
+        /* Per-sensor last update timestamps (seconds since boot). 0 = never */
+        uint32_t mcu;
+        uint32_t sht41;
+        uint32_t bmp280;
+        uint32_t sgp41;
+        uint32_t pms5003;
+        uint32_t s8;
+    } updated_at;
     uint8_t overall_quality;    // Overall air quality (0-100)
     bool warming_up;            // True if sensors still warming up
 
@@ -89,6 +97,14 @@ bool iaq_data_lock(uint32_t timeout_ms);
  * Unlock the data structure.
  */
 void iaq_data_unlock(void);
+
+/** Compute a coarse fingerprint of sensor state for change detection.
+ * Quantizes floats to reduce jitter-driven publishes.
+ *
+ * @param data Pointer to iaq_data_t (caller must hold lock if concurrent)
+ * @return 32-bit hash fingerprint of key state fields
+ */
+uint32_t iaq_data_fingerprint(const iaq_data_t *data);
 
 /**
  * Scoped lock helper that guarantees unlock even on early returns.
