@@ -64,12 +64,4 @@
  */
 #define STATUS_PUBLISH_INTERVAL_MS  30000  /* 30 seconds */
 
-/**
- * Sensor state publish policy
- * - Coalesce multiple sensor updates within a small window
- * - Enforce a minimum interval between publishes
- */
-#define SENSOR_PUBLISH_COALESCE_WINDOW_MS   300   /* wait up to 300ms to batch updates */
-#define SENSOR_PUBLISH_MIN_INTERVAL_MS     1000   /* at most 1 publish per second */
-
 #endif /* IAQ_CONFIG_H */

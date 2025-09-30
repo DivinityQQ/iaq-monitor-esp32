@@ -15,6 +15,7 @@ idf_component_register(
         mqtt
         json
         iaq_data
+        system_context
     PRIV_REQUIRES
         esp_timer
         driver

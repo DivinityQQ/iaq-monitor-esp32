@@ -98,14 +98,6 @@ bool iaq_data_lock(uint32_t timeout_ms);
  */
 void iaq_data_unlock(void);
 
-/** Compute a coarse fingerprint of sensor state for change detection.
- * Quantizes floats to reduce jitter-driven publishes.
- *
- * @param data Pointer to iaq_data_t (caller must hold lock if concurrent)
- * @return 32-bit hash fingerprint of key state fields
- */
-uint32_t iaq_data_fingerprint(const iaq_data_t *data);
-
 /**
  * Scoped lock helper that guarantees unlock even on early returns.
  * Usage:

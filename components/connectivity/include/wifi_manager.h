@@ -4,14 +4,16 @@
 
 #include "esp_err.h"
 #include "esp_wifi_types.h"
+#include "system_context.h"
 
 /**
  * Initialize the WiFi manager.
  * Loads credentials from NVS if available.
  *
+ * @param ctx System context containing event group for synchronization
  * @return ESP_OK on success, error code otherwise
  */
-esp_err_t wifi_manager_init(void);
+esp_err_t wifi_manager_init(iaq_system_context_t *ctx);
 
 /**
  * Start WiFi and connect to configured network.

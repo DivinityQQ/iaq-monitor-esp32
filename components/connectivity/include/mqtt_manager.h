@@ -4,14 +4,16 @@
 
 #include "esp_err.h"
 #include "iaq_data.h"
+#include "system_context.h"
 
 /**
  * Initialize the MQTT manager with MQTT 5.0 support.
  * Must be called before mqtt_manager_start().
  *
+ * @param ctx System context containing event group for synchronization
  * @return ESP_OK on success, ESP_FAIL otherwise
  */
-esp_err_t mqtt_manager_init(void);
+esp_err_t mqtt_manager_init(iaq_system_context_t *ctx);
 
 /**
  * Start the MQTT client (connects to broker).

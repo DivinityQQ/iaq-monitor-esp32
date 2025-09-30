@@ -18,7 +18,7 @@
 
 static const char *TAG = "MQTT_MGR";
 
-extern EventGroupHandle_t g_event_group;  /* From main */
+static iaq_system_context_t *s_system_ctx = NULL;
 
 /* NVS namespace for MQTT config */
 #define NVS_NAMESPACE        "mqtt_config"
@@ -215,13 +215,23 @@ static esp_err_t save_mqtt_config(const char *broker_url, const char *username, 
     return ret;
 }
 
-esp_err_t mqtt_manager_init(void)
+esp_err_t mqtt_manager_init(iaq_system_context_t *ctx)
 {
+    if (!ctx) {
+        ESP_LOGE(TAG, "Invalid system context");
+        return ESP_ERR_INVALID_ARG;
+    }
+
     if (s_initialized) {
         ESP_LOGW(TAG, "MQTT manager already initialized");
         return ESP_OK;
     }
+
     ESP_LOGI(TAG, "Initializing MQTT client");
+
+    /* Store system context */
+    s_system_ctx = ctx;
+
     load_mqtt_config();
 
     if (!is_valid_broker_url(s_broker_url)) {
@@ -479,7 +489,7 @@ static void mqtt_handle_command(const char *topic, const char *data, int data_le
         esp_restart();
     } else if (strcmp(topic, TOPIC_CMD_CALIBRATE) == 0) {
         ESP_LOGI(TAG, "Calibrate command received");
-        xEventGroupSetBits(g_event_group, SENSORS_CALIBRATE_BIT);
+        xEventGroupSetBits(s_system_ctx->event_group, SENSORS_CALIBRATE_BIT);
     } else {
         ESP_LOGW(TAG, "Unknown command: %s", topic);
     }
@@ -496,7 +506,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             ESP_LOGI(TAG, "MQTT connected");
             s_mqtt_connected = true;
             IAQ_DATA_WITH_LOCK() { iaq_data_get()->system.mqtt_connected = true; }
-            xEventGroupSetBits(g_event_group, MQTT_CONNECTED_BIT);
+            xEventGroupSetBits(s_system_ctx->event_group, MQTT_CONNECTED_BIT);
             {
                 int msg_id = esp_mqtt_client_subscribe(client, TOPIC_COMMAND, CONFIG_IAQ_MQTT_QOS);
                 ESP_LOGD(TAG, "Subscribing to %s, msg_id=%d", TOPIC_COMMAND, msg_id);
@@ -508,7 +518,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             ESP_LOGI(TAG, "MQTT disconnected");
             s_mqtt_connected = false;
             IAQ_DATA_WITH_LOCK() { iaq_data_get()->system.mqtt_connected = false; }
-            xEventGroupClearBits(g_event_group, MQTT_CONNECTED_BIT);
+            xEventGroupClearBits(s_system_ctx->event_group, MQTT_CONNECTED_BIT);
             break;
         case MQTT_EVENT_SUBSCRIBED:
             ESP_LOGI(TAG, "MQTT subscribed, msg_id=%d", event->msg_id);

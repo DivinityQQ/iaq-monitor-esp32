@@ -13,6 +13,7 @@ idf_component_register(
         esp_event
         esp_timer
         iaq_data
+        system_context
         connectivity
         sensor_coordinator
         console_commands

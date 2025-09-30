@@ -16,8 +16,7 @@
 
 static const char *TAG = "SENSOR_COORD";
 
-extern EventGroupHandle_t g_event_group;  /* From main */
-
+static iaq_system_context_t *s_system_ctx = NULL;
 static TaskHandle_t s_sensor_task_handle = NULL;
 static bool s_initialized = false;
 static bool s_running = false;
@@ -108,7 +107,7 @@ static void sensor_coordinator_task(void *arg)
     /* Wait a bit for system to stabilize */
     vTaskDelay(pdMS_TO_TICKS(2000));
 
-    xEventGroupSetBits(g_event_group, SENSORS_READY_BIT);
+    xEventGroupSetBits(s_system_ctx->event_group, SENSORS_READY_BIT);
 
     while (s_running) {
         /* Handle pending coordinator commands */
@@ -128,7 +127,7 @@ static void sensor_coordinator_task(void *arg)
                                 data->warming_up = false;
                             }
                             /* Signal MCU sensor update */
-                            xEventGroupSetBits(g_event_group, SENSOR_UPDATED_MCU_BIT);
+                            xEventGroupSetBits(s_system_ctx->event_group, SENSOR_UPDATED_MCU_BIT);
                             /* Data ready signaled on successful reads */
                         } else {
                             // keep op_res as error
@@ -164,7 +163,7 @@ static void sensor_coordinator_task(void *arg)
                     data->updated_at.mcu = esp_timer_get_time() / 1000000;
                     data->warming_up = false;
                 }
-                xEventGroupSetBits(g_event_group, SENSORS_DATA_READY_BIT | SENSOR_UPDATED_MCU_BIT);
+                xEventGroupSetBits(s_system_ctx->event_group, SENSORS_DATA_READY_BIT | SENSOR_UPDATED_MCU_BIT);
             }
             s_schedule[SENSOR_ID_MCU].next_due = now + s_schedule[SENSOR_ID_MCU].period_ticks;
         }
@@ -179,14 +178,22 @@ static void sensor_coordinator_task(void *arg)
     vTaskDelete(NULL);
 }
 
-esp_err_t sensor_coordinator_init(void)
+esp_err_t sensor_coordinator_init(iaq_system_context_t *ctx)
 {
+    if (!ctx) {
+        ESP_LOGE(TAG, "Invalid system context");
+        return ESP_ERR_INVALID_ARG;
+    }
+
     if (s_initialized) {
         ESP_LOGW(TAG, "Sensor coordinator already initialized");
         return ESP_OK;
     }
 
     ESP_LOGI(TAG, "Initializing sensor coordinator");
+
+    /* Store system context */
+    s_system_ctx = ctx;
 
     /* Create command queue */
     s_cmd_queue = xQueueCreate(8, sizeof(sensor_cmd_t));

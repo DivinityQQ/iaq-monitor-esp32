@@ -18,7 +18,7 @@
 
 static const char *TAG = "WIFI_MGR";
 
-extern EventGroupHandle_t g_event_group;  /* From main */
+static iaq_system_context_t *s_system_ctx = NULL;
 
 /* NVS namespace for WiFi config */
 #define NVS_NAMESPACE "wifi_config"
@@ -51,7 +51,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                 /* ESP-IDF handles automatic reconnection */
                 ESP_LOGI(TAG, "WiFi disconnected, will auto-retry");
                 s_retry_num++;
-                xEventGroupClearBits(g_event_group, WIFI_CONNECTED_BIT);
+                xEventGroupClearBits(s_system_ctx->event_group, WIFI_CONNECTED_BIT);
                 break;
                 
             case WIFI_EVENT_STA_CONNECTED:
@@ -77,7 +77,7 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                         mqtt_was_connected = data->system.mqtt_connected;
                     }
 
-                    xEventGroupSetBits(g_event_group, WIFI_CONNECTED_BIT);
+                    xEventGroupSetBits(s_system_ctx->event_group, WIFI_CONNECTED_BIT);
 
                     /* Restart MQTT if it was previously connected but now disconnected */
                     if (mqtt_was_connected && !mqtt_manager_is_connected()) {
@@ -179,14 +179,22 @@ static esp_err_t save_wifi_credentials(const char *ssid, const char *password)
     return ret;
 }
 
-esp_err_t wifi_manager_init(void)
+esp_err_t wifi_manager_init(iaq_system_context_t *ctx)
 {
+    if (!ctx) {
+        ESP_LOGE(TAG, "Invalid system context");
+        return ESP_ERR_INVALID_ARG;
+    }
+
     if (s_initialized) {
         ESP_LOGW(TAG, "WiFi manager already initialized");
         return ESP_OK;
     }
 
     ESP_LOGI(TAG, "Initializing WiFi manager");
+
+    /* Store system context */
+    s_system_ctx = ctx;
 
     /* Create default station netif */
     s_sta_netif = esp_netif_create_default_wifi_sta();

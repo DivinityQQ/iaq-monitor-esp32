@@ -14,6 +14,7 @@
 
 #include "iaq_config.h"
 #include "iaq_data.h"
+#include "system_context.h"
 #include "wifi_manager.h"
 #include "mqtt_manager.h"
 #include "sensor_coordinator.h"
@@ -21,8 +22,8 @@
 
 static const char *TAG = "IAQ_MAIN";
 
-/* Global event group for inter-component synchronization */
-EventGroupHandle_t g_event_group;
+/* System context for inter-component coordination */
+static iaq_system_context_t g_system_ctx;
 
 /* Timer for periodic status updates */
 static esp_timer_handle_t status_timer;
@@ -74,6 +75,7 @@ static void status_timer_callback(void* arg)
  */
 static void network_monitor_task(void *arg)
 {
+    iaq_system_context_t *ctx = (iaq_system_context_t *)arg;
     ESP_LOGI(TAG, "Network monitor task started");
 
     while (1) {
@@ -87,7 +89,7 @@ static void network_monitor_task(void *arg)
             SENSOR_UPDATED_S8_BIT;
 
         EventBits_t bits = xEventGroupWaitBits(
-            g_event_group,
+            ctx->event_group,
             sensor_bits_mask,
             pdTRUE,   /* Clear bits on exit */
             pdFALSE,  /* Wait for any bit */
@@ -149,11 +151,11 @@ static esp_err_t init_core_system(void)
     ESP_ERROR_CHECK(esp_netif_init());
     ESP_ERROR_CHECK(esp_event_loop_create_default());
 
-    /* Create event group for inter-component synchronization */
-    g_event_group = xEventGroupCreate();
-    if (g_event_group == NULL) {
-        ESP_LOGE(TAG, "Failed to create event group");
-        return ESP_FAIL;
+    /* Initialize system context (event group, etc.) */
+    ret = iaq_system_context_init(&g_system_ctx);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to initialize system context");
+        return ret;
     }
 
     ESP_LOGI(TAG, "Core system initialized");
@@ -175,15 +177,15 @@ void app_main(void)
 
     /* Initialize WiFi manager */
     ESP_LOGI(TAG, "Initializing WiFi manager");
-    ESP_ERROR_CHECK(wifi_manager_init());
+    ESP_ERROR_CHECK(wifi_manager_init(&g_system_ctx));
 
     /* Initialize MQTT manager */
     ESP_LOGI(TAG, "Initializing MQTT manager");
-    ESP_ERROR_CHECK(mqtt_manager_init());
+    ESP_ERROR_CHECK(mqtt_manager_init(&g_system_ctx));
 
     /* Initialize sensor coordinator */
     ESP_LOGI(TAG, "Initializing sensor coordinator");
-    ESP_ERROR_CHECK(sensor_coordinator_init());
+    ESP_ERROR_CHECK(sensor_coordinator_init(&g_system_ctx));
 
     /* Initialize console commands */
     ESP_LOGI(TAG, "Initializing console commands");
@@ -195,7 +197,7 @@ void app_main(void)
 
     /* Wait for WiFi connection (with timeout) */
     EventBits_t bits = xEventGroupWaitBits(
-        g_event_group,
+        g_system_ctx.event_group,
         WIFI_CONNECTED_BIT,
         pdFALSE,  /* Don't clear bits */
         pdFALSE,  /* Wait for any bit */
@@ -211,7 +213,7 @@ void app_main(void)
 
         /* Wait a bit for MQTT to connect */
         bits = xEventGroupWaitBits(
-            g_event_group,
+            g_system_ctx.event_group,
             MQTT_CONNECTED_BIT,
             pdFALSE,  /* Don't clear bits */
             pdFALSE,  /* Wait for any bit */
@@ -237,7 +239,7 @@ void app_main(void)
         network_monitor_task,
         "network_mon",
         TASK_STACK_NETWORK_MANAGER,
-        NULL,
+        &g_system_ctx,
         TASK_PRIORITY_NETWORK_MANAGER,
         NULL,
         TASK_CORE_NETWORK_MANAGER

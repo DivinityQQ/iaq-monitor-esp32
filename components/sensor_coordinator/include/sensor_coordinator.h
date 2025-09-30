@@ -3,6 +3,7 @@
 #define SENSOR_COORDINATOR_H
 
 #include "esp_err.h"
+#include "system_context.h"
 
 typedef enum {
     SENSOR_ID_MCU = 0,
@@ -18,9 +19,10 @@ typedef enum {
  * Initialize the sensor coordinator.
  * Sets up sensor hardware interfaces (I2C, UART) and prepares for sensor init.
  *
+ * @param ctx System context containing event group for synchronization
  * @return ESP_OK on success, error code otherwise
  */
-esp_err_t sensor_coordinator_init(void);
+esp_err_t sensor_coordinator_init(iaq_system_context_t *ctx);
 
 /**
  * Start the sensor coordinator task.
