@@ -7,6 +7,8 @@
 #include "esp_timer.h"
 #include "mcu_temp_driver.h"
 #include "s8_driver.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 
 #include "sensor_coordinator.h"
 #include "iaq_data.h"
@@ -32,6 +34,68 @@ typedef struct {
 
 static QueueHandle_t s_cmd_queue = NULL;
 
+typedef struct {
+    TickType_t period_ticks;
+    TickType_t next_due;
+    bool enabled;
+} sensor_schedule_t;
+
+static sensor_schedule_t s_schedule[SENSOR_ID_MAX];
+static uint32_t s_cadence_ms[SENSOR_ID_MAX] = {0};
+static bool s_cadence_from_nvs[SENSOR_ID_MAX] = {0};
+
+#define NVS_NAMESPACE "sensor_cfg"
+
+static uint32_t load_cadence_ms(const char *key, uint32_t def_ms, bool *from_nvs)
+{
+    nvs_handle_t h;
+    uint32_t val = def_ms;
+    esp_err_t err = nvs_open(NVS_NAMESPACE, NVS_READONLY, &h);
+    if (err == ESP_OK) {
+        uint32_t tmp;
+        err = nvs_get_u32(h, key, &tmp);
+        if (err == ESP_OK) { val = tmp; if (from_nvs) *from_nvs = true; }
+        nvs_close(h);
+    }
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        // store default
+        if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+            nvs_set_u32(h, key, def_ms);
+            nvs_commit(h);
+            nvs_close(h);
+        }
+        if (from_nvs) *from_nvs = false;
+    }
+    return val;
+}
+
+static void save_cadence_ms(const char *key, uint32_t ms)
+{
+    nvs_handle_t h;
+    if (nvs_open(NVS_NAMESPACE, NVS_READWRITE, &h) == ESP_OK) {
+        nvs_set_u32(h, key, ms);
+        nvs_commit(h);
+        nvs_close(h);
+    }
+}
+
+static void init_schedule_from_config(void)
+{
+    s_cadence_ms[SENSOR_ID_MCU]     = load_cadence_ms("cad_mcu",     CONFIG_IAQ_CADENCE_MCU_MS,     &s_cadence_from_nvs[SENSOR_ID_MCU]);
+    s_cadence_ms[SENSOR_ID_SHT41]   = load_cadence_ms("cad_sht41",   CONFIG_IAQ_CADENCE_SHT41_MS,   &s_cadence_from_nvs[SENSOR_ID_SHT41]);
+    s_cadence_ms[SENSOR_ID_BMP280]  = load_cadence_ms("cad_bmp280",  CONFIG_IAQ_CADENCE_BMP280_MS,  &s_cadence_from_nvs[SENSOR_ID_BMP280]);
+    s_cadence_ms[SENSOR_ID_SGP41]   = load_cadence_ms("cad_sgp41",   CONFIG_IAQ_CADENCE_SGP41_MS,   &s_cadence_from_nvs[SENSOR_ID_SGP41]);
+    s_cadence_ms[SENSOR_ID_PMS5003] = load_cadence_ms("cad_pms5003", CONFIG_IAQ_CADENCE_PMS5003_MS, &s_cadence_from_nvs[SENSOR_ID_PMS5003]);
+    s_cadence_ms[SENSOR_ID_S8]      = load_cadence_ms("cad_s8",      CONFIG_IAQ_CADENCE_S8_MS,      &s_cadence_from_nvs[SENSOR_ID_S8]);
+
+    TickType_t now = xTaskGetTickCount();
+    for (int i = 0; i < SENSOR_ID_MAX; ++i) {
+        s_schedule[i].enabled = (s_cadence_ms[i] > 0);
+        s_schedule[i].period_ticks = pdMS_TO_TICKS(s_cadence_ms[i]);
+        s_schedule[i].next_due = now + s_schedule[i].period_ticks;
+    }
+}
+
 
 /**
  * Sensor coordinator task.
@@ -45,8 +109,6 @@ static void sensor_coordinator_task(void *arg)
     vTaskDelay(pdMS_TO_TICKS(2000));
 
     xEventGroupSetBits(g_event_group, SENSORS_READY_BIT);
-
-    TickType_t last_wake = xTaskGetTickCount();
 
     while (s_running) {
         /* Handle pending coordinator commands */
@@ -89,43 +151,25 @@ static void sensor_coordinator_task(void *arg)
                 (void)xQueueSend(cmd.resp_queue, &op_res, 0);
             }
         }
-        /* TODO: Phase 1: Read environmental baseline (SHT41, BMP280) */
-        /* TODO: Phase 2: Apply pre-compensation (SGP41) */
-        /* TODO: Phase 3: Read gas/particle sensors (S8, PMS5003, SGP41) */
-        /* TODO: Phase 4: Apply post-compensation algorithms */
-
-        /* Read internal MCU temperature if available */
-        float mcu_temp_c = 0.0f;
-        if (s_temp_inited) {
-            if (mcu_temp_driver_read_celsius(&mcu_temp_c) != ESP_OK) {
-                mcu_temp_c = 0.0f;
+        /* Periodic scheduler per sensor */
+        TickType_t now = xTaskGetTickCount();
+        if (s_temp_inited && s_schedule[SENSOR_ID_MCU].enabled && now >= s_schedule[SENSOR_ID_MCU].next_due) {
+            float t = 0.0f;
+            if (mcu_temp_driver_read_celsius(&t) == ESP_OK) {
+                IAQ_DATA_WITH_LOCK() {
+                    iaq_data_t *data = iaq_data_get();
+                    data->mcu_temperature = t;
+                    data->last_update = esp_timer_get_time() / 1000000;
+                    data->warming_up = false;
+                }
+                xEventGroupSetBits(g_event_group, SENSORS_DATA_READY_BIT);
             }
+            s_schedule[SENSOR_ID_MCU].next_due = now + s_schedule[SENSOR_ID_MCU].period_ticks;
         }
 
-        IAQ_DATA_WITH_LOCK() {
-            iaq_data_t *data = iaq_data_get();
+        /* TODO: add other sensors here in dependency-aware order */
 
-            /* Update timestamp */
-            data->last_update = esp_timer_get_time() / 1000000;
-
-            /* Mark system as operational */
-            data->warming_up = false;
-
-            /* Update MCU temperature reading */
-            data->mcu_temperature = mcu_temp_c;
-
-            /* TODO: Set actual sensor values here */
-            /* For now, leave them at 0 */
-            
-        }
-
-        /* Signal that data is ready */
-        /* Data ready signaled on successful reads */
-
-        ESP_LOGD(TAG, "Sensor reading cycle complete");
-
-        /* Sleep until next reading */
-        vTaskDelayUntil(&last_wake, pdMS_TO_TICKS(SENSOR_READING_INTERVAL_MS));
+        vTaskDelay(pdMS_TO_TICKS(100));
     }
 
     ESP_LOGI(TAG, "Sensor coordinator task stopped");
@@ -163,6 +207,9 @@ esp_err_t sensor_coordinator_init(void)
     } else {
         ESP_LOGW(TAG, "Failed to initialize MCU temperature sensor");
     }
+
+    /* Initialize schedules and defaults from Kconfig + NVS */
+    init_schedule_from_config();
 
     /* For now, just mark as initialized */
     s_initialized = true;
@@ -259,9 +306,35 @@ esp_err_t sensor_coordinator_calibrate(sensor_id_t id, int value)
 
 esp_err_t sensor_coordinator_set_cadence(sensor_id_t id, uint32_t interval_ms)
 {
-    // Placeholder: per-sensor cadence scheduling will be added; return not supported for now
-    (void)id; (void)interval_ms;
-    return ESP_ERR_NOT_SUPPORTED;
+    if (id < 0 || id >= SENSOR_ID_MAX) return ESP_ERR_INVALID_ARG;
+    if (!s_initialized) return ESP_ERR_INVALID_STATE;
+    s_schedule[id].enabled = (interval_ms > 0);
+    s_schedule[id].period_ticks = pdMS_TO_TICKS(interval_ms);
+    s_schedule[id].next_due = xTaskGetTickCount() + s_schedule[id].period_ticks;
+    s_cadence_ms[id] = interval_ms;
+    s_cadence_from_nvs[id] = true; /* persisted */
+    switch (id) {
+        case SENSOR_ID_MCU:      save_cadence_ms("cad_mcu", interval_ms); break;
+        case SENSOR_ID_SHT41:    save_cadence_ms("cad_sht41", interval_ms); break;
+        case SENSOR_ID_BMP280:   save_cadence_ms("cad_bmp280", interval_ms); break;
+        case SENSOR_ID_SGP41:    save_cadence_ms("cad_sgp41", interval_ms); break;
+        case SENSOR_ID_PMS5003:  save_cadence_ms("cad_pms5003", interval_ms); break;
+        case SENSOR_ID_S8:       save_cadence_ms("cad_s8", interval_ms); break;
+        default: break;
+    }
+    return ESP_OK;
+}
+
+esp_err_t sensor_coordinator_get_cadences(uint32_t out_ms[SENSOR_ID_MAX], bool out_from_nvs[SENSOR_ID_MAX])
+{
+    if (!s_initialized) return ESP_ERR_INVALID_STATE;
+    if (out_ms) {
+        for (int i = 0; i < SENSOR_ID_MAX; ++i) out_ms[i] = s_cadence_ms[i];
+    }
+    if (out_from_nvs) {
+        for (int i = 0; i < SENSOR_ID_MAX; ++i) out_from_nvs[i] = s_cadence_from_nvs[i];
+    }
+    return ESP_OK;
 }
 
 esp_err_t sensor_coordinator_force_read_sync(sensor_id_t id, uint32_t timeout_ms)

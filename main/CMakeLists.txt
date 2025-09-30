@@ -1,18 +1,19 @@
 # main/CMakeLists.txt
 
 idf_component_register(
-    SRCS 
+    SRCS
         "main.c"
-    INCLUDE_DIRS 
+    INCLUDE_DIRS
         "."
-    REQUIRES 
+    REQUIRES
         driver
         nvs_flash
         esp_wifi
         esp_netif
         esp_event
-        mqtt
-        console
         esp_timer
+        iaq_data
         connectivity
+        sensor_coordinator
+        console_commands
 )

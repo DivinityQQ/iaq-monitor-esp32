@@ -1,0 +1,47 @@
+menu "Sensor Coordinator"
+
+config IAQ_CADENCE_MCU_MS
+    int "MCU temperature cadence (ms)"
+    default 10000
+    range 0 600000
+    help
+        Period between MCU internal temperature sensor reads.
+        0 disables periodic reads.
+
+config IAQ_CADENCE_SHT41_MS
+    int "SHT41 cadence (ms)"
+    default 30000
+    range 0 600000
+    help
+        Period between SHT41 reads. 0 disables.
+
+config IAQ_CADENCE_BMP280_MS
+    int "BMP280 cadence (ms)"
+    default 30000
+    range 0 600000
+    help
+        Period between BMP280 reads. 0 disables.
+
+config IAQ_CADENCE_SGP41_MS
+    int "SGP41 cadence (ms)"
+    default 60000
+    range 0 600000
+    help
+        Period between SGP41 reads. 0 disables.
+
+config IAQ_CADENCE_PMS5003_MS
+    int "PMS5003 cadence (ms)"
+    default 60000
+    range 0 600000
+    help
+        Period between PMS5003 reads. 0 disables.
+
+config IAQ_CADENCE_S8_MS
+    int "Senseair S8 cadence (ms)"
+    default 30000
+    range 0 600000
+    help
+        Period between S8 CO2 reads. 0 disables.
+
+endmenu
+

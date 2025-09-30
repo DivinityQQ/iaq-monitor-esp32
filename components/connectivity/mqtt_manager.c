@@ -1,241 +1,362 @@
 /* components/connectivity/mqtt_manager.c */
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "esp_log.h"
+#include "esp_system.h"
 #include "mqtt_client.h"
 #include "cJSON.h"
+#include "nvs_flash.h"
+#include "nvs.h"
 
 #include "mqtt_manager.h"
+#include "iaq_data.h"
 #include "iaq_config.h"
 
 static const char *TAG = "MQTT_MGR";
 
-extern EventGroupHandle_t g_event_group;
-extern system_info_t g_system_info;
+extern EventGroupHandle_t g_event_group;  /* From main */
+
+/* NVS namespace for MQTT config */
+#define NVS_NAMESPACE        "mqtt_config"
+#define NVS_KEY_BROKER_URL   "broker_url"
+#define NVS_KEY_USERNAME     "username"
+#define NVS_KEY_PASSWORD     "password"
 
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
 static bool s_mqtt_connected = false;
+static bool s_initialized = false;
+static char s_broker_url[128] = {0};
+static char s_username[64] = {0};
+static char s_password[64] = {0};
 
 /* Topic definitions */
-#define TOPIC_STATUS    CONFIG_IAQ_DEVICE_ID "/status"
-#define TOPIC_STATE     CONFIG_IAQ_DEVICE_ID "/state"
-#define TOPIC_COMMAND   CONFIG_IAQ_DEVICE_ID "/cmd/+"
-#define TOPIC_LWT       CONFIG_IAQ_DEVICE_ID "/availability"
+#define TOPIC_PREFIX    "iaq/" CONFIG_IAQ_DEVICE_ID
+#define TOPIC_STATUS    TOPIC_PREFIX "/status"
+#define TOPIC_STATE     TOPIC_PREFIX "/state"
+#define TOPIC_HEALTH    TOPIC_PREFIX "/health"
+#define TOPIC_COMMAND   TOPIC_PREFIX "/cmd/#"
+#define TOPIC_CMD_RESTART   TOPIC_PREFIX "/cmd/restart"
+#define TOPIC_CMD_CALIBRATE TOPIC_PREFIX "/cmd/calibrate"
 
-/* Publish Home Assistant discovery message */
-static void mqtt_publish_ha_discovery(void)
+/* Forward declarations */
+static void mqtt_publish_ha_discovery(void);
+static void mqtt_handle_command(const char *topic, const char *data, int data_len);
+static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
+
+/* Simple broker URL validator */
+static bool is_valid_broker_url(const char *url)
 {
-    /* Example for temperature sensor */
-    cJSON *root = cJSON_CreateObject();
-    cJSON *device = cJSON_CreateObject();
-    
-    /* Device information */
-    cJSON_AddStringToObject(device, "identifiers", CONFIG_IAQ_DEVICE_ID);
-    cJSON_AddStringToObject(device, "name", "IAQ Monitor");
-    cJSON_AddStringToObject(device, "model", "ESP32-S3");
-    cJSON_AddStringToObject(device, "manufacturer", "DIY");
-    char sw_version[32];
-    snprintf(sw_version, sizeof(sw_version), "%d.%d.%d", 
-             IAQ_VERSION_MAJOR, IAQ_VERSION_MINOR, IAQ_VERSION_PATCH);
-    cJSON_AddStringToObject(device, "sw_version", sw_version);
-    
-    /* Sensor configuration */
-    cJSON_AddStringToObject(root, "name", "Temperature");
-    cJSON_AddStringToObject(root, "state_topic", CONFIG_IAQ_DEVICE_ID "/state");
-    cJSON_AddStringToObject(root, "availability_topic", TOPIC_LWT);
-    cJSON_AddStringToObject(root, "device_class", "temperature");
-    cJSON_AddStringToObject(root, "unit_of_measurement", "°C");
-    cJSON_AddStringToObject(root, "value_template", "{{ value_json.temperature }}");
-    cJSON_AddStringToObject(root, "unique_id", CONFIG_IAQ_DEVICE_ID "_temp");
-    cJSON_AddItemToObject(root, "device", device);
-    
-    char *json_string = cJSON_Print(root);
-    if (json_string) {
-        char topic[128];
-        snprintf(topic, sizeof(topic), "homeassistant/sensor/%s_temp/config", CONFIG_IAQ_DEVICE_ID);
-        esp_mqtt_client_publish(s_mqtt_client, topic, json_string, 0, 1, true);
-        ESP_LOGI(TAG, "Published HA discovery to %s", topic);
-        free(json_string);
+    if (!url || url[0] == '\0') return false;
+    const char *mqtt = "mqtt://";
+    const char *mqtts = "mqtts://";
+    size_t l1 = strlen(mqtt), l2 = strlen(mqtts);
+    const char *host = NULL;
+    if (strncmp(url, mqtt, l1) == 0) host = url + l1;
+    else if (strncmp(url, mqtts, l2) == 0) host = url + l2;
+    else return false;
+    if (!host || host[0] == '\0') return false;
+    for (const char *p = url; *p; ++p) {
+        if (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') return false;
     }
-    
-    cJSON_Delete(root);
+    return true;
 }
 
-/* MQTT event handler */
-static void mqtt_event_handler(void *handler_args, esp_event_base_t base, 
-                               int32_t event_id, void *event_data)
+/* Helper: create MQTT client from current settings */
+static esp_err_t create_mqtt_client(void)
 {
-    esp_mqtt_event_handle_t event = event_data;
-    esp_mqtt_client_handle_t client = event->client;
-    
-    switch ((esp_mqtt_event_id_t)event_id) {
-        case MQTT_EVENT_CONNECTED:
-            ESP_LOGI(TAG, "MQTT connected");
-            s_mqtt_connected = true;
-            g_system_info.mqtt_connected = true;
-            xEventGroupSetBits(g_event_group, MQTT_CONNECTED_BIT);
-            
-            /* Subscribe to command topic */
-            int msg_id = esp_mqtt_client_subscribe(client, TOPIC_COMMAND, CONFIG_IAQ_MQTT_QOS);
-            ESP_LOGI(TAG, "Subscribed to %s, msg_id=%d", TOPIC_COMMAND, msg_id);
-            
-            /* Publish online status */
-            esp_mqtt_client_publish(client, TOPIC_LWT, "online", 0, 1, true);
-            
-            /* Send Home Assistant discovery (basic example) */
-            mqtt_publish_ha_discovery();
-            break;
-            
-        case MQTT_EVENT_DISCONNECTED:
-            ESP_LOGI(TAG, "MQTT disconnected");
-            s_mqtt_connected = false;
-            g_system_info.mqtt_connected = false;
-            xEventGroupClearBits(g_event_group, MQTT_CONNECTED_BIT);
-            break;
-            
-        case MQTT_EVENT_SUBSCRIBED:
-            ESP_LOGI(TAG, "MQTT subscribed, msg_id=%d", event->msg_id);
-            break;
-            
-        case MQTT_EVENT_UNSUBSCRIBED:
-            ESP_LOGI(TAG, "MQTT unsubscribed, msg_id=%d", event->msg_id);
-            break;
-            
-        case MQTT_EVENT_PUBLISHED:
-            ESP_LOGD(TAG, "MQTT published, msg_id=%d", event->msg_id);
-            break;
-            
-        case MQTT_EVENT_DATA:
-            ESP_LOGI(TAG, "MQTT data received");
-            ESP_LOGI(TAG, "Topic: %.*s", event->topic_len, event->topic);
-            ESP_LOGI(TAG, "Data: %.*s", event->data_len, event->data);
-            /* Handle commands here */
-            break;
-            
-        case MQTT_EVENT_ERROR:
-            ESP_LOGE(TAG, "MQTT error");
-            if (event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
-                ESP_LOGE(TAG, "Last error code: 0x%x", event->error_handle->esp_tls_last_esp_err);
-                ESP_LOGE(TAG, "Last tls error: 0x%x", event->error_handle->esp_tls_stack_err);
-            }
-            break;
-            
-        default:
-            ESP_LOGD(TAG, "Other MQTT event id:%d", event->event_id);
-            break;
+    if (!is_valid_broker_url(s_broker_url)) return ESP_ERR_INVALID_ARG;
+
+    esp_mqtt_client_config_t mqtt_cfg = {
+        .broker.address.uri = s_broker_url,
+        .credentials = {
+            .client_id = CONFIG_IAQ_DEVICE_ID,
+            .username = strlen(s_username) > 0 ? s_username : NULL,
+            .authentication = { .password = strlen(s_password) > 0 ? s_password : NULL }
+        },
+        .session = {
+            .last_will = { .topic = TOPIC_STATUS, .msg = "offline", .qos = 1, .retain = 1 },
+            .keepalive = 60,
+            .disable_clean_session = 0,
+            .protocol_ver = MQTT_PROTOCOL_V_5,
+        },
+        .network = { .reconnect_timeout_ms = 10000, .timeout_ms = 10000 },
+        .buffer = { .size = 2048, .out_size = 2048 },
+    };
+
+    s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
+    if (!s_mqtt_client) {
+        ESP_LOGE(TAG, "Failed to initialize MQTT client");
+        return ESP_FAIL;
     }
+
+    esp_err_t ret = esp_mqtt_client_register_event(s_mqtt_client, ESP_EVENT_ANY_ID,
+                                                   mqtt_event_handler, NULL);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to register MQTT event handler: %s", esp_err_to_name(ret));
+        esp_mqtt_client_destroy(s_mqtt_client);
+        s_mqtt_client = NULL;
+        return ret;
+    }
+    return ESP_OK;
+}
+
+/* Load MQTT configuration from NVS */
+static esp_err_t load_mqtt_config(void)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READONLY, &nvs_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "No saved MQTT config in NVS, using defaults");
+        strlcpy(s_broker_url, CONFIG_IAQ_MQTT_BROKER_URL, sizeof(s_broker_url));
+        strlcpy(s_username, CONFIG_IAQ_MQTT_USERNAME, sizeof(s_username));
+        strlcpy(s_password, CONFIG_IAQ_MQTT_PASSWORD, sizeof(s_password));
+    } else {
+        size_t len;
+        len = sizeof(s_broker_url);
+        ret = nvs_get_str(nvs_handle, NVS_KEY_BROKER_URL, s_broker_url, &len);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to read broker URL from NVS: %s", esp_err_to_name(ret));
+            strlcpy(s_broker_url, CONFIG_IAQ_MQTT_BROKER_URL, sizeof(s_broker_url));
+        }
+        len = sizeof(s_username);
+        ret = nvs_get_str(nvs_handle, NVS_KEY_USERNAME, s_username, &len);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to read username from NVS: %s", esp_err_to_name(ret));
+            strlcpy(s_username, CONFIG_IAQ_MQTT_USERNAME, sizeof(s_username));
+        }
+        len = sizeof(s_password);
+        ret = nvs_get_str(nvs_handle, NVS_KEY_PASSWORD, s_password, &len);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to read password from NVS: %s", esp_err_to_name(ret));
+            strlcpy(s_password, CONFIG_IAQ_MQTT_PASSWORD, sizeof(s_password));
+        }
+        nvs_close(nvs_handle);
+    }
+
+    if (!is_valid_broker_url(s_broker_url)) {
+        if (is_valid_broker_url(CONFIG_IAQ_MQTT_BROKER_URL)) {
+            ESP_LOGW(TAG, "Invalid broker URL in NVS. Falling back to default: %s", CONFIG_IAQ_MQTT_BROKER_URL);
+            strlcpy(s_broker_url, CONFIG_IAQ_MQTT_BROKER_URL, sizeof(s_broker_url));
+        } else {
+            ESP_LOGW(TAG, "Invalid broker URL (no valid default). MQTT will be disabled until configured.");
+            s_broker_url[0] = '\0';
+        }
+    }
+
+    ESP_LOGI(TAG, "Loaded MQTT config from NVS: Broker=%s", s_broker_url);
+    return ESP_OK;
+}
+
+/* Save MQTT configuration to NVS */
+static esp_err_t save_mqtt_config(const char *broker_url, const char *username, const char *password)
+{
+    nvs_handle_t nvs_handle;
+    esp_err_t ret = nvs_open(NVS_NAMESPACE, NVS_READWRITE, &nvs_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to open NVS: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ret = nvs_set_str(nvs_handle, NVS_KEY_BROKER_URL, broker_url);
+    if (ret != ESP_OK) { nvs_close(nvs_handle); return ret; }
+    ret = nvs_set_str(nvs_handle, NVS_KEY_USERNAME, username ? username : "");
+    if (ret != ESP_OK) { nvs_close(nvs_handle); return ret; }
+    ret = nvs_set_str(nvs_handle, NVS_KEY_PASSWORD, password ? password : "");
+    if (ret != ESP_OK) { nvs_close(nvs_handle); return ret; }
+    ret = nvs_commit(nvs_handle);
+    nvs_close(nvs_handle);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to commit NVS: %s", esp_err_to_name(ret));
+    } else {
+        ESP_LOGI(TAG, "Saved MQTT config to NVS");
+    }
+    return ret;
 }
 
 esp_err_t mqtt_manager_init(void)
 {
-    ESP_LOGI(TAG, "Initializing MQTT client");
-    
-    /* Configure MQTT client */
-    esp_mqtt_client_config_t mqtt_cfg = {
-        .broker.address.uri = CONFIG_IAQ_MQTT_BROKER_URL,
-        .credentials = {
-            .client_id = CONFIG_IAQ_DEVICE_ID,
-            .username = CONFIG_IAQ_MQTT_USERNAME,
-            .authentication = {
-                .password = CONFIG_IAQ_MQTT_PASSWORD
-            }
-        },
-        .session = {
-            .last_will = {
-                .topic = TOPIC_LWT,
-                .msg = "offline",
-                .qos = 1,
-                .retain = true
-            },
-            .keepalive = 60,
-            .disable_clean_session = false,
-            .protocol_ver = MQTT_PROTOCOL_V_3_1_1,
-        },
-        .buffer.size = 1024,
-    };
-    
-    /* Create MQTT client */
-    s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
-    if (s_mqtt_client == NULL) {
-        ESP_LOGE(TAG, "Failed to initialize MQTT client");
-        return ESP_FAIL;
+    if (s_initialized) {
+        ESP_LOGW(TAG, "MQTT manager already initialized");
+        return ESP_OK;
     }
-    
-    /* Register event handler */
-    ESP_ERROR_CHECK(esp_mqtt_client_register_event(s_mqtt_client, ESP_EVENT_ANY_ID, 
-                                                    mqtt_event_handler, NULL));
-    
+    ESP_LOGI(TAG, "Initializing MQTT client");
+    load_mqtt_config();
+
+    if (!is_valid_broker_url(s_broker_url)) {
+        ESP_LOGW(TAG, "MQTT disabled: invalid broker URL. Set with 'mqtt set <url> [user] [pass]'.");
+        s_initialized = true;
+        return ESP_OK;
+    }
+
+    esp_err_t ret = create_mqtt_client();
+    if (ret != ESP_OK) return ret;
+
+    s_initialized = true;
+    ESP_LOGI(TAG, "MQTT client initialized successfully (MQTT 5.0)");
     return ESP_OK;
 }
 
 esp_err_t mqtt_manager_start(void)
 {
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "MQTT manager not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (s_mqtt_client == NULL) {
+        if (!is_valid_broker_url(s_broker_url)) {
+            ESP_LOGW(TAG, "MQTT not started: disabled or invalid broker. Use console to configure.");
+            return ESP_OK;
+        }
+        esp_err_t ret = create_mqtt_client();
+        if (ret != ESP_OK) return ret;
+    }
     ESP_LOGI(TAG, "Starting MQTT client");
     return esp_mqtt_client_start(s_mqtt_client);
 }
 
 esp_err_t mqtt_manager_stop(void)
 {
+    if (!s_initialized || s_mqtt_client == NULL) return ESP_OK;
     ESP_LOGI(TAG, "Stopping MQTT client");
     return esp_mqtt_client_stop(s_mqtt_client);
 }
 
-esp_err_t mqtt_publish_status(const system_info_t *info)
+/* HA discovery */
+static void mqtt_publish_ha_discovery(void)
 {
-    if (!s_mqtt_connected || !info) {
-        return ESP_FAIL;
+    if (!s_mqtt_connected) return;
+    ESP_LOGD(TAG, "Publishing Home Assistant discovery messages");
+
+    cJSON *device = cJSON_CreateObject();
+    cJSON_AddStringToObject(device, "identifiers", CONFIG_IAQ_DEVICE_ID);
+    cJSON_AddStringToObject(device, "name", "IAQ Monitor");
+    cJSON_AddStringToObject(device, "model", "ESP32-S3 DIY");
+    cJSON_AddStringToObject(device, "manufacturer", "Homemade");
+    char sw_version[32];
+    snprintf(sw_version, sizeof(sw_version), "%d.%d.%d", IAQ_VERSION_MAJOR, IAQ_VERSION_MINOR, IAQ_VERSION_PATCH);
+    cJSON_AddStringToObject(device, "sw_version", sw_version);
+
+    struct {
+        const char *name;
+        const char *device_class;
+        const char *unit;
+        const char *value_template;
+        const char *unique_suffix;
+        const char *icon;
+    } sensors[] = {
+        {"Temperature", "temperature", "°C", "{{ value_json.temperature }}", "temperature", NULL},
+        {"Humidity", "humidity", "%", "{{ value_json.humidity }}", "humidity", NULL},
+        {"Pressure", "pressure", "hPa", "{{ value_json.pressure }}", "pressure", NULL},
+        {"CO₂", "carbon_dioxide", "ppm", "{{ value_json.co2 }}", "co2", NULL},
+        {"PM1.0", "pm1", "µg/m³", "{{ value_json.pm1_0 }}", "pm1", NULL},
+        {"PM2.5", "pm25", "µg/m³", "{{ value_json.pm2_5 }}", "pm25", NULL},
+        {"PM10", "pm10", "µg/m³", "{{ value_json.pm10 }}", "pm10", NULL},
+        {"VOC Index", NULL, NULL, "{{ value_json.voc_index }}", "voc", "mdi:chemical-weapon"},
+        {"NOx Index", NULL, NULL, "{{ value_json.nox_index }}", "nox", "mdi:smog"},
+        {"AQI", "aqi", NULL, "{{ value_json.aqi }}", "aqi", NULL},
+    };
+
+    for (int i = 0; i < (int)(sizeof(sensors) / sizeof(sensors[0])); i++) {
+        cJSON *config = cJSON_CreateObject();
+        cJSON_AddStringToObject(config, "name", sensors[i].name);
+        cJSON_AddStringToObject(config, "state_topic", TOPIC_STATE);
+        cJSON_AddStringToObject(config, "availability_topic", TOPIC_STATUS);
+        if (sensors[i].device_class) cJSON_AddStringToObject(config, "device_class", sensors[i].device_class);
+        if (sensors[i].unit) cJSON_AddStringToObject(config, "unit_of_measurement", sensors[i].unit);
+        if (sensors[i].icon) cJSON_AddStringToObject(config, "icon", sensors[i].icon);
+        cJSON_AddStringToObject(config, "value_template", sensors[i].value_template);
+
+        char unique_id[64];
+        snprintf(unique_id, sizeof(unique_id), "%s_%s", CONFIG_IAQ_DEVICE_ID, sensors[i].unique_suffix);
+        cJSON_AddStringToObject(config, "unique_id", unique_id);
+        cJSON_AddItemToObject(config, "device", cJSON_Duplicate(device, true));
+
+        char topic[128];
+        snprintf(topic, sizeof(topic), "homeassistant/sensor/%s/config", unique_id);
+        char *json_string = cJSON_PrintUnformatted(config);
+        if (json_string) {
+            esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, 1, 1, true);
+            free(json_string);
+        }
+        cJSON_Delete(config);
     }
-    
-    /* Create JSON status */
+    /* MCU Temperature sensor discovery */
+    {
+        cJSON *config = cJSON_CreateObject();
+        cJSON_AddStringToObject(config, "name", "MCU Temperature");
+        cJSON_AddStringToObject(config, "state_topic", TOPIC_STATE);
+        cJSON_AddStringToObject(config, "availability_topic", TOPIC_STATUS);
+        cJSON_AddStringToObject(config, "device_class", "temperature");
+        cJSON_AddStringToObject(config, "unit_of_measurement", "°C");
+        cJSON_AddStringToObject(config, "value_template", "{{ value_json.mcu_temperature }}");
+        char unique_id[64];
+        snprintf(unique_id, sizeof(unique_id), "%s_%s", CONFIG_IAQ_DEVICE_ID, "mcu_temperature");
+        cJSON_AddStringToObject(config, "unique_id", unique_id);
+        cJSON_AddItemToObject(config, "device", cJSON_Duplicate(device, true));
+
+        char topic[128];
+        snprintf(topic, sizeof(topic), "homeassistant/sensor/%s/config", unique_id);
+        char *json_string = cJSON_PrintUnformatted(config);
+        if (json_string) {
+            esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, 1, 1, true);
+            free(json_string);
+        }
+        cJSON_Delete(config);
+    }
+    cJSON_Delete(device);
+    ESP_LOGI(TAG, "Home Assistant discovery announced");
+}
+
+esp_err_t mqtt_publish_status(const iaq_data_t *data)
+{
+    if (!s_mqtt_connected || !data) return ESP_FAIL;
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "uptime", info->uptime_seconds);
-    cJSON_AddNumberToObject(root, "free_heap", info->free_heap);
-    cJSON_AddNumberToObject(root, "wifi_rssi", info->wifi_rssi);
-    cJSON_AddStringToObject(root, "state", 
-                           info->state == SYSTEM_STATE_RUNNING ? "running" : "error");
-    
-    char *json_string = cJSON_Print(root);
+    cJSON_AddNumberToObject(root, "uptime", data->system.uptime_seconds);
+    cJSON_AddNumberToObject(root, "wifi_rssi", data->system.wifi_rssi);
+    cJSON_AddNumberToObject(root, "free_heap", data->system.free_heap);
+    cJSON *sensors_ok = cJSON_CreateArray();
+    if (data->health.sht41_ok) cJSON_AddItemToArray(sensors_ok, cJSON_CreateString("sht41"));
+    if (data->health.bmp280_ok) cJSON_AddItemToArray(sensors_ok, cJSON_CreateString("bmp280"));
+    if (data->health.sgp41_ok) cJSON_AddItemToArray(sensors_ok, cJSON_CreateString("sgp41"));
+    if (data->health.pms5003_ok) cJSON_AddItemToArray(sensors_ok, cJSON_CreateString("pms5003"));
+    if (data->health.s8_ok) cJSON_AddItemToArray(sensors_ok, cJSON_CreateString("s8"));
+    cJSON_AddItemToObject(root, "sensors_ok", sensors_ok);
+    cJSON_AddBoolToObject(root, "warming_up", data->warming_up);
+    char *json_string = cJSON_PrintUnformatted(root);
     if (json_string) {
-        int msg_id = esp_mqtt_client_publish(s_mqtt_client, TOPIC_STATUS, 
-                                             json_string, 0, CONFIG_IAQ_MQTT_QOS, false);
-        ESP_LOGD(TAG, "Published status, msg_id=%d", msg_id);
+        esp_mqtt_client_enqueue(s_mqtt_client, TOPIC_HEALTH, json_string, 0, CONFIG_IAQ_MQTT_QOS, 0, false);
         free(json_string);
     }
-    
     cJSON_Delete(root);
     return ESP_OK;
 }
 
-esp_err_t mqtt_publish_sensor_data(const sensor_data_t *data)
+esp_err_t mqtt_publish_sensor_data(const iaq_data_t *data)
 {
-    if (!s_mqtt_connected || !data) {
-        return ESP_FAIL;
-    }
-    
-    /* Create JSON with sensor data */
+    if (!s_mqtt_connected || !data) return ESP_FAIL;
     cJSON *root = cJSON_CreateObject();
-    cJSON_AddNumberToObject(root, "temperature", data->temperature);
-    cJSON_AddNumberToObject(root, "humidity", data->humidity);
-    cJSON_AddNumberToObject(root, "pressure", data->pressure);
-    cJSON_AddNumberToObject(root, "co2", data->co2);
-    cJSON_AddNumberToObject(root, "pm1_0", data->pm1_0);
-    cJSON_AddNumberToObject(root, "pm2_5", data->pm2_5);
-    cJSON_AddNumberToObject(root, "pm10", data->pm10);
-    cJSON_AddNumberToObject(root, "voc_index", data->voc_index);
-    cJSON_AddNumberToObject(root, "nox_index", data->nox_index);
-    cJSON_AddNumberToObject(root, "timestamp", data->timestamp);
-    
+    if (!isnan(data->temperature))      cJSON_AddNumberToObject(root, "temperature", data->temperature);       else cJSON_AddNullToObject(root, "temperature");
+    if (!isnan(data->mcu_temperature))  cJSON_AddNumberToObject(root, "mcu_temperature", data->mcu_temperature); else cJSON_AddNullToObject(root, "mcu_temperature");
+    if (!isnan(data->humidity))         cJSON_AddNumberToObject(root, "humidity", data->humidity);             else cJSON_AddNullToObject(root, "humidity");
+    if (!isnan(data->pressure))         cJSON_AddNumberToObject(root, "pressure", data->pressure);             else cJSON_AddNullToObject(root, "pressure");
+    if (!isnan(data->co2_ppm))          cJSON_AddNumberToObject(root, "co2", data->co2_ppm);                   else cJSON_AddNullToObject(root, "co2");
+    if (!isnan(data->pm1_0))            cJSON_AddNumberToObject(root, "pm1_0", data->pm1_0);                   else cJSON_AddNullToObject(root, "pm1_0");
+    if (!isnan(data->pm2_5))            cJSON_AddNumberToObject(root, "pm2_5", data->pm2_5);                   else cJSON_AddNullToObject(root, "pm2_5");
+    if (!isnan(data->pm10))             cJSON_AddNumberToObject(root, "pm10", data->pm10);                     else cJSON_AddNullToObject(root, "pm10");
+    if (data->voc_index != UINT16_MAX)  cJSON_AddNumberToObject(root, "voc_index", data->voc_index);           else cJSON_AddNullToObject(root, "voc_index");
+    if (data->nox_index != UINT16_MAX)  cJSON_AddNumberToObject(root, "nox_index", data->nox_index);           else cJSON_AddNullToObject(root, "nox_index");
+    if (data->aqi != UINT16_MAX)        cJSON_AddNumberToObject(root, "aqi", data->aqi);                       else cJSON_AddNullToObject(root, "aqi");
+    cJSON_AddStringToObject(root, "comfort", data->comfort ? data->comfort : "unknown");
+    cJSON_AddNumberToObject(root, "timestamp", data->last_update);
     char *json_string = cJSON_PrintUnformatted(root);
     if (json_string) {
-        int msg_id = esp_mqtt_client_publish(s_mqtt_client, TOPIC_STATE, 
-                                             json_string, 0, CONFIG_IAQ_MQTT_QOS, false);
-        ESP_LOGD(TAG, "Published sensor data, msg_id=%d", msg_id);
+        int msg_id = esp_mqtt_client_enqueue(s_mqtt_client, TOPIC_STATE, json_string, 0, CONFIG_IAQ_MQTT_QOS, 0, false);
+        ESP_LOGD(TAG, "Enqueued sensor data, msg_id=%d", msg_id);
         free(json_string);
     }
-    
     cJSON_Delete(root);
     return ESP_OK;
 }
@@ -243,4 +364,105 @@ esp_err_t mqtt_publish_sensor_data(const sensor_data_t *data)
 bool mqtt_manager_is_connected(void)
 {
     return s_mqtt_connected;
+}
+
+esp_err_t mqtt_manager_set_broker(const char *broker_url, const char *username, const char *password)
+{
+    if (!broker_url) return ESP_ERR_INVALID_ARG;
+    if (strlen(broker_url) == 0 || strlen(broker_url) >= sizeof(s_broker_url)) return ESP_ERR_INVALID_ARG;
+    if (!is_valid_broker_url(broker_url)) {
+        ESP_LOGE(TAG, "Invalid broker URL format (expected mqtt:// or mqtts://)");
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    ESP_LOGI(TAG, "Setting MQTT broker: %s", broker_url);
+    esp_err_t ret = save_mqtt_config(broker_url, username, password);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to save MQTT config to NVS");
+        return ret;
+    }
+    strlcpy(s_broker_url, broker_url, sizeof(s_broker_url));
+    if (username) strlcpy(s_username, username, sizeof(s_username)); else s_username[0] = '\0';
+    if (password) strlcpy(s_password, password, sizeof(s_password)); else s_password[0] = '\0';
+    ESP_LOGI(TAG, "MQTT broker configuration updated. Restart MQTT to apply changes.");
+    return ESP_OK;
+}
+
+esp_err_t mqtt_manager_get_broker_url(char *broker_url, size_t url_len)
+{
+    if (!broker_url || url_len == 0) return ESP_ERR_INVALID_ARG;
+    strlcpy(broker_url, s_broker_url, url_len);
+    return ESP_OK;
+}
+
+/* Command handling */
+static void mqtt_handle_command(const char *topic, const char *data, int data_len)
+{
+    ESP_LOGI(TAG, "Command received on topic: %s", topic);
+    if (strcmp(topic, TOPIC_CMD_RESTART) == 0) {
+        ESP_LOGI(TAG, "Restart command received");
+        esp_restart();
+    } else if (strcmp(topic, TOPIC_CMD_CALIBRATE) == 0) {
+        ESP_LOGI(TAG, "Calibrate command received");
+        xEventGroupSetBits(g_event_group, SENSORS_CALIBRATE_BIT);
+    } else {
+        ESP_LOGW(TAG, "Unknown command: %s", topic);
+    }
+}
+
+/* MQTT event handler */
+static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data)
+{
+    esp_mqtt_event_handle_t event = event_data;
+    esp_mqtt_client_handle_t client = event->client;
+
+    switch ((esp_mqtt_event_id_t)event_id) {
+        case MQTT_EVENT_CONNECTED:
+            ESP_LOGI(TAG, "MQTT connected");
+            s_mqtt_connected = true;
+            IAQ_DATA_WITH_LOCK() { iaq_data_get()->system.mqtt_connected = true; }
+            xEventGroupSetBits(g_event_group, MQTT_CONNECTED_BIT);
+            {
+                int msg_id = esp_mqtt_client_subscribe(client, TOPIC_COMMAND, CONFIG_IAQ_MQTT_QOS);
+                ESP_LOGD(TAG, "Subscribing to %s, msg_id=%d", TOPIC_COMMAND, msg_id);
+            }
+            esp_mqtt_client_enqueue(client, TOPIC_STATUS, "online", 0, 1, 1, true);
+            mqtt_publish_ha_discovery();
+            break;
+        case MQTT_EVENT_DISCONNECTED:
+            ESP_LOGI(TAG, "MQTT disconnected");
+            s_mqtt_connected = false;
+            IAQ_DATA_WITH_LOCK() { iaq_data_get()->system.mqtt_connected = false; }
+            xEventGroupClearBits(g_event_group, MQTT_CONNECTED_BIT);
+            break;
+        case MQTT_EVENT_SUBSCRIBED:
+            ESP_LOGI(TAG, "MQTT subscribed, msg_id=%d", event->msg_id);
+            break;
+        case MQTT_EVENT_UNSUBSCRIBED:
+            ESP_LOGI(TAG, "MQTT unsubscribed, msg_id=%d", event->msg_id);
+            break;
+        case MQTT_EVENT_PUBLISHED:
+            ESP_LOGD(TAG, "MQTT published, msg_id=%d", event->msg_id);
+            break;
+        case MQTT_EVENT_DATA: {
+            ESP_LOGI(TAG, "MQTT data received");
+            char topic[128] = {0};
+            char data_buf[256] = {0};
+            if (event->topic_len < sizeof(topic)) memcpy(topic, event->topic, event->topic_len);
+            if (event->data_len < sizeof(data_buf)) memcpy(data_buf, event->data, event->data_len);
+            ESP_LOGI(TAG, "Topic: %s, Data: %s", topic, data_buf);
+            mqtt_handle_command(topic, data_buf, event->data_len);
+            break;
+        }
+        case MQTT_EVENT_ERROR:
+            ESP_LOGE(TAG, "MQTT error");
+            if (event->error_handle && event->error_handle->error_type == MQTT_ERROR_TYPE_TCP_TRANSPORT) {
+                ESP_LOGE(TAG, "Last error code: 0x%x", event->error_handle->esp_tls_last_esp_err);
+                ESP_LOGE(TAG, "Last tls error: 0x%x", event->error_handle->esp_tls_stack_err);
+            }
+            break;
+        default:
+            ESP_LOGD(TAG, "Other MQTT event id:%d", event->event_id);
+            break;
+    }
 }

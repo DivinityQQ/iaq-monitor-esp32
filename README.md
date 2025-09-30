@@ -1,155 +1,91 @@
-# IAQ Monitor - ESP32-S3
+# IAQ Monitor (ESP32‑S3, ESP‑IDF)
 
-Indoor Air Quality Monitor using ESP-IDF and FreeRTOS.
+Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, robust defaults, and a friendly console for configuration. Designed to integrate with Home Assistant via MQTT discovery.
 
-## Features (Current)
-- ✅ WiFi connectivity with automatic reconnection
-- ✅ MQTT client with Home Assistant auto-discovery
-- ✅ Console commands for runtime debugging
-- ✅ Status LED indication
-- ✅ System monitoring (heap, uptime, WiFi RSSI)
+## Features
+- Wi‑Fi station mode with NVS‑stored credentials (console configurable)
+- MQTT 5.0 client, retained LWT/status, HA discovery retained
+- Central data model with explicit “no data” until sensors report
+- Sensor coordinator owns drivers and per‑sensor cadences (defaults via Kconfig, persisted in NVS)
+- Console commands for status, Wi‑Fi, MQTT, sensor reads/resets, cadences
+- Non‑blocking MQTT publish path (enqueue)
 
-## Features (Planned)
-- [ ] SHT41 temperature/humidity sensor
-- [ ] PMS5003 particulate matter sensor
-- [ ] Senseair S8 CO2 sensor
-- [ ] SGP41 VOC/NOx sensor
-- [ ] BMP280 pressure sensor
-- [ ] OLED display
-- [ ] Web configuration portal
-- [ ] Sensor data compensation
-- [ ] Historical data storage
+## Hardware/Software
+- Target: ESP32‑S3
+- SDK: ESP‑IDF v5.5.1+
+- Tooling: idf.py (CMake + Ninja)
 
-## Prerequisites
-
-- ESP-IDF v5.1 or later
-- ESP32-S3 development board
-- USB cable for flashing and monitoring
-
-## Installation
-
-1. **Install ESP-IDF:**
-```bash
-mkdir ~/esp
-cd ~/esp
-git clone -b v5.1.2 --recursive https://github.com/espressif/esp-idf.git
-cd esp-idf
-./install.sh esp32s3
+## Quick Start
 ```
-
-2. **Clone this repository:**
-```bash
-git clone https://github.com/yourusername/iaq-monitor-esp32.git
-cd iaq-monitor-esp32
-```
-
-3. **Set up ESP-IDF environment:**
-```bash
-. ~/esp/esp-idf/export.sh
-```
-
-## Configuration
-
-1. **Run menuconfig:**
-```bash
-idf.py menuconfig
-```
-
-2. **Configure WiFi and MQTT:**
-- Navigate to `IAQ Monitor Configuration`
-- Set your WiFi SSID and password
-- Set your MQTT broker URL
-- Configure device ID and other options
-
-## Building and Flashing
-
-1. **Build the project:**
-```bash
 idf.py build
+idf.py -p \\.\COM3 flash
+idf.py -p \\.\COM3 monitor
+```
+Tip: On Windows, use `\\.\COMx` or set `$env:ESPPORT='\\.\COM3'`.
+
+## First Boot + Configuration
+- Console appears on UART after boot. Press Enter to activate and type `help`.
+- Set Wi‑Fi credentials and reconnect:
+```
+wifi set <ssid> <password>
+wifi restart
+```
+- Set MQTT broker (supports mqtt:// or mqtts://). Invalid URLs are rejected and not saved.
+```
+mqtt set mqtt://<host>:1883 [username] [password]
+mqtt restart
+```
+- Check status at any time:
+```
+status
+mqtt status
+wifi status
 ```
 
-2. **Flash to ESP32-S3:**
-```bash
-idf.py -p /dev/ttyUSB0 flash
+## Console Commands (Cheat Sheet)
 ```
-(Replace `/dev/ttyUSB0` with your serial port)
+status
+wifi scan | wifi set <ssid> <pass> | wifi restart | wifi status
+mqtt set mqtt://<host>:1883 [user] [pass] | mqtt restart | mqtt status | mqtt publish
+sensor status | sensor read <sensor> | sensor reset <sensor>
+sensor calibrate co2 <ppm>
+sensor cadence | sensor cadence set <sensor> <ms>
+free | version | restart
+```
+Sensors you can reference today: mcu (internal temp). More to come (sht41, bmp280, sgp41, pms5003, s8).
 
-3. **Monitor output:**
-```bash
-idf.py -p /dev/ttyUSB0 monitor
+## Per‑Sensor Cadence
+- Build‑time defaults via Kconfig (menuconfig): Sensor Coordinator → cadence options
+- Persisted at runtime in NVS (namespace `sensor_cfg`)
+- View and change at runtime:
+```
+sensor cadence
+sensor cadence set <sensor> <ms>
 ```
 
-4. **Combined flash and monitor:**
-```bash
-idf.py -p /dev/ttyUSB0 flash monitor
-```
+## Home Assistant
+- Auto‑discovery (retained) published on MQTT connect
+- State JSON publishes `null` for missing values so HA shows “unknown”
+- Topics: `iaq/{device_id}/state`, `.../health`, `.../status`, `.../cmd/#`
 
-## Console Commands
+## Logging
+- App/component logs at INFO by default
+- Noisy ESP Wi‑Fi/PHY tags are reduced to WARN in `main.c`
+- On Windows terminals, prefer Windows Terminal (UTF‑8). Console uses ASCII units by default to avoid mojibake.
 
-Once running, press Enter to activate the console and use these commands:
-
-- `help` - Show available commands
-- `status` - Display system status
-- `restart` - Restart the system
-
-## MQTT Topics
-
-The device publishes to these MQTT topics:
-
-- `{device_id}/status` - System status (JSON)
-- `{device_id}/state` - Sensor data (JSON)
-- `{device_id}/availability` - Online/Offline (LWT)
-
-And subscribes to:
-- `{device_id}/cmd/+` - Command topics
-
-## Home Assistant Integration
-
-The device automatically publishes discovery messages for Home Assistant. Sensors will appear automatically in HA once the device connects to MQTT.
-
-## LED Status Indicators
-
-- **3 blinks** - System starting
-- **2 blinks** - WiFi connected
-- **1 blink** - MQTT connected
-
-## Project Structure
-
-```
-├── main/               # Main application
-├── components/         # Custom components
-│   ├── connectivity/   # WiFi and MQTT
-│   └── sensor_drivers/ # Sensor implementations (future)
-├── partitions.csv      # Flash partition table
-└── sdkconfig.defaults  # Default configuration
-```
+## Build Notes
+- If you add new source files, update the component’s `CMakeLists.txt` `SRCS` and, if needed, `REQUIRES`
+- If you add new settings, consider Kconfig defaults and NVS persistence
+- See CONTRIBUTING.md for coding and component guidelines
 
 ## Troubleshooting
+- Monitor warning on COM ports: use `\\.\COMx` device path
+- MQTT bootloops (old behavior): now prevented; invalid broker URL disables MQTT without failing init/start
+- Wi‑Fi not starting: empty SSID is treated as disabled; set via console
 
-1. **WiFi won't connect:**
-   - Check SSID and password in menuconfig
-   - Ensure router is 2.4GHz (ESP32 doesn't support 5GHz)
-   - Check serial output for error messages
+## Project Status / Roadmap
+- Implement remaining sensor drivers and wire them into the coordinator (SHT41, BMP280, SGP41, PMS5003, S8)
+- Add dependency‑aware startup (enable SGP41 after SHT41/BMP280 baselines)
+- Optional: persistent MQTT session, better console arg parsing (quoted args)
+- Optional: display/LED tasks (placeholders pre‑defined)
 
-2. **MQTT won't connect:**
-   - Verify broker URL format: `mqtt://ip:port`
-   - Check if broker requires authentication
-   - Ensure broker is reachable from ESP32 network
-
-3. **Build errors:**
-   - Run `idf.py fullclean` and rebuild
-   - Ensure ESP-IDF environment is properly sourced
-   - Check ESP-IDF version compatibility
-
-## Next Steps
-
-To add sensors:
-
-1. Implement driver in `components/sensor_drivers/`
-2. Add sensor task in `main.c`
-3. Update MQTT publishing to include sensor data
-4. Add Home Assistant discovery for new sensors
-
-## License
-
-MIT License - see LICENSE file for details

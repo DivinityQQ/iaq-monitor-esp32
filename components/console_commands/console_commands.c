@@ -1,6 +1,7 @@
 ﻿/* components/console_commands/console_commands.c */
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_log.h"
@@ -59,14 +60,14 @@ static int cmd_status(int argc, char **argv)
 
         /* Sensor Readings */
         printf("\n--- Current Readings ---\n");
-        printf("Temperature: %.1fÂ°C\n", data->temperature);
-        printf("Humidity: %.1f%%\n", data->humidity);
-        printf("Pressure: %.1f hPa\n", data->pressure);
-        printf("MCU Temp: %.1fÂ°C\n", data->mcu_temperature);
-        printf("COâ‚‚: %.0f ppm\n", data->co2_ppm);
-        printf("PM2.5: %.1f Âµg/mÂł\n", data->pm2_5);
-        printf("VOC Index: %u\n", data->voc_index);
-        printf("AQI: %u\n", data->aqi);
+        if (isnan(data->temperature)) printf("Temperature: n/a\n"); else printf("Temperature: %.1f degC\n", data->temperature);
+        if (isnan(data->humidity))    printf("Humidity: n/a\n");    else printf("Humidity: %.1f%%\n", data->humidity);
+        if (isnan(data->pressure))    printf("Pressure: n/a\n");    else printf("Pressure: %.1f hPa\n", data->pressure);
+        if (isnan(data->mcu_temperature)) printf("MCU Temp: n/a\n"); else printf("MCU Temp: %.1f degC\n", data->mcu_temperature);
+        if (isnan(data->co2_ppm))     printf("CO2: n/a\n");       else printf("CO2: %.0f ppm\n", data->co2_ppm);
+        if (isnan(data->pm2_5))       printf("PM2.5: n/a\n");     else printf("PM2.5: %.1f ug/m3\n", data->pm2_5);
+        if (data->voc_index == UINT16_MAX) printf("VOC Index: n/a\n"); else printf("VOC Index: %u\n", data->voc_index);
+        if (data->aqi == UINT16_MAX)       printf("AQI: n/a\n");       else printf("AQI: %u\n", data->aqi);
         printf("Comfort: %s\n", data->comfort ? data->comfort : "unknown");
     }
 
@@ -441,14 +442,86 @@ static int cmd_sensor_calibrate(int argc, char **argv)
     return 1;
 }
 
+static const char* sensor_id_to_name(sensor_id_t id)
+{
+    switch (id) {
+        case SENSOR_ID_MCU: return "mcu";
+        case SENSOR_ID_SHT41: return "sht41";
+        case SENSOR_ID_BMP280: return "bmp280";
+        case SENSOR_ID_SGP41: return "sgp41";
+        case SENSOR_ID_PMS5003: return "pms5003";
+        case SENSOR_ID_S8: return "s8";
+        default: return "unknown";
+    }
+}
+
+static int cmd_sensor_cadence(int argc, char **argv)
+{
+    if (argc == 1) {
+        /* Show cadences */
+        uint32_t ms[SENSOR_ID_MAX] = {0};
+        bool from_nvs[SENSOR_ID_MAX] = {0};
+        esp_err_t ret = sensor_coordinator_get_cadences(ms, from_nvs);
+        if (ret != ESP_OK) {
+            printf("Failed to get cadences: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+        printf("\n=== Sensor Cadences ===\n");
+        printf("%-10s  %-10s  %-8s\n", "Sensor", "Cadence(ms)", "Source");
+        printf("-----------------------------------\n");
+        for (int i = 0; i < SENSOR_ID_MAX; ++i) {
+            printf("%-10s  %-10lu  %-8s\n",
+                   sensor_id_to_name((sensor_id_t)i),
+                   (unsigned long)ms[i],
+                   from_nvs[i] ? "NVS" : "default");
+        }
+        printf("\n");
+        return 0;
+    }
+
+    if (argc == 3 && strcmp(argv[1], "set") == 0) {
+        sensor_id_t id;
+        if (!parse_sensor_id(argv[2], &id)) {
+            printf("Unknown sensor: %s\n", argv[2]);
+            return 1;
+        }
+        printf("Usage: sensor cadence set <sensor> <ms>\n");
+        return 1;
+    }
+
+    if (argc == 4 && strcmp(argv[1], "set") == 0) {
+        sensor_id_t id;
+        if (!parse_sensor_id(argv[2], &id)) {
+            printf("Unknown sensor: %s\n", argv[2]);
+            return 1;
+        }
+        int ms = atoi(argv[3]);
+        if (ms < 0) {
+            printf("Invalid ms: %s\n", argv[3]);
+            return 1;
+        }
+        esp_err_t ret = sensor_coordinator_set_cadence(id, (uint32_t)ms);
+        if (ret == ESP_OK) {
+            printf("Cadence for %s set to %d ms (saved to NVS)\n", argv[2], ms);
+            return 0;
+        }
+        printf("Failed to set cadence: %s\n", esp_err_to_name(ret));
+        return 1;
+    }
+
+    printf("Usage: sensor cadence [set <sensor> <ms>]\n");
+    return 1;
+}
+
 static int cmd_sensor(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: sensor <status|read|reset|calibrate>\n");
+        printf("Usage: sensor <status|read|reset|calibrate|cadence>\n");
         printf("  status                 - Show sensor health status\n");
         printf("  read <sensor>          - Force read specific sensor (e.g., mcu)\n");
         printf("  reset <sensor>         - Reset specific sensor (e.g., mcu)\n");
         printf("  calibrate co2 <ppm>    - Calibrate CO2 sensor\n");
+        printf("  cadence [set <sensor> <ms>] - Show or set cadences\n");
         return 0;
     }
 
@@ -460,6 +533,8 @@ static int cmd_sensor(int argc, char **argv)
         return cmd_sensor_reset(argc - 1, &argv[1]);
     } else if (strcmp(argv[1], "calibrate") == 0) {
         return cmd_sensor_calibrate(argc - 1, &argv[1]);
+    } else if (strcmp(argv[1], "cadence") == 0) {
+        return cmd_sensor_cadence(argc - 1, &argv[1]);
     }
 
     printf("Unknown or unimplemented sensor command: %s\n", argv[1]);
@@ -595,6 +670,7 @@ esp_err_t console_commands_init(void)
 
     return ESP_OK;
 }
+
 
 
 

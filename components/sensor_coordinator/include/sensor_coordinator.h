@@ -59,4 +59,8 @@ esp_err_t sensor_coordinator_set_cadence(sensor_id_t id, uint32_t interval_ms);
 /* Synchronous force read with completion feedback. Waits up to timeout_ms. */
 esp_err_t sensor_coordinator_force_read_sync(sensor_id_t id, uint32_t timeout_ms);
 
+/* Get current cadences (ms) and whether each was loaded from NVS at startup.
+ * Pass NULL for any array you don't need. Arrays must have SENSOR_ID_MAX length. */
+esp_err_t sensor_coordinator_get_cadences(uint32_t out_ms[SENSOR_ID_MAX], bool out_from_nvs[SENSOR_ID_MAX]);
+
 #endif /* SENSOR_COORDINATOR_H */

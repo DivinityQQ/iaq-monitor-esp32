@@ -1,18 +1,20 @@
 # components/connectivity/CMakeLists.txt
 idf_component_register(
-    SRCS 
+    SRCS
         "wifi_manager.c"
         "mqtt_manager.c"
-    INCLUDE_DIRS 
+       
+    INCLUDE_DIRS
         "include"
-    PRIV_INCLUDE_DIRS 
+    PRIV_INCLUDE_DIRS
         "../../main"
-    REQUIRES 
+    REQUIRES
         esp_wifi
         esp_netif
         nvs_flash
         mqtt
         json
+        iaq_data
     PRIV_REQUIRES
         esp_timer
         driver
