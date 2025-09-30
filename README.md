@@ -2,7 +2,7 @@
 
 Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, robust defaults, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery.
 
-Current version: 0.3.0
+Current version: 0.3.1
 
 ## Features
 - Wi‑Fi station mode with NVS‑stored credentials (console configurable)
@@ -107,4 +107,3 @@ Notes
 - On Windows, use the `\\.\COMx` device path
 - If MQTT does not start: set a valid broker URL via console
 - Empty SSID disables Wi‑Fi without failing init/start
-
