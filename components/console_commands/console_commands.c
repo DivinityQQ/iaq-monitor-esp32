@@ -252,18 +252,21 @@ static int cmd_mqtt_publish_test(int argc, char **argv)
 {
     printf("Publishing test message...\n");
 
+    /* Snapshot data, release lock, then publish */
+    iaq_data_t snapshot;
     IAQ_DATA_WITH_LOCK() {
-        iaq_data_t *data = iaq_data_get();
-        esp_err_t ret = ESP_OK;
-        ret |= mqtt_publish_sensor_mcu(data);
-        ret |= mqtt_publish_sensor_sht41(data);
-        ret |= mqtt_publish_sensor_bmp280(data);
-        ret |= mqtt_publish_sensor_sgp41(data);
-        ret |= mqtt_publish_sensor_pms5003(data);
-        ret |= mqtt_publish_sensor_s8(data);
-        if (ret == ESP_OK) printf("Per-sensor test messages published\n");
-        else printf("Some per-sensor test publishes may have failed\n");
+        snapshot = *iaq_data_get();
     }
+
+    esp_err_t ret = ESP_OK;
+    ret |= mqtt_publish_sensor_mcu(&snapshot);
+    ret |= mqtt_publish_sensor_sht41(&snapshot);
+    ret |= mqtt_publish_sensor_bmp280(&snapshot);
+    ret |= mqtt_publish_sensor_sgp41(&snapshot);
+    ret |= mqtt_publish_sensor_pms5003(&snapshot);
+    ret |= mqtt_publish_sensor_s8(&snapshot);
+    if (ret == ESP_OK) printf("Per-sensor test messages published\n");
+    else printf("Some per-sensor test publishes may have failed\n");
 
     return 0;
 }

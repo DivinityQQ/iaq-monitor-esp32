@@ -98,9 +98,12 @@ static void status_timer_callback(void* arg)
 
     /* Publish status to MQTT if connected */
     if (mqtt_manager_is_connected()) {
+        /* Snapshot fields, release lock, then publish */
+        iaq_data_t snapshot;
         IAQ_DATA_WITH_LOCK() {
-            mqtt_publish_status(iaq_data_get());
+            snapshot = *iaq_data_get();
         }
+        mqtt_publish_status(&snapshot);
     }
 }
 
@@ -132,17 +135,19 @@ static void network_monitor_task(void *arg)
         );
 
         if ((bits & sensor_bits_mask) && mqtt_manager_is_connected()) {
+            /* Snapshot data, release lock, then publish */
+            iaq_data_t snapshot;
             IAQ_DATA_WITH_LOCK() {
-                iaq_data_t *data = iaq_data_get();
-                if (bits & SENSOR_UPDATED_MCU_BIT)     (void)mqtt_publish_sensor_mcu(data);
-                if (bits & SENSOR_UPDATED_SHT41_BIT)   (void)mqtt_publish_sensor_sht41(data);
-                if (bits & SENSOR_UPDATED_BMP280_BIT)  (void)mqtt_publish_sensor_bmp280(data);
-                if (bits & SENSOR_UPDATED_SGP41_BIT)   (void)mqtt_publish_sensor_sgp41(data);
-                if (bits & SENSOR_UPDATED_PMS5003_BIT) (void)mqtt_publish_sensor_pms5003(data);
-                if (bits & SENSOR_UPDATED_S8_BIT)      (void)mqtt_publish_sensor_s8(data);
-                /* Derived metrics may change with any sensor update */
-                (void)mqtt_publish_sensor_derived(data);
+                snapshot = *iaq_data_get();
             }
+            if (bits & SENSOR_UPDATED_MCU_BIT)     (void)mqtt_publish_sensor_mcu(&snapshot);
+            if (bits & SENSOR_UPDATED_SHT41_BIT)   (void)mqtt_publish_sensor_sht41(&snapshot);
+            if (bits & SENSOR_UPDATED_BMP280_BIT)  (void)mqtt_publish_sensor_bmp280(&snapshot);
+            if (bits & SENSOR_UPDATED_SGP41_BIT)   (void)mqtt_publish_sensor_sgp41(&snapshot);
+            if (bits & SENSOR_UPDATED_PMS5003_BIT) (void)mqtt_publish_sensor_pms5003(&snapshot);
+            if (bits & SENSOR_UPDATED_S8_BIT)      (void)mqtt_publish_sensor_s8(&snapshot);
+            /* Derived metrics may change with any sensor update */
+            (void)mqtt_publish_sensor_derived(&snapshot);
             ESP_LOGD(TAG, "Published per-sensor updates to MQTT");
         }
 
