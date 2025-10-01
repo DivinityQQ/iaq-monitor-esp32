@@ -281,7 +281,11 @@ esp_err_t wifi_manager_start(void)
 esp_err_t wifi_manager_stop(void)
 {
     ESP_LOGI(TAG, "Stopping WiFi");
-    ESP_ERROR_CHECK(esp_wifi_stop());
+    esp_err_t ret = esp_wifi_stop();
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to stop WiFi: %s", esp_err_to_name(ret));
+        return ret;
+    }
     return ESP_OK;
 }
 

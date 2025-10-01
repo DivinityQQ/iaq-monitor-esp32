@@ -183,10 +183,14 @@ static int cmd_wifi_restart(int argc, char **argv)
 {
     printf("Restarting WiFi...\n");
 
-    wifi_manager_stop();
+    esp_err_t ret = wifi_manager_stop();
+    if (ret != ESP_OK) {
+        printf("Failed to stop WiFi: %s\n", esp_err_to_name(ret));
+        /* Continue with restart attempt for recovery */
+    }
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    esp_err_t ret = wifi_manager_start();
+    ret = wifi_manager_start();
     if (ret != ESP_OK) {
         printf("Failed to start WiFi: %s\n", esp_err_to_name(ret));
         return 1;
