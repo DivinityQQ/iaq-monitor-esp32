@@ -24,7 +24,6 @@ static iaq_system_context_t *s_system_ctx = NULL;
 #define NVS_KEY_SSID "ssid"
 #define NVS_KEY_PASSWORD "password"
 
-static int s_retry_num = 0;
 static esp_netif_t *s_sta_netif = NULL;
 static bool s_initialized = false;
 static char s_ssid[33] = {0};
@@ -49,7 +48,6 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 
                 /* ESP-IDF handles automatic reconnection */
                 ESP_LOGI(TAG, "WiFi disconnected, will auto-retry");
-                s_retry_num++;
                 xEventGroupClearBits(s_system_ctx->event_group, WIFI_CONNECTED_BIT);
 
                 /* Post WiFi disconnected event to default event loop */
@@ -69,7 +67,6 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                 {
                     ip_event_got_ip_t* event = (ip_event_got_ip_t*) event_data;
                     ESP_LOGI(TAG, "Got IP: " IPSTR, IP2STR(&event->ip_info.ip));
-                    s_retry_num = 0;
 
                     /* Update IAQ data */
                     IAQ_DATA_WITH_LOCK() {
