@@ -270,7 +270,13 @@ esp_err_t mqtt_manager_stop(void)
 {
     if (!s_initialized || s_mqtt_client == NULL) return ESP_OK;
     ESP_LOGI(TAG, "Stopping MQTT client");
-    return esp_mqtt_client_stop(s_mqtt_client);
+    esp_err_t ret = esp_mqtt_client_stop(s_mqtt_client);
+    if (ret == ESP_OK) {
+        esp_mqtt_client_destroy(s_mqtt_client);
+        s_mqtt_client = NULL;
+        ESP_LOGI(TAG, "MQTT client stopped and destroyed");
+    }
+    return ret;
 }
 
 /* HA discovery */
