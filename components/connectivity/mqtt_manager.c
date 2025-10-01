@@ -539,8 +539,16 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             ESP_LOGI(TAG, "MQTT data received");
             char topic[128] = {0};
             char data_buf[256] = {0};
-            if (event->topic_len < sizeof(topic)) memcpy(topic, event->topic, event->topic_len);
-            if (event->data_len < sizeof(data_buf)) memcpy(data_buf, event->data, event->data_len);
+            if (event->topic_len < sizeof(topic)) {
+                memcpy(topic, event->topic, event->topic_len);
+            } else {
+                ESP_LOGW(TAG, "Topic truncated: received %d bytes, buffer size %zu", event->topic_len, sizeof(topic));
+            }
+            if (event->data_len < sizeof(data_buf)) {
+                memcpy(data_buf, event->data, event->data_len);
+            } else {
+                ESP_LOGW(TAG, "Data truncated: received %d bytes, buffer size %zu", event->data_len, sizeof(data_buf));
+            }
             ESP_LOGI(TAG, "Topic: %s, Data: %s", topic, data_buf);
             mqtt_handle_command(topic, data_buf, event->data_len);
             break;
