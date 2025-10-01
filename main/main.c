@@ -40,6 +40,41 @@ static void configure_log_levels(void)
 }
 
 /**
+ * Event handler for custom IAQ events.
+ * Handles WiFi connectivity changes and manages MQTT lifecycle.
+ */
+static void iaq_event_handler(void *arg, esp_event_base_t event_base,
+                               int32_t event_id, void *event_data)
+{
+    if (event_base == IAQ_EVENT) {
+        switch (event_id) {
+            case IAQ_EVENT_WIFI_CONNECTED:
+                ESP_LOGI(TAG, "WiFi connected event received");
+
+                /* Check if MQTT needs to be restarted */
+                bool mqtt_was_connected = false;
+                IAQ_DATA_WITH_LOCK() {
+                    mqtt_was_connected = iaq_data_get()->system.mqtt_connected;
+                }
+
+                /* Restart MQTT if it was previously connected but now disconnected */
+                if (mqtt_was_connected && !mqtt_manager_is_connected()) {
+                    ESP_LOGI(TAG, "WiFi recovered, restarting MQTT");
+                    mqtt_manager_start();
+                }
+                break;
+
+            case IAQ_EVENT_WIFI_DISCONNECTED:
+                ESP_LOGD(TAG, "WiFi disconnected event received");
+                break;
+
+            default:
+                break;
+        }
+    }
+}
+
+/**
  * Status timer callback - updates system info and publishes status.
  * Runs every 30 seconds.
  */
@@ -190,6 +225,11 @@ void app_main(void)
     /* Initialize console commands */
     ESP_LOGI(TAG, "Initializing console commands");
     ESP_ERROR_CHECK(console_commands_init());
+
+    /* Register event handler for IAQ custom events */
+    ESP_LOGI(TAG, "Registering IAQ event handler");
+    ESP_ERROR_CHECK(esp_event_handler_register(IAQ_EVENT, ESP_EVENT_ANY_ID,
+                                                &iaq_event_handler, NULL));
 
     /* Start WiFi (this creates internal WiFi task) */
     ESP_LOGD(TAG, "Starting WiFi");

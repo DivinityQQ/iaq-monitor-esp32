@@ -5,6 +5,13 @@
 
 static const char *TAG = "SYS_CTX";
 
+/**
+ * Define the IAQ custom event base.
+ * This allows application components to post and subscribe to IAQ-specific events
+ * on the default event loop.
+ */
+ESP_EVENT_DEFINE_BASE(IAQ_EVENT);
+
 esp_err_t iaq_system_context_init(iaq_system_context_t *ctx)
 {
     if (!ctx) {

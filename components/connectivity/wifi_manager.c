@@ -12,7 +12,6 @@
 #include "nvs.h"
 
 #include "wifi_manager.h"
-#include "mqtt_manager.h"
 #include "iaq_data.h"
 #include "iaq_config.h"
 
@@ -52,6 +51,9 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                 ESP_LOGI(TAG, "WiFi disconnected, will auto-retry");
                 s_retry_num++;
                 xEventGroupClearBits(s_system_ctx->event_group, WIFI_CONNECTED_BIT);
+
+                /* Post WiFi disconnected event to default event loop */
+                esp_event_post(IAQ_EVENT, IAQ_EVENT_WIFI_DISCONNECTED, NULL, 0, portMAX_DELAY);
                 break;
                 
             case WIFI_EVENT_STA_CONNECTED:
@@ -70,20 +72,14 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                     s_retry_num = 0;
 
                     /* Update IAQ data */
-                    bool mqtt_was_connected = false;
                     IAQ_DATA_WITH_LOCK() {
-                        iaq_data_t *data = iaq_data_get();
-                        data->system.wifi_connected = true;
-                        mqtt_was_connected = data->system.mqtt_connected;
+                        iaq_data_get()->system.wifi_connected = true;
                     }
 
                     xEventGroupSetBits(s_system_ctx->event_group, WIFI_CONNECTED_BIT);
 
-                    /* Restart MQTT if it was previously connected but now disconnected */
-                    if (mqtt_was_connected && !mqtt_manager_is_connected()) {
-                        ESP_LOGI(TAG, "WiFi recovered, restarting MQTT");
-                        mqtt_manager_start();
-                    }
+                    /* Post WiFi connected event to default event loop */
+                    esp_event_post(IAQ_EVENT, IAQ_EVENT_WIFI_CONNECTED, NULL, 0, portMAX_DELAY);
                 }
                 break;
                 

@@ -5,6 +5,21 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/event_groups.h"
 #include "esp_err.h"
+#include "esp_event.h"
+
+/**
+ * Custom event base for application-level events.
+ * Posted to the default event loop.
+ */
+ESP_EVENT_DECLARE_BASE(IAQ_EVENT);
+
+/**
+ * Application event IDs for IAQ_EVENT base.
+ */
+enum {
+    IAQ_EVENT_WIFI_CONNECTED,      /**< WiFi connected and IP acquired */
+    IAQ_EVENT_WIFI_DISCONNECTED,   /**< WiFi disconnected */
+};
 
 /**
  * System-wide context structure.
