@@ -161,7 +161,7 @@ static void sensor_coordinator_task(void *arg)
                     break;
                 case CMD_CALIBRATE:
                     if (cmd.id == SENSOR_ID_S8) {
-                        op_res = s8_calibrate_co2(cmd.value);
+                        op_res = s8_driver_calibrate_co2(cmd.value);
                     }
                     break;
                 default:
