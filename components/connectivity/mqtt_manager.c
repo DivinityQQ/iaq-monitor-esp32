@@ -27,7 +27,7 @@ static iaq_system_context_t *s_system_ctx = NULL;
 #define NVS_KEY_PASSWORD     "password"
 
 static esp_mqtt_client_handle_t s_mqtt_client = NULL;
-static bool s_mqtt_connected = false;
+static volatile bool s_mqtt_connected = false;
 static bool s_initialized = false;
 static char s_broker_url[128] = {0};
 static char s_username[64] = {0};
@@ -484,6 +484,11 @@ esp_err_t mqtt_manager_get_broker_url(char *broker_url, size_t url_len)
     if (!broker_url || url_len == 0) return ESP_ERR_INVALID_ARG;
     strlcpy(broker_url, s_broker_url, url_len);
     return ESP_OK;
+}
+
+bool mqtt_manager_is_configured(void)
+{
+    return is_valid_broker_url(s_broker_url);
 }
 
 /* Command handling */

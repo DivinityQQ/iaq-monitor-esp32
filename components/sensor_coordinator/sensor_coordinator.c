@@ -18,9 +18,9 @@ static const char *TAG = "SENSOR_COORD";
 
 static iaq_system_context_t *s_system_ctx = NULL;
 static TaskHandle_t s_sensor_task_handle = NULL;
-static bool s_initialized = false;
-static bool s_running = false;
-static bool s_temp_inited = false;
+static volatile bool s_initialized = false;
+static volatile bool s_running = false;
+static volatile bool s_temp_inited = false;
 
 
 typedef enum { CMD_READ = 0, CMD_RESET, CMD_CALIBRATE } sensor_cmd_type_t;
@@ -104,15 +104,32 @@ static void sensor_coordinator_task(void *arg)
 {
     ESP_LOGI(TAG, "Sensor coordinator task started");
 
-    /* Wait a bit for system to stabilize */
-    vTaskDelay(pdMS_TO_TICKS(2000));
+    /* Brief delay for hardware stabilization */
+    vTaskDelay(pdMS_TO_TICKS(500));
 
     xEventGroupSetBits(s_system_ctx->event_group, SENSORS_READY_BIT);
 
     while (s_running) {
-        /* Handle pending coordinator commands */
+        /* Calculate time until next sensor is due */
+        TickType_t now = xTaskGetTickCount();
+        TickType_t next_wake = portMAX_DELAY;
+
+        for (int i = 0; i < SENSOR_ID_MAX; ++i) {
+            if (s_schedule[i].enabled) {
+                TickType_t time_until_due = s_schedule[i].next_due - now;
+                /* Handle tick overflow and past-due sensors */
+                if ((int32_t)time_until_due <= 0) {
+                    next_wake = 0;  /* Sensor is due now */
+                    break;
+                } else if (time_until_due < next_wake) {
+                    next_wake = time_until_due;
+                }
+            }
+        }
+
+        /* Handle pending coordinator commands with calculated timeout */
         sensor_cmd_t cmd;
-        while (s_cmd_queue && xQueueReceive(s_cmd_queue, &cmd, 0) == pdTRUE) {
+        if (s_cmd_queue && xQueueReceive(s_cmd_queue, &cmd, next_wake) == pdTRUE) {
             esp_err_t op_res = ESP_ERR_NOT_SUPPORTED;
             switch (cmd.type) {
                 case CMD_READ:
@@ -151,10 +168,13 @@ static void sensor_coordinator_task(void *arg)
             if (cmd.resp_queue) {
                 (void)xQueueSend(cmd.resp_queue, &op_res, 0);
             }
+            /* After processing command, continue to check for more or handle scheduled reads */
+            continue;
         }
+
         /* Periodic scheduler per sensor */
-        TickType_t now = xTaskGetTickCount();
-        if (s_temp_inited && s_schedule[SENSOR_ID_MCU].enabled && now >= s_schedule[SENSOR_ID_MCU].next_due) {
+        now = xTaskGetTickCount();
+        if (s_temp_inited && s_schedule[SENSOR_ID_MCU].enabled && (int32_t)(now - s_schedule[SENSOR_ID_MCU].next_due) >= 0) {
             float t = 0.0f;
             if (mcu_temp_driver_read_celsius(&t) == ESP_OK) {
                 IAQ_DATA_WITH_LOCK() {
@@ -169,8 +189,6 @@ static void sensor_coordinator_task(void *arg)
         }
 
         /* TODO: add other sensors here in dependency-aware order */
-
-        vTaskDelay(pdMS_TO_TICKS(100));
     }
 
     ESP_LOGI(TAG, "Sensor coordinator task stopped");

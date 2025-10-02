@@ -74,4 +74,11 @@ esp_err_t mqtt_manager_set_broker(const char *broker_url, const char *username, 
  */
 esp_err_t mqtt_manager_get_broker_url(char *broker_url, size_t url_len);
 
+/**
+ * Check if MQTT is configured with a valid broker URL.
+ *
+ * @return true if broker URL is valid, false otherwise
+ */
+bool mqtt_manager_is_configured(void);
+
 #endif /* MQTT_MANAGER_H */

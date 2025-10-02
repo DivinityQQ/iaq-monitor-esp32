@@ -51,15 +51,9 @@ static void iaq_event_handler(void *arg, esp_event_base_t event_base,
             case IAQ_EVENT_WIFI_CONNECTED:
                 ESP_LOGI(TAG, "WiFi connected event received");
 
-                /* Check if MQTT needs to be restarted */
-                bool mqtt_was_connected = false;
-                IAQ_DATA_WITH_LOCK() {
-                    mqtt_was_connected = iaq_data_get()->system.mqtt_connected;
-                }
-
-                /* Restart MQTT if it was previously connected but now disconnected */
-                if (mqtt_was_connected && !mqtt_manager_is_connected()) {
-                    ESP_LOGI(TAG, "WiFi recovered, restarting MQTT");
+                /* Start MQTT if configured and not already connected */
+                if (mqtt_manager_is_configured() && !mqtt_manager_is_connected()) {
+                    ESP_LOGI(TAG, "WiFi connected, starting MQTT");
                     mqtt_manager_start();
                 }
                 break;
@@ -150,9 +144,6 @@ static void network_monitor_task(void *arg)
             (void)mqtt_publish_sensor_derived(&snapshot);
             ESP_LOGD(TAG, "Published per-sensor updates to MQTT");
         }
-
-        /* Small delay to prevent tight loop */
-        vTaskDelay(pdMS_TO_TICKS(100));
     }
 }
 
@@ -236,45 +227,7 @@ void app_main(void)
     ESP_ERROR_CHECK(esp_event_handler_register(IAQ_EVENT, ESP_EVENT_ANY_ID,
                                                 &iaq_event_handler, NULL));
 
-    /* Start WiFi (this creates internal WiFi task) */
-    ESP_LOGD(TAG, "Starting WiFi");
-    ESP_ERROR_CHECK(wifi_manager_start());
-
-    /* Wait for WiFi connection (with timeout) */
-    EventBits_t bits = xEventGroupWaitBits(
-        g_system_ctx.event_group,
-        WIFI_CONNECTED_BIT,
-        pdFALSE,  /* Don't clear bits */
-        pdFALSE,  /* Wait for any bit */
-        pdMS_TO_TICKS(15000)  /* 15 second timeout */
-    );
-
-    if (bits & WIFI_CONNECTED_BIT) {
-        ESP_LOGD(TAG, "WiFi connected");
-
-        /* Start MQTT (this creates internal MQTT task) */
-        ESP_LOGD(TAG, "Starting MQTT client");
-        ESP_ERROR_CHECK(mqtt_manager_start());
-
-        /* Wait a bit for MQTT to connect */
-        bits = xEventGroupWaitBits(
-            g_system_ctx.event_group,
-            MQTT_CONNECTED_BIT,
-            pdFALSE,  /* Don't clear bits */
-            pdFALSE,  /* Wait for any bit */
-            pdMS_TO_TICKS(10000)  /* 10 second timeout */
-        );
-
-        if (bits & MQTT_CONNECTED_BIT) {
-            ESP_LOGD(TAG, "MQTT connected");
-        } else {
-            ESP_LOGW(TAG, "MQTT connection timeout (will auto-retry)");
-        }
-    } else {
-        ESP_LOGW(TAG, "WiFi connection timeout (will auto-retry)");
-    }
-
-    /* Start sensor coordinator task */
+    /* Start sensor coordinator task (begin warm-up immediately) */
     ESP_LOGD(TAG, "Starting sensor coordinator");
     ESP_ERROR_CHECK(sensor_coordinator_start());
 
@@ -301,6 +254,22 @@ void app_main(void)
     };
     ESP_ERROR_CHECK(esp_timer_create(&status_timer_args, &status_timer));
     ESP_ERROR_CHECK(esp_timer_start_periodic(status_timer, STATUS_PUBLISH_INTERVAL_MS * 1000));
+
+    /* Start WiFi (non-blocking, event-driven) */
+    ESP_LOGI(TAG, "Starting WiFi");
+    ESP_ERROR_CHECK(wifi_manager_start());
+    if (wifi_manager_is_configured()) {
+        ESP_LOGI(TAG, "WiFi configured, connecting in background");
+    } else {
+        ESP_LOGW(TAG, "WiFi not configured. Use console: wifi set <ssid> <password>");
+    }
+
+    /* MQTT will be started automatically by iaq_event_handler when WiFi connects */
+    if (mqtt_manager_is_configured()) {
+        ESP_LOGI(TAG, "MQTT configured, will connect when WiFi is ready");
+    } else {
+        ESP_LOGW(TAG, "MQTT not configured. Use console: mqtt set <broker_url> [user] [pass]");
+    }
 
     ESP_LOGI(TAG, "=== System initialization complete ===");
     ESP_LOGI(TAG, "All components running independently");

@@ -73,4 +73,11 @@ esp_err_t wifi_manager_set_credentials(const char *ssid, const char *password);
  */
 esp_err_t wifi_manager_get_ssid(char *ssid, size_t ssid_len);
 
+/**
+ * Check if WiFi is configured with valid credentials.
+ *
+ * @return true if SSID is configured, false otherwise
+ */
+bool wifi_manager_is_configured(void);
+
 #endif /* WIFI_MANAGER_H */

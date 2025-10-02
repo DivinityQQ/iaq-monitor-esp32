@@ -396,3 +396,8 @@ esp_err_t wifi_manager_get_ssid(char *ssid, size_t ssid_len)
     strlcpy(ssid, s_ssid, ssid_len);
     return ESP_OK;
 }
+
+bool wifi_manager_is_configured(void)
+{
+    return (s_ssid[0] != '\0');
+}
