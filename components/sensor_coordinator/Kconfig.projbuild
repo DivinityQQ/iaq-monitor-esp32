@@ -43,5 +43,65 @@ config IAQ_CADENCE_S8_MS
     help
         Period between S8 CO2 reads. 0 disables.
 
+menu "Sensor Warm-up Durations"
+
+    config IAQ_WARMUP_MCU_MS
+        int "MCU temperature warm-up (ms)"
+        default 0
+        range 0 60000
+        help
+            MCU sensor warm-up time. Reads are blocked until this period elapses.
+            Default: 0 (no warm-up needed).
+
+    config IAQ_WARMUP_SHT41_MS
+        int "SHT41 warm-up (ms)"
+        default 0
+        range 0 60000
+        help
+            SHT41 warm-up time after power-on.
+            Default: 0 (ready immediately).
+
+    config IAQ_WARMUP_BMP280_MS
+        int "BMP280 warm-up (ms)"
+        default 0
+        range 0 60000
+        help
+            BMP280 warm-up time after power-on.
+            Default: 0 (ready immediately).
+
+    config IAQ_WARMUP_SGP41_MS
+        int "SGP41 warm-up (ms)"
+        default 10000
+        range 0 60000
+        help
+            SGP41 VOC/NOx sensor requires ~10s warm-up for stable readings.
+            Default: 10000 (10 seconds).
+
+    config IAQ_WARMUP_PMS5003_MS
+        int "PMS5003 warm-up (ms)"
+        default 30000
+        range 0 60000
+        help
+            PMS5003 particulate sensor needs ~30s to stabilize fan and readings.
+            Default: 30000 (30 seconds).
+
+    config IAQ_WARMUP_S8_MS
+        int "Senseair S8 warm-up (ms)"
+        default 20000
+        range 0 60000
+        help
+            S8 CO2 sensor requires ~20s warm-up for accurate readings.
+            Default: 20000 (20 seconds).
+
+endmenu
+
+config IAQ_SIMULATION
+    bool "Enable sensor simulation mode"
+    default n
+    help
+        Replace real sensor reads with simulated data.
+        Useful for testing MQTT/HA integration without hardware.
+        Simulation still respects cadences, warm-up delays, and state machine logic.
+
 endmenu
 

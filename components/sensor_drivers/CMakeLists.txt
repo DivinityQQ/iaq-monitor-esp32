@@ -1,9 +1,17 @@
+set(SRCS
+    "i2c_bus.c"
+    "uart_bus.c"
+    "mcu_temp_driver.c"
+    "s8_driver.c"
+)
+
+# Conditionally add simulation backend
+if(CONFIG_IAQ_SIMULATION)
+    list(APPEND SRCS "sensor_sim.c")
+endif()
+
 idf_component_register(
-    SRCS
-        "i2c_bus.c"
-        "uart_bus.c"
-        "mcu_temp_driver.c"
-        "s8_driver.c"
+    SRCS ${SRCS}
     INCLUDE_DIRS "include"
     REQUIRES driver esp_timer
 )

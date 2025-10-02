@@ -42,6 +42,20 @@ esp_err_t iaq_data_init(void)
     g_iaq_data.warming_up = true;
     g_iaq_data.comfort = "unknown";
 
+    /* Initialize all validity flags to false */
+    g_iaq_data.valid.temperature = false;
+    g_iaq_data.valid.mcu_temperature = false;
+    g_iaq_data.valid.humidity = false;
+    g_iaq_data.valid.pressure = false;
+    g_iaq_data.valid.co2_ppm = false;
+    g_iaq_data.valid.pm1_0 = false;
+    g_iaq_data.valid.pm2_5 = false;
+    g_iaq_data.valid.pm10 = false;
+    g_iaq_data.valid.voc_index = false;
+    g_iaq_data.valid.nox_index = false;
+
+    /* Timestamps already zeroed by memset */
+
     ESP_LOGI(TAG, "IAQ data structure initialized");
     return ESP_OK;
 }

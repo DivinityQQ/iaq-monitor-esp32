@@ -31,6 +31,7 @@ This document defines GPIO ownership for sensor hardware and buses.
 **UART Port:** UART1 (`IAQ_PMS5003_UART_PORT`)
 **Baud Rate:** 9600 bps (fixed)
 **Protocol:** 32-byte frames with 16-bit checksum
+**RX Buffer:** 256 bytes (default)
 
 ---
 
@@ -44,6 +45,22 @@ This document defines GPIO ownership for sensor hardware and buses.
 **UART Port:** UART2 (`IAQ_S8_UART_PORT`)
 **Baud Rate:** 9600 bps (fixed)
 **Protocol:** Modbus RTU with CRC16
+**RX Buffer:** 256 bytes (default)
+
+---
+
+### UART Buffer Size Requirements
+
+**CRITICAL:** ESP-IDF UART driver requires RX buffer size **> 128 bytes** (hardware FIFO size on ESP32-S3).
+
+- **Minimum valid size:** 256 bytes
+- **Kconfig validation:** Range enforced as `256-2048` bytes
+- **Runtime check:** `uart_bus_init()` validates and returns `ESP_ERR_INVALID_ARG` if buffer ≤ 128
+
+If you encounter `uart rx buffer length error`, increase the buffer size in `idf.py menuconfig`:
+```
+Sensor Hardware Configuration → UART Configuration → [Sensor] → RX Buffer Size
+```
 
 ---
 

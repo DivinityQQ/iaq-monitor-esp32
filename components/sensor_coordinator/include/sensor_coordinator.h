@@ -65,4 +65,35 @@ esp_err_t sensor_coordinator_force_read_sync(sensor_id_t id, uint32_t timeout_ms
  * Pass NULL for any array you don't need. Arrays must have SENSOR_ID_MAX length. */
 esp_err_t sensor_coordinator_get_cadences(uint32_t out_ms[SENSOR_ID_MAX], bool out_from_nvs[SENSOR_ID_MAX]);
 
+/** State machine types (for console/observability) **/
+
+typedef enum {
+    SENSOR_STATE_UNINIT = 0,
+    SENSOR_STATE_INIT,
+    SENSOR_STATE_WARMING,
+    SENSOR_STATE_READY,
+    SENSOR_STATE_ERROR
+} sensor_state_t;
+
+typedef struct {
+    sensor_state_t state;
+    int64_t warmup_deadline_us;
+    int64_t last_read_us;
+    uint32_t error_count;
+} sensor_runtime_info_t;
+
+/**
+ * Get runtime state of a sensor (for console observability).
+ *
+ * @param id Sensor ID
+ * @param out_info Pointer to store runtime info
+ * @return ESP_OK on success, ESP_ERR_INVALID_ARG if id invalid
+ */
+esp_err_t sensor_coordinator_get_runtime_info(sensor_id_t id, sensor_runtime_info_t *out_info);
+
+/**
+ * Convert sensor_state_t to string.
+ */
+const char* sensor_coordinator_state_to_string(sensor_state_t state);
+
 #endif /* SENSOR_COORDINATOR_H */

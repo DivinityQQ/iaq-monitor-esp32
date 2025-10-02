@@ -80,9 +80,10 @@ menu "Sensor Hardware Configuration"
             config IAQ_PMS5003_RX_BUF_SIZE
                 int "RX Buffer Size (bytes)"
                 default 256
-                range 64 1024
+                range 256 2048
                 help
                     UART RX buffer size for PMS5003.
+                    MUST be > 128 bytes (ESP32-S3 UART FIFO size).
                     PMS5003 frame is 32 bytes; buffer should accommodate bursts.
                     Default: 256 bytes.
 
@@ -117,12 +118,13 @@ menu "Sensor Hardware Configuration"
 
             config IAQ_S8_RX_BUF_SIZE
                 int "RX Buffer Size (bytes)"
-                default 128
-                range 32 1024
+                default 256
+                range 256 2048
                 help
                     UART RX buffer size for S8.
+                    MUST be > 128 bytes (ESP32-S3 UART FIFO size).
                     S8 Modbus responses are typically <32 bytes.
-                    Default: 128 bytes.
+                    Default: 256 bytes.
 
         endmenu
 

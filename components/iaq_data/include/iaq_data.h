@@ -35,14 +35,29 @@ typedef struct {
 
     /* Metadata */
     struct {
-        /* Per-sensor last update timestamps (seconds since boot). 0 = never */
-        uint32_t mcu;
-        uint32_t sht41;
-        uint32_t bmp280;
-        uint32_t sgp41;
-        uint32_t pms5003;
-        uint32_t s8;
+        /* Per-sensor last update timestamps (microseconds since boot). 0 = never */
+        int64_t mcu;
+        int64_t sht41;
+        int64_t bmp280;
+        int64_t sgp41;
+        int64_t pms5003;
+        int64_t s8;
     } updated_at;
+
+    /* Validity flags - true if sensor has provided at least one valid reading */
+    struct {
+        bool temperature;       // SHT41 temperature valid
+        bool mcu_temperature;   // MCU internal temperature valid
+        bool humidity;          // SHT41 humidity valid
+        bool pressure;          // BMP280 pressure valid
+        bool co2_ppm;           // S8 CO2 valid
+        bool pm1_0;             // PMS5003 PM1.0 valid
+        bool pm2_5;             // PMS5003 PM2.5 valid
+        bool pm10;              // PMS5003 PM10 valid
+        bool voc_index;         // SGP41 VOC index valid
+        bool nox_index;         // SGP41 NOx index valid
+    } valid;
+
     uint8_t overall_quality;    // Overall air quality (0-100)
     bool warming_up;            // True if sensors still warming up
 

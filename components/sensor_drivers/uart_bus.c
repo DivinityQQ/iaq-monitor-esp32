@@ -8,6 +8,13 @@ static const char *TAG = "UART_BUS";
 esp_err_t uart_bus_init(uart_port_t uart_port, int tx_gpio, int rx_gpio,
                         int baud_rate, int rx_buffer_size)
 {
+    /* Validate RX buffer size: ESP-IDF requires > SOC_UART_FIFO_LEN (128 bytes on ESP32-S3) */
+    if (rx_buffer_size <= 128) {
+        ESP_LOGE(TAG, "UART%d: RX buffer size must be > 128 bytes (UART FIFO size), got %d",
+                 uart_port, rx_buffer_size);
+        return ESP_ERR_INVALID_ARG;
+    }
+
     uart_config_t uart_config = {
         .baud_rate = baud_rate,
         .data_bits = UART_DATA_8_BITS,
