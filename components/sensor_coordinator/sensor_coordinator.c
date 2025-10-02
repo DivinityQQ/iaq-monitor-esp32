@@ -129,7 +129,9 @@ static void sensor_coordinator_task(void *arg)
 
         /* Handle pending coordinator commands with calculated timeout */
         sensor_cmd_t cmd;
-        if (s_cmd_queue && xQueueReceive(s_cmd_queue, &cmd, next_wake) == pdTRUE) {
+        /* Ensure minimum 1-tick delay to prevent tight loop when next_wake=0 */
+        TickType_t queue_timeout = (next_wake == 0) ? 1 : next_wake;
+        if (s_cmd_queue && xQueueReceive(s_cmd_queue, &cmd, queue_timeout) == pdTRUE) {
             esp_err_t op_res = ESP_ERR_NOT_SUPPORTED;
             switch (cmd.type) {
                 case CMD_READ:
@@ -185,7 +187,8 @@ static void sensor_coordinator_task(void *arg)
                 }
                 xEventGroupSetBits(s_system_ctx->event_group, SENSORS_DATA_READY_BIT | SENSOR_UPDATED_MCU_BIT);
             }
-            s_schedule[SENSOR_ID_MCU].next_due = now + s_schedule[SENSOR_ID_MCU].period_ticks;
+            /* Increment from previous due time to maintain cadence without drift */
+            s_schedule[SENSOR_ID_MCU].next_due += s_schedule[SENSOR_ID_MCU].period_ticks;
         }
 
         /* TODO: add other sensors here in dependency-aware order */
