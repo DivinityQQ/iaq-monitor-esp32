@@ -7,7 +7,7 @@ cmake_minimum_required(VERSION 3.16)
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 # Set project name and version
-project(iaq-monitor VERSION 0.3.3)
+project(iaq-monitor VERSION 0.4.0)
 
 # Project-wide compile options
 idf_build_set_property(COMPILE_OPTIONS "-Wall" APPEND)
