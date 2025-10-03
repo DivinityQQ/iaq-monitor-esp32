@@ -23,7 +23,11 @@ static const char *TAG = "MQTT_MGR";
 
 static iaq_system_context_t *s_system_ctx = NULL;
 static esp_timer_handle_t s_health_timer = NULL;
-static TaskHandle_t s_event_task_handle = NULL;
+static esp_timer_handle_t s_state_timer = NULL;
+static esp_timer_handle_t s_metrics_timer = NULL;
+#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
+static esp_timer_handle_t s_diagnostics_timer = NULL;
+#endif
 
 /* NVS namespace for MQTT config */
 #define NVS_NAMESPACE        "mqtt_config"
@@ -42,26 +46,24 @@ static char s_password[64] = {0};
 #define TOPIC_PREFIX    "iaq/" CONFIG_IAQ_DEVICE_ID
 #define TOPIC_STATUS    TOPIC_PREFIX "/status"
 #define TOPIC_HEALTH    TOPIC_PREFIX "/health"
+#define TOPIC_STATE     TOPIC_PREFIX "/state"
+#define TOPIC_METRICS   TOPIC_PREFIX "/metrics"
+#define TOPIC_DIAGNOSTICS TOPIC_PREFIX "/diagnostics"
 #define TOPIC_COMMAND   TOPIC_PREFIX "/cmd/#"
 #define TOPIC_CMD_RESTART   TOPIC_PREFIX "/cmd/restart"
 #define TOPIC_CMD_CALIBRATE TOPIC_PREFIX "/cmd/calibrate"
-
-/* Per-sensor state topics */
-#define TOPIC_SENSOR_PREFIX   TOPIC_PREFIX "/sensor"
-#define TOPIC_SENSOR_MCU      TOPIC_SENSOR_PREFIX "/mcu"
-#define TOPIC_SENSOR_SHT41    TOPIC_SENSOR_PREFIX "/sht41"
-#define TOPIC_SENSOR_BMP280   TOPIC_SENSOR_PREFIX "/bmp280"
-#define TOPIC_SENSOR_SGP41    TOPIC_SENSOR_PREFIX "/sgp41"
-#define TOPIC_SENSOR_PMS5003  TOPIC_SENSOR_PREFIX "/pms5003"
-#define TOPIC_SENSOR_S8       TOPIC_SENSOR_PREFIX "/s8"
-#define TOPIC_SENSOR_DERIVED  TOPIC_SENSOR_PREFIX "/derived"
 
 /* Forward declarations */
 static void mqtt_publish_ha_discovery(void);
 static void mqtt_handle_command(const char *topic, const char *data, int data_len);
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
 static void mqtt_health_timer_callback(void* arg);
-static void mqtt_event_task(void *arg);
+static void mqtt_state_timer_callback(void *arg);
+static void mqtt_metrics_timer_callback(void *arg);
+#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
+static void mqtt_diagnostics_timer_callback(void *arg);
+#endif
+/* Public publish functions declared in mqtt_manager.h */
 
 /* Helper: publish a single HA sensor discovery config */
 static void ha_publish_sensor_config(cJSON *device, const char *unique_suffix, const char *name,
@@ -77,7 +79,10 @@ static void ha_publish_sensor_config(cJSON *device, const char *unique_suffix, c
     if (unit) cJSON_AddStringToObject(config, "unit_of_measurement", unit);
     if (icon) cJSON_AddStringToObject(config, "icon", icon);
     if (value_template) { cJSON_AddStringToObject(config, "value_template", value_template); }
-    cJSON_AddStringToObject(config, "state_class", "measurement");
+    /* Only add state_class for numeric sensors (those with device_class or unit) */
+    if (device_class || unit) {
+        cJSON_AddStringToObject(config, "state_class", "measurement");
+    }
     char unique_id[64];
     snprintf(unique_id, sizeof(unique_id), "%s_%s", CONFIG_IAQ_DEVICE_ID, unique_suffix);
     cJSON_AddStringToObject(config, "unique_id", unique_id);
@@ -271,21 +276,58 @@ esp_err_t mqtt_manager_init(iaq_system_context_t *ctx)
     }
     ESP_LOGI(TAG, "MQTT health timer started (%d ms interval)", STATUS_PUBLISH_INTERVAL_MS);
 
-    /* Create MQTT event monitoring task */
-    BaseType_t task_ret = xTaskCreatePinnedToCore(
-        mqtt_event_task,
-        "mqtt_event",
-        TASK_STACK_NETWORK_MANAGER,
-        s_system_ctx,
-        TASK_PRIORITY_NETWORK_MANAGER,
-        &s_event_task_handle,
-        TASK_CORE_NETWORK_MANAGER
-    );
-    if (task_ret != pdPASS) {
-        ESP_LOGE(TAG, "Failed to create MQTT event task");
-        return ESP_FAIL;
+    /* Create MQTT state publishing timer (default 30s, configurable via Kconfig) */
+    const esp_timer_create_args_t state_timer_args = {
+        .callback = &mqtt_state_timer_callback,
+        .name = "mqtt_state"
+    };
+    ret = esp_timer_create(&state_timer_args, &s_state_timer);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create state timer: %s", esp_err_to_name(ret));
+        return ret;
     }
-    ESP_LOGI(TAG, "MQTT event task created");
+    ret = esp_timer_start_periodic(s_state_timer, CONFIG_MQTT_STATE_PUBLISH_INTERVAL_SEC * 1000000);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start state timer: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "MQTT state timer started (%d s interval)", CONFIG_MQTT_STATE_PUBLISH_INTERVAL_SEC);
+
+    /* Create MQTT metrics publishing timer (default 30s, configurable via Kconfig) */
+    const esp_timer_create_args_t metrics_timer_args = {
+        .callback = &mqtt_metrics_timer_callback,
+        .name = "mqtt_metrics"
+    };
+    ret = esp_timer_create(&metrics_timer_args, &s_metrics_timer);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create metrics timer: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ret = esp_timer_start_periodic(s_metrics_timer, CONFIG_MQTT_METRICS_PUBLISH_INTERVAL_SEC * 1000000);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start metrics timer: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "MQTT metrics timer started (%d s interval)", CONFIG_MQTT_METRICS_PUBLISH_INTERVAL_SEC);
+
+#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
+    /* Create MQTT diagnostics publishing timer (default 5 min, only if diagnostics enabled) */
+    const esp_timer_create_args_t diagnostics_timer_args = {
+        .callback = &mqtt_diagnostics_timer_callback,
+        .name = "mqtt_diagnostics"
+    };
+    ret = esp_timer_create(&diagnostics_timer_args, &s_diagnostics_timer);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create diagnostics timer: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ret = esp_timer_start_periodic(s_diagnostics_timer, CONFIG_MQTT_DIAGNOSTICS_PUBLISH_INTERVAL_SEC * 1000000);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start diagnostics timer: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "MQTT diagnostics timer started (%d s interval)", CONFIG_MQTT_DIAGNOSTICS_PUBLISH_INTERVAL_SEC);
+#endif
 
     s_initialized = true;
     ESP_LOGI(TAG, "MQTT client initialized successfully (MQTT 5.0)");
@@ -338,17 +380,41 @@ static void mqtt_publish_ha_discovery(void)
     snprintf(sw_version, sizeof(sw_version), "%d.%d.%d", IAQ_VERSION_MAJOR, IAQ_VERSION_MINOR, IAQ_VERSION_PATCH);
     cJSON_AddStringToObject(device, "sw_version", sw_version);
 
-    ha_publish_sensor_config(device, "temperature",     "Temperature",     TOPIC_SENSOR_SHT41,  "temperature",     "\xC2\xB0""C",    "{{ value_json.temperature }}",     NULL);
-    ha_publish_sensor_config(device, "humidity",        "Humidity",        TOPIC_SENSOR_SHT41,  "humidity",        "%",     "{{ value_json.humidity }}",        NULL);
-    ha_publish_sensor_config(device, "pressure",        "Pressure",        TOPIC_SENSOR_BMP280, "pressure",        "hPa",   "{{ value_json.pressure }}",        NULL);
-    ha_publish_sensor_config(device, "co2",             "CO2",             TOPIC_SENSOR_S8,     "carbon_dioxide",  "ppm",   "{{ value_json.co2 }}",             NULL);
-    ha_publish_sensor_config(device, "pm1",         "PM1.0",       TOPIC_SENSOR_PMS5003, "pm1",  "\xC2\xB5g/m\xC2\xB3", "{{ value_json.pm1_0 }}", NULL);
-    ha_publish_sensor_config(device, "pm25",        "PM2.5",       TOPIC_SENSOR_PMS5003, "pm25", "\xC2\xB5g/m\xC2\xB3", "{{ value_json.pm2_5 }}", NULL);
-    ha_publish_sensor_config(device, "pm10",        "PM10",        TOPIC_SENSOR_PMS5003, "pm10", "\xC2\xB5g/m\xC2\xB3", "{{ value_json.pm10 }}",  NULL);
-    ha_publish_sensor_config(device, "voc",             "VOC Index",       TOPIC_SENSOR_SGP41,  NULL,               NULL,     "{{ value_json.voc_index }}",       "mdi:chemical-weapon");
-    ha_publish_sensor_config(device, "nox",             "NOx Index",       TOPIC_SENSOR_SGP41,  NULL,               NULL,     "{{ value_json.nox_index }}",       "mdi:smog");
-    ha_publish_sensor_config(device, "aqi",             "AQI",             TOPIC_SENSOR_DERIVED,"aqi",             NULL,     "{{ value_json.aqi }}",             NULL);
-    ha_publish_sensor_config(device, "mcu_temp", "MCU Temperature", TOPIC_SENSOR_MCU,    "temperature",     "\xC2\xB0""C",    "{{ value_json.mcu_temperature }}", NULL);
+    /* Compensated sensor values from /state topic */
+    ha_publish_sensor_config(device, "temperature",     "Temperature",     TOPIC_STATE,  "temperature",     "\xC2\xB0""C",    "{{ value_json.temp_c }}",     NULL);
+    ha_publish_sensor_config(device, "humidity",        "Humidity",        TOPIC_STATE,  "humidity",        "%",     "{{ value_json.rh_pct }}",        NULL);
+    ha_publish_sensor_config(device, "pressure",        "Pressure",        TOPIC_STATE, "pressure",        "hPa",   "{{ value_json.pressure_hpa }}",        NULL);
+    ha_publish_sensor_config(device, "co2",             "CO2",             TOPIC_STATE,     "carbon_dioxide",  "ppm",   "{{ value_json.co2_ppm }}",             NULL);
+#ifdef CONFIG_MQTT_PUBLISH_PM1
+    ha_publish_sensor_config(device, "pm1",         "PM1.0",       TOPIC_STATE, "pm1",  "\xC2\xB5g/m\xC2\xB3", "{{ value_json.pm1_ugm3 }}", NULL);
+#endif
+    ha_publish_sensor_config(device, "pm25",        "PM2.5",       TOPIC_STATE, "pm25", "\xC2\xB5g/m\xC2\xB3", "{{ value_json.pm25_ugm3 }}", NULL);
+    ha_publish_sensor_config(device, "pm10",        "PM10",        TOPIC_STATE, "pm10", "\xC2\xB5g/m\xC2\xB3", "{{ value_json.pm10_ugm3 }}",  NULL);
+    ha_publish_sensor_config(device, "voc",             "VOC Index",       TOPIC_STATE,  NULL,               NULL,     "{{ value_json.voc_index }}",       "mdi:chemical-weapon");
+    ha_publish_sensor_config(device, "nox",             "NOx Index",       TOPIC_STATE,  NULL,               NULL,     "{{ value_json.nox_index }}",       "mdi:smog");
+    ha_publish_sensor_config(device, "mcu_temp", "MCU Temperature", TOPIC_STATE,    "temperature",     "\xC2\xB0""C",    "{{ value_json.mcu_temp_c }}", NULL);
+
+    /* Basic metrics from /state topic */
+    ha_publish_sensor_config(device, "aqi",             "AQI",             TOPIC_STATE,"aqi",             NULL,     "{{ value_json.aqi }}",             NULL);
+    ha_publish_sensor_config(device, "comfort_score", "Comfort Score", TOPIC_STATE, NULL, NULL, "{{ value_json.comfort_score }}", "mdi:thermometer-lines");
+
+    /* Detailed metrics from /metrics topic */
+    ha_publish_sensor_config(device, "aqi_category", "AQI Category", TOPIC_METRICS, NULL, NULL, "{{ value_json.aqi.category }}", "mdi:air-filter");
+    ha_publish_sensor_config(device, "aqi_dominant", "AQI Dominant Pollutant", TOPIC_METRICS, NULL, NULL, "{{ value_json.aqi.dominant }}", "mdi:molecule");
+    ha_publish_sensor_config(device, "dew_point", "Dew Point", TOPIC_METRICS, "temperature", "\xC2\xB0""C", "{{ value_json.comfort.dew_point_c }}", NULL);
+    ha_publish_sensor_config(device, "abs_humidity", "Absolute Humidity", TOPIC_METRICS, "absolute_humidity", "g/m\xC2\xB3", "{{ value_json.comfort.abs_humidity_gm3 }}", NULL);
+    ha_publish_sensor_config(device, "heat_index", "Heat Index", TOPIC_METRICS, "temperature", "\xC2\xB0""C", "{{ value_json.comfort.heat_index_c }}", "mdi:thermometer-alert");
+    ha_publish_sensor_config(device, "comfort_category", "Comfort Category", TOPIC_METRICS, NULL, NULL, "{{ value_json.comfort.category }}", "mdi:sofa");
+    ha_publish_sensor_config(device, "co2_score", "CO2 Score", TOPIC_METRICS, NULL, NULL, "{{ value_json.co2_score }}", "mdi:air-purifier");
+    ha_publish_sensor_config(device, "voc_category", "VOC Category", TOPIC_METRICS, NULL, NULL, "{{ value_json.voc_category }}", "mdi:chemical-weapon");
+    ha_publish_sensor_config(device, "nox_category", "NOx Category", TOPIC_METRICS, NULL, NULL, "{{ value_json.nox_category }}", "mdi:smog");
+    ha_publish_sensor_config(device, "overall_iaq_score", "Overall IAQ Score", TOPIC_METRICS, NULL, NULL, "{{ value_json.overall_iaq_score }}", "mdi:air-filter");
+    ha_publish_sensor_config(device, "mold_risk", "Mold Risk Score", TOPIC_METRICS, NULL, NULL, "{{ value_json.mold_risk.score }}", "mdi:water-percent");
+    ha_publish_sensor_config(device, "mold_category", "Mold Risk Category", TOPIC_METRICS, NULL, NULL, "{{ value_json.mold_risk.category }}", "mdi:water-alert");
+    ha_publish_sensor_config(device, "pressure_trend", "Pressure Trend", TOPIC_METRICS, NULL, NULL, "{{ value_json.pressure.trend }}", "mdi:trending-up");
+    ha_publish_sensor_config(device, "pressure_delta_3hr", "Pressure Change (3hr)", TOPIC_METRICS, "pressure", "hPa", "{{ value_json.pressure.delta_3hr_hpa }}", NULL);
+    ha_publish_sensor_config(device, "co2_rate", "CO2 Rate", TOPIC_METRICS, NULL, "ppm/hr", "{{ value_json.co2_rate_ppm_hr }}", "mdi:trending-up");
+    ha_publish_sensor_config(device, "pm25_spike", "PM2.5 Spike Detected", TOPIC_METRICS, NULL, NULL, "{{ value_json.pm25_spike_detected }}", "mdi:alert");
 
     cJSON_Delete(device);
     ESP_LOGI(TAG, "Home Assistant discovery announced");
@@ -422,106 +488,215 @@ static esp_err_t publish_json(const char *topic, cJSON *obj)
     return ESP_OK;
 }
 
-esp_err_t mqtt_publish_sensor_mcu(const iaq_data_t *data)
+/**
+ * Publish unified /state topic with compensated (fused) sensor values.
+ * This is the primary telemetry topic - publishes what users should see.
+ */
+esp_err_t mqtt_publish_state(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
+
     cJSON *root = cJSON_CreateObject();
+
+    /* Fused (compensated) sensor values */
+    if (!isnan(data->fused.temp_c)) {
+        cJSON_AddNumberToObject(root, "temp_c", round(data->fused.temp_c * 10.0) / 10.0);
+    } else {
+        cJSON_AddNullToObject(root, "temp_c");
+    }
+
+    if (!isnan(data->fused.rh_pct)) {
+        cJSON_AddNumberToObject(root, "rh_pct", round(data->fused.rh_pct * 10.0) / 10.0);
+    } else {
+        cJSON_AddNullToObject(root, "rh_pct");
+    }
+
+    if (!isnan(data->fused.pressure_pa)) {
+        cJSON_AddNumberToObject(root, "pressure_hpa", round(data->fused.pressure_pa / 10.0) / 10.0);  /* Pa -> hPa */
+    } else {
+        cJSON_AddNullToObject(root, "pressure_hpa");
+    }
+
+    if (!isnan(data->fused.pm25_ugm3)) {
+        cJSON_AddNumberToObject(root, "pm25_ugm3", round(data->fused.pm25_ugm3 * 10.0) / 10.0);
+    } else {
+        cJSON_AddNullToObject(root, "pm25_ugm3");
+    }
+
+    if (!isnan(data->fused.pm10_ugm3)) {
+        cJSON_AddNumberToObject(root, "pm10_ugm3", round(data->fused.pm10_ugm3 * 10.0) / 10.0);
+    } else {
+        cJSON_AddNullToObject(root, "pm10_ugm3");
+    }
+
+#ifdef CONFIG_MQTT_PUBLISH_PM1
+    if (!isnan(data->fused.pm1_ugm3)) {
+        cJSON_AddNumberToObject(root, "pm1_ugm3", round(data->fused.pm1_ugm3 * 10.0) / 10.0);
+    } else {
+        cJSON_AddNullToObject(root, "pm1_ugm3");
+    }
+#endif
+
+    if (!isnan(data->fused.co2_ppm)) {
+        cJSON_AddNumberToObject(root, "co2_ppm", round(data->fused.co2_ppm));
+    } else {
+        cJSON_AddNullToObject(root, "co2_ppm");
+    }
+
+    /* VOC/NOx indices (not compensated, use raw) */
+    if (data->voc_index != UINT16_MAX) {
+        cJSON_AddNumberToObject(root, "voc_index", data->voc_index);
+    } else {
+        cJSON_AddNullToObject(root, "voc_index");
+    }
+
+    if (data->nox_index != UINT16_MAX) {
+        cJSON_AddNumberToObject(root, "nox_index", data->nox_index);
+    } else {
+        cJSON_AddNullToObject(root, "nox_index");
+    }
+
+    /* MCU temperature (not compensated) */
     if (!isnan(data->mcu_temperature)) {
-        double t = round((double)data->mcu_temperature * 100.0) / 100.0;
-        cJSON_AddNumberToObject(root, "mcu_temperature", t);
+        cJSON_AddNumberToObject(root, "mcu_temp_c", round(data->mcu_temperature * 10.0) / 10.0);
     } else {
-        cJSON_AddNullToObject(root, "mcu_temperature");
+        cJSON_AddNullToObject(root, "mcu_temp_c");
     }
-    return publish_json(TOPIC_SENSOR_MCU, root);
+
+    /* Basic metrics (for quick overview) */
+    if (data->metrics.aqi_value != UINT16_MAX) {
+        cJSON_AddNumberToObject(root, "aqi", data->metrics.aqi_value);
+    } else {
+        cJSON_AddNullToObject(root, "aqi");
+    }
+
+    if (data->metrics.comfort_score > 0) {
+        cJSON_AddNumberToObject(root, "comfort_score", data->metrics.comfort_score);
+    } else {
+        cJSON_AddNullToObject(root, "comfort_score");
+    }
+
+    return publish_json(TOPIC_STATE, root);
 }
 
-esp_err_t mqtt_publish_sensor_sht41(const iaq_data_t *data)
+/**
+ * Publish detailed /metrics topic with all derived calculations.
+ * This provides full breakdown of AQI, comfort, trends, and scores.
+ */
+esp_err_t mqtt_publish_metrics(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
+
     cJSON *root = cJSON_CreateObject();
-    if (!isnan(data->temperature)) {
-        double t = round((double)data->temperature * 100.0) / 100.0;
-        cJSON_AddNumberToObject(root, "temperature", t);
-    } else {
-        cJSON_AddNullToObject(root, "temperature");
+
+    /* AQI breakdown */
+    cJSON *aqi = cJSON_CreateObject();
+    if (data->metrics.aqi_value != UINT16_MAX) {
+        cJSON_AddNumberToObject(aqi, "value", data->metrics.aqi_value);
+        cJSON_AddStringToObject(aqi, "category", data->metrics.aqi_category);
+        cJSON_AddStringToObject(aqi, "dominant", data->metrics.aqi_dominant);
+        if (!isnan(data->metrics.aqi_pm25_subindex)) {
+            cJSON_AddNumberToObject(aqi, "pm25_subindex", round(data->metrics.aqi_pm25_subindex * 10.0) / 10.0);
+        }
+        if (!isnan(data->metrics.aqi_pm10_subindex)) {
+            cJSON_AddNumberToObject(aqi, "pm10_subindex", round(data->metrics.aqi_pm10_subindex * 10.0) / 10.0);
+        }
     }
-    if (!isnan(data->humidity)) {
-        double h = round((double)data->humidity * 100.0) / 100.0;
-        cJSON_AddNumberToObject(root, "humidity", h);
-    } else {
-        cJSON_AddNullToObject(root, "humidity");
+    cJSON_AddItemToObject(root, "aqi", aqi);
+
+    /* Comfort breakdown */
+    cJSON *comfort = cJSON_CreateObject();
+    cJSON_AddNumberToObject(comfort, "score", data->metrics.comfort_score);
+    cJSON_AddStringToObject(comfort, "category", data->metrics.comfort_category);
+    if (!isnan(data->metrics.dew_point_c)) {
+        cJSON_AddNumberToObject(comfort, "dew_point_c", round(data->metrics.dew_point_c * 10.0) / 10.0);
     }
-    return publish_json(TOPIC_SENSOR_SHT41, root);
+    if (!isnan(data->metrics.abs_humidity_gm3)) {
+        cJSON_AddNumberToObject(comfort, "abs_humidity_gm3", round(data->metrics.abs_humidity_gm3 * 10.0) / 10.0);
+    }
+    if (!isnan(data->metrics.heat_index_c)) {
+        cJSON_AddNumberToObject(comfort, "heat_index_c", round(data->metrics.heat_index_c * 10.0) / 10.0);
+    }
+    cJSON_AddItemToObject(root, "comfort", comfort);
+
+    /* Pressure trend */
+    cJSON *pressure = cJSON_CreateObject();
+    const char *trend_str = "unknown";
+    switch (data->metrics.pressure_trend) {
+        case PRESSURE_TREND_RISING:  trend_str = "rising"; break;
+        case PRESSURE_TREND_STABLE:  trend_str = "stable"; break;
+        case PRESSURE_TREND_FALLING: trend_str = "falling"; break;
+        default: break;
+    }
+    cJSON_AddStringToObject(pressure, "trend", trend_str);
+    if (!isnan(data->metrics.pressure_delta_3hr_hpa)) {
+        cJSON_AddNumberToObject(pressure, "delta_3hr_hpa", round(data->metrics.pressure_delta_3hr_hpa * 100.0) / 100.0);
+    }
+    cJSON_AddItemToObject(root, "pressure", pressure);
+
+    /* Air quality scores */
+    cJSON_AddNumberToObject(root, "co2_score", data->metrics.co2_score);
+    cJSON_AddStringToObject(root, "voc_category", data->metrics.voc_category);
+    cJSON_AddStringToObject(root, "nox_category", data->metrics.nox_category);
+    cJSON_AddNumberToObject(root, "overall_iaq_score", data->metrics.overall_iaq_score);
+
+    /* Mold risk */
+    cJSON *mold = cJSON_CreateObject();
+    cJSON_AddNumberToObject(mold, "score", data->metrics.mold_risk_score);
+    cJSON_AddStringToObject(mold, "category", data->metrics.mold_risk_category);
+    cJSON_AddItemToObject(root, "mold_risk", mold);
+
+    /* Trends */
+    if (!isnan(data->metrics.co2_rate_ppm_hr)) {
+        cJSON_AddNumberToObject(root, "co2_rate_ppm_hr", round(data->metrics.co2_rate_ppm_hr * 10.0) / 10.0);
+    }
+    cJSON_AddBoolToObject(root, "pm25_spike_detected", data->metrics.pm25_spike_detected);
+
+    return publish_json(TOPIC_METRICS, root);
 }
 
-esp_err_t mqtt_publish_sensor_bmp280(const iaq_data_t *data)
+#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
+/**
+ * Publish optional /diagnostics topic with raw values and fusion debug info.
+ * Only compiled if CONFIG_MQTT_PUBLISH_DIAGNOSTICS is enabled.
+ */
+esp_err_t mqtt_publish_diagnostics(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
-    cJSON *root = cJSON_CreateObject();
-    if (!isnan(data->pressure)) {
-        double p = round((double)data->pressure * 100.0) / 100.0;
-        cJSON_AddNumberToObject(root, "pressure", p);
-    } else {
-        cJSON_AddNullToObject(root, "pressure");
-    }
-    return publish_json(TOPIC_SENSOR_BMP280, root);
-}
 
-esp_err_t mqtt_publish_sensor_sgp41(const iaq_data_t *data)
-{
-    if (!s_mqtt_connected || !data) return ESP_FAIL;
     cJSON *root = cJSON_CreateObject();
-    if (data->voc_index != UINT16_MAX) cJSON_AddNumberToObject(root, "voc_index", data->voc_index); else cJSON_AddNullToObject(root, "voc_index");
-    if (data->nox_index != UINT16_MAX) cJSON_AddNumberToObject(root, "nox_index", data->nox_index); else cJSON_AddNullToObject(root, "nox_index");
-    return publish_json(TOPIC_SENSOR_SGP41, root);
-}
 
-esp_err_t mqtt_publish_sensor_pms5003(const iaq_data_t *data)
-{
-    if (!s_mqtt_connected || !data) return ESP_FAIL;
-    cJSON *root = cJSON_CreateObject();
-    if (!isnan(data->pm1_0)) {
-        double v = round((double)data->pm1_0 * 100.0) / 100.0;
-        cJSON_AddNumberToObject(root, "pm1_0", v);
-    } else {
-        cJSON_AddNullToObject(root, "pm1_0");
-    }
-    if (!isnan(data->pm2_5)) {
-        double v = round((double)data->pm2_5 * 100.0) / 100.0;
-        cJSON_AddNumberToObject(root, "pm2_5", v);
-    } else {
-        cJSON_AddNullToObject(root, "pm2_5");
-    }
-    if (!isnan(data->pm10)) {
-        double v = round((double)data->pm10 * 100.0) / 100.0;
-        cJSON_AddNumberToObject(root, "pm10", v);
-    } else {
-        cJSON_AddNullToObject(root, "pm10");
-    }
-    return publish_json(TOPIC_SENSOR_PMS5003, root);
-}
+    /* Raw (uncompensated) sensor values */
+    cJSON *raw = cJSON_CreateObject();
+    if (!isnan(data->temperature)) cJSON_AddNumberToObject(raw, "temp_c", round(data->temperature * 10.0) / 10.0);
+    if (!isnan(data->humidity)) cJSON_AddNumberToObject(raw, "rh_pct", round(data->humidity * 10.0) / 10.0);
+    if (!isnan(data->pressure)) cJSON_AddNumberToObject(raw, "pressure_hpa", round(data->pressure * 10.0) / 10.0);
+    if (!isnan(data->pm1_0)) cJSON_AddNumberToObject(raw, "pm1_ugm3", round(data->pm1_0 * 10.0) / 10.0);
+    if (!isnan(data->pm2_5)) cJSON_AddNumberToObject(raw, "pm25_ugm3", round(data->pm2_5 * 10.0) / 10.0);
+    if (!isnan(data->pm10)) cJSON_AddNumberToObject(raw, "pm10_ugm3", round(data->pm10 * 10.0) / 10.0);
+    if (!isnan(data->co2_ppm)) cJSON_AddNumberToObject(raw, "co2_ppm", round(data->co2_ppm));
+    cJSON_AddItemToObject(root, "raw", raw);
 
-esp_err_t mqtt_publish_sensor_s8(const iaq_data_t *data)
-{
-    if (!s_mqtt_connected || !data) return ESP_FAIL;
-    cJSON *root = cJSON_CreateObject();
-    if (!isnan(data->co2_ppm)) {
-        double c = round((double)data->co2_ppm * 100.0) / 100.0;
-        cJSON_AddNumberToObject(root, "co2", c);
-    } else {
-        cJSON_AddNullToObject(root, "co2");
+    /* Fusion diagnostics */
+    cJSON *fusion = cJSON_CreateObject();
+    cJSON_AddNumberToObject(fusion, "pm_rh_factor", round(data->fusion_diag.pm_rh_factor * 1000.0) / 1000.0);
+    cJSON_AddNumberToObject(fusion, "co2_pressure_offset_ppm", round(data->fusion_diag.co2_pressure_offset_ppm * 10.0) / 10.0);
+    cJSON_AddNumberToObject(fusion, "temp_self_heat_offset_c", round(data->fusion_diag.temp_self_heat_offset_c * 100.0) / 100.0);
+    cJSON_AddNumberToObject(fusion, "pm25_quality", data->fusion_diag.pm25_quality);
+    if (!isnan(data->fusion_diag.pm1_pm25_ratio)) {
+        cJSON_AddNumberToObject(fusion, "pm1_pm25_ratio", round(data->fusion_diag.pm1_pm25_ratio * 100.0) / 100.0);
     }
-    return publish_json(TOPIC_SENSOR_S8, root);
-}
+    cJSON_AddItemToObject(root, "fusion", fusion);
 
-esp_err_t mqtt_publish_sensor_derived(const iaq_data_t *data)
-{
-    if (!s_mqtt_connected || !data) return ESP_FAIL;
-    cJSON *root = cJSON_CreateObject();
-    if (data->aqi != UINT16_MAX) cJSON_AddNumberToObject(root, "aqi", data->aqi); else cJSON_AddNullToObject(root, "aqi");
-    if (data->comfort) cJSON_AddStringToObject(root, "comfort", data->comfort); else cJSON_AddNullToObject(root, "comfort");
-    return publish_json(TOPIC_SENSOR_DERIVED, root);
+    /* ABC diagnostics */
+    cJSON *abc = cJSON_CreateObject();
+    cJSON_AddNumberToObject(abc, "baseline_ppm", data->fusion_diag.co2_abc_baseline_ppm);
+    cJSON_AddNumberToObject(abc, "confidence_pct", data->fusion_diag.co2_abc_confidence_pct);
+    cJSON_AddItemToObject(root, "abc", abc);
+
+    return publish_json(TOPIC_DIAGNOSTICS, root);
 }
+#endif /* CONFIG_MQTT_PUBLISH_DIAGNOSTICS */
 
 bool mqtt_manager_is_connected(void)
 {
@@ -662,50 +837,72 @@ static void mqtt_health_timer_callback(void* arg)
 }
 
 /**
- * MQTT event monitoring task.
- * Monitors sensor update events and publishes sensor data when available.
+ * MQTT state publishing timer callback.
+ * Publishes unified /state topic with compensated (fused) sensor values.
+ * Runs at configurable interval (default 30s).
  */
-static void mqtt_event_task(void *arg)
+static void mqtt_state_timer_callback(void *arg)
 {
-    iaq_system_context_t *ctx = (iaq_system_context_t *)arg;
-    ESP_LOGI(TAG, "MQTT event task started");
+    (void)arg;
 
-    while (1) {
-        /* Wait for any per-sensor update bits */
-        const EventBits_t sensor_bits_mask =
-            SENSOR_UPDATED_MCU_BIT |
-            SENSOR_UPDATED_SHT41_BIT |
-            SENSOR_UPDATED_BMP280_BIT |
-            SENSOR_UPDATED_SGP41_BIT |
-            SENSOR_UPDATED_PMS5003_BIT |
-            SENSOR_UPDATED_S8_BIT;
-
-        EventBits_t bits = xEventGroupWaitBits(
-            ctx->event_group,
-            sensor_bits_mask,
-            pdTRUE,   /* Clear bits on exit */
-            pdFALSE,  /* Wait for any bit */
-            pdMS_TO_TICKS(5000)  /* Timeout after 5 seconds */
-        );
-
-        if ((bits & sensor_bits_mask) && mqtt_manager_is_connected()) {
-            /* Snapshot data, release lock, then publish */
-            iaq_data_t snapshot;
-            IAQ_DATA_WITH_LOCK() {
-                snapshot = *iaq_data_get();
-            }
-            if (bits & SENSOR_UPDATED_MCU_BIT)     (void)mqtt_publish_sensor_mcu(&snapshot);
-            if (bits & SENSOR_UPDATED_SHT41_BIT)   (void)mqtt_publish_sensor_sht41(&snapshot);
-            if (bits & SENSOR_UPDATED_BMP280_BIT)  (void)mqtt_publish_sensor_bmp280(&snapshot);
-            if (bits & SENSOR_UPDATED_SGP41_BIT)   (void)mqtt_publish_sensor_sgp41(&snapshot);
-            if (bits & SENSOR_UPDATED_PMS5003_BIT) (void)mqtt_publish_sensor_pms5003(&snapshot);
-            if (bits & SENSOR_UPDATED_S8_BIT)      (void)mqtt_publish_sensor_s8(&snapshot);
-            /* Derived metrics may change with any sensor update */
-            (void)mqtt_publish_sensor_derived(&snapshot);
-            ESP_LOGD(TAG, "Published per-sensor updates to MQTT");
-        }
+    if (!mqtt_manager_is_connected()) {
+        return;
     }
+
+    /* Snapshot data and publish */
+    iaq_data_t snapshot;
+    IAQ_DATA_WITH_LOCK() {
+        snapshot = *iaq_data_get();
+    }
+
+    mqtt_publish_state(&snapshot);
 }
+
+/**
+ * MQTT metrics publishing timer callback.
+ * Publishes detailed /metrics topic with derived calculations (AQI, comfort, trends).
+ * Runs at configurable interval (default 30s).
+ */
+static void mqtt_metrics_timer_callback(void *arg)
+{
+    (void)arg;
+
+    if (!mqtt_manager_is_connected()) {
+        return;
+    }
+
+    /* Snapshot data and publish */
+    iaq_data_t snapshot;
+    IAQ_DATA_WITH_LOCK() {
+        snapshot = *iaq_data_get();
+    }
+
+    mqtt_publish_metrics(&snapshot);
+}
+
+#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
+/**
+ * MQTT diagnostics publishing timer callback.
+ * Publishes optional /diagnostics topic with raw values and fusion debug info.
+ * Runs at configurable interval (default 5 minutes).
+ */
+static void mqtt_diagnostics_timer_callback(void *arg)
+{
+    (void)arg;
+
+    if (!mqtt_manager_is_connected()) {
+        return;
+    }
+
+    /* Snapshot data and publish */
+    iaq_data_t snapshot;
+    IAQ_DATA_WITH_LOCK() {
+        snapshot = *iaq_data_get();
+    }
+
+    mqtt_publish_diagnostics(&snapshot);
+}
+#endif /* CONFIG_MQTT_PUBLISH_DIAGNOSTICS */
 
 
 

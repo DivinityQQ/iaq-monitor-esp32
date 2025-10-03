@@ -607,6 +607,13 @@ CONFIG_IAQ_DEVICE_ID="iaq_livingroom"
 CONFIG_IAQ_MQTT_QOS=1
 CONFIG_IAQ_STATUS_LED_GPIO=48
 CONFIG_IAQ_ENABLE_CONSOLE_COMMANDS=y
+
+#
+# MQTT Publishing Options
+#
+# CONFIG_MQTT_PUBLISH_DIAGNOSTICS is not set
+# CONFIG_MQTT_PUBLISH_PM1 is not set
+# end of MQTT Publishing Options
 # end of IAQ Monitor Configuration
 
 #
@@ -630,7 +637,24 @@ CONFIG_IAQ_WARMUP_PMS5003_MS=30000
 CONFIG_IAQ_WARMUP_S8_MS=20000
 # end of Sensor Warm-up Durations
 
-# CONFIG_IAQ_SIMULATION is not set
+CONFIG_IAQ_SIMULATION=y
+
+#
+# Sensor Fusion
+#
+# CONFIG_FUSION_PM_RH_ENABLE is not set
+# CONFIG_FUSION_CO2_PRESSURE_ENABLE is not set
+CONFIG_FUSION_TEMP_SELF_HEAT_OFFSET_C="0.0"
+# CONFIG_FUSION_CO2_ABC_ENABLE is not set
+# end of Sensor Fusion
+
+#
+# Derived Metrics
+#
+# CONFIG_METRICS_AQI_ENABLE is not set
+# CONFIG_METRICS_COMFORT_ENABLE is not set
+# CONFIG_METRICS_PRESSURE_TREND_ENABLE is not set
+# end of Derived Metrics
 # end of Sensor Coordinator
 
 #

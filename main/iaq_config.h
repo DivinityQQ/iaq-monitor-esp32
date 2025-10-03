@@ -47,17 +47,8 @@
 #define WIFI_CONNECTED_BIT          BIT0
 #define MQTT_CONNECTED_BIT          BIT1
 #define SENSORS_READY_BIT           BIT2
-#define SENSORS_DATA_READY_BIT      BIT3
-#define SENSORS_CALIBRATE_BIT       BIT4
-#define DISPLAY_UPDATE_BIT          BIT5
-
-/* Per-sensor update bits (set when a sensor completes a new reading) */
-#define SENSOR_UPDATED_MCU_BIT       BIT6
-#define SENSOR_UPDATED_SHT41_BIT     BIT7
-#define SENSOR_UPDATED_BMP280_BIT    BIT8
-#define SENSOR_UPDATED_SGP41_BIT     BIT9
-#define SENSOR_UPDATED_PMS5003_BIT   BIT10
-#define SENSOR_UPDATED_S8_BIT        BIT11
+#define SENSORS_CALIBRATE_BIT       BIT3
+#define DISPLAY_UPDATE_BIT          BIT4
 
 /**
  * Status publishing interval (milliseconds)

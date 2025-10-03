@@ -25,7 +25,7 @@ esp_err_t iaq_data_init(void)
         return ESP_FAIL;
     }
 
-    /* Mark no-data for all numeric fields */
+    /* Mark no-data for all numeric fields (RAW sensor values) */
     g_iaq_data.temperature = NAN;
     g_iaq_data.humidity = NAN;
     g_iaq_data.pressure = NAN;
@@ -40,6 +40,46 @@ esp_err_t iaq_data_init(void)
     g_iaq_data.overall_quality = 0xFF;
     g_iaq_data.mcu_temperature = NAN;
     g_iaq_data.comfort = "unknown";
+
+    /* Initialize FUSED (compensated) sensor values */
+    g_iaq_data.fused.temp_c = NAN;
+    g_iaq_data.fused.rh_pct = NAN;
+    g_iaq_data.fused.pressure_pa = NAN;
+    g_iaq_data.fused.pm1_ugm3 = NAN;
+    g_iaq_data.fused.pm25_ugm3 = NAN;
+    g_iaq_data.fused.pm10_ugm3 = NAN;
+    g_iaq_data.fused.co2_ppm = NAN;
+
+    /* Initialize METRICS */
+    g_iaq_data.metrics.aqi_value = UINT16_MAX;
+    g_iaq_data.metrics.aqi_category = "unknown";
+    g_iaq_data.metrics.aqi_dominant = "none";
+    g_iaq_data.metrics.aqi_pm25_subindex = NAN;
+    g_iaq_data.metrics.aqi_pm10_subindex = NAN;
+    g_iaq_data.metrics.dew_point_c = NAN;
+    g_iaq_data.metrics.abs_humidity_gm3 = NAN;  // Tier 1
+    g_iaq_data.metrics.heat_index_c = NAN;
+    g_iaq_data.metrics.comfort_score = 0;
+    g_iaq_data.metrics.comfort_category = "unknown";
+    g_iaq_data.metrics.co2_score = 0;
+    g_iaq_data.metrics.voc_category = "unknown";  // Tier 1
+    g_iaq_data.metrics.nox_category = "unknown";  // Tier 1
+    g_iaq_data.metrics.overall_iaq_score = 0;
+    g_iaq_data.metrics.mold_risk_score = 0;  // Tier 1
+    g_iaq_data.metrics.mold_risk_category = "unknown";  // Tier 1
+    g_iaq_data.metrics.pressure_trend = PRESSURE_TREND_UNKNOWN;
+    g_iaq_data.metrics.pressure_delta_3hr_hpa = NAN;
+    g_iaq_data.metrics.co2_rate_ppm_hr = NAN;  // Tier 1
+    g_iaq_data.metrics.pm25_spike_detected = false;  // Tier 1
+
+    /* Initialize FUSION diagnostics */
+    g_iaq_data.fusion_diag.pm_rh_factor = 1.0f;  // 1.0 = no correction
+    g_iaq_data.fusion_diag.co2_pressure_offset_ppm = 0.0f;
+    g_iaq_data.fusion_diag.temp_self_heat_offset_c = 0.0f;
+    g_iaq_data.fusion_diag.co2_abc_baseline_ppm = 400;  // Typical outdoor baseline
+    g_iaq_data.fusion_diag.co2_abc_confidence_pct = 0;
+    g_iaq_data.fusion_diag.pm25_quality = 100;
+    g_iaq_data.fusion_diag.pm1_pm25_ratio = NAN;
 
     /* Initialize all validity flags to false */
     g_iaq_data.valid.temperature = false;

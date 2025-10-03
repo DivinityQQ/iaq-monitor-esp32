@@ -277,7 +277,7 @@ static int cmd_mqtt_status(int argc, char **argv)
 
 static int cmd_mqtt_publish_test(int argc, char **argv)
 {
-    printf("Publishing test message...\n");
+    printf("Publishing test messages to unified topics...\n");
 
     /* Snapshot data, release lock, then publish */
     iaq_data_t snapshot;
@@ -286,14 +286,25 @@ static int cmd_mqtt_publish_test(int argc, char **argv)
     }
 
     esp_err_t ret = ESP_OK;
-    ret |= mqtt_publish_sensor_mcu(&snapshot);
-    ret |= mqtt_publish_sensor_sht41(&snapshot);
-    ret |= mqtt_publish_sensor_bmp280(&snapshot);
-    ret |= mqtt_publish_sensor_sgp41(&snapshot);
-    ret |= mqtt_publish_sensor_pms5003(&snapshot);
-    ret |= mqtt_publish_sensor_s8(&snapshot);
-    if (ret == ESP_OK) printf("Per-sensor test messages published\n");
-    else printf("Some per-sensor test publishes may have failed\n");
+
+    /* Publish all three unified topics */
+    ret = mqtt_publish_state(&snapshot);
+    if (ret == ESP_OK) printf("  /state published\n");
+    else printf("  /state publish failed\n");
+
+    ret = mqtt_publish_metrics(&snapshot);
+    if (ret == ESP_OK) printf("  /metrics published\n");
+    else printf("  /metrics publish failed\n");
+
+    ret = mqtt_publish_status(&snapshot);
+    if (ret == ESP_OK) printf("  /health published\n");
+    else printf("  /health publish failed\n");
+
+#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
+    ret = mqtt_publish_diagnostics(&snapshot);
+    if (ret == ESP_OK) printf("  /diagnostics published\n");
+    else printf("  /diagnostics publish failed\n");
+#endif
 
     return 0;
 }

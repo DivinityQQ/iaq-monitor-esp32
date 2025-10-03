@@ -23,6 +23,10 @@
 #include "pms5003_driver.h"
 #include "s8_driver.h"
 
+/* Fusion and metrics */
+#include "sensor_fusion.h"
+#include "metrics_calc.h"
+
 static const char *TAG = "SENSOR_COORD";
 
 static iaq_system_context_t *s_system_ctx = NULL;
@@ -82,6 +86,10 @@ static uint32_t s_cadence_ms[SENSOR_ID_MAX] = {0};
 static bool s_cadence_from_nvs[SENSOR_ID_MAX] = {0};
 
 #define NVS_NAMESPACE "sensor_cfg"
+
+/* Periodic timers for fusion and metrics processing */
+static esp_timer_handle_t s_fusion_timer = NULL;
+static esp_timer_handle_t s_metrics_timer = NULL;
 
 static uint32_t load_cadence_ms(const char *key, uint32_t def_ms, bool *from_nvs)
 {
@@ -211,7 +219,6 @@ static esp_err_t read_sensor_mcu(void)
         }
         s_runtime[SENSOR_ID_MCU].last_read_us = esp_timer_get_time();
         s_runtime[SENSOR_ID_MCU].error_count = 0;
-        xEventGroupSetBits(s_system_ctx->event_group, SENSOR_UPDATED_MCU_BIT);
         ESP_LOGD(TAG, "MCU temp: %.1f C", temp_c);
     } else {
         s_runtime[SENSOR_ID_MCU].error_count++;
@@ -244,7 +251,6 @@ static esp_err_t read_sensor_sht41(void)
         }
         s_runtime[SENSOR_ID_SHT41].last_read_us = esp_timer_get_time();
         s_runtime[SENSOR_ID_SHT41].error_count = 0;
-        xEventGroupSetBits(s_system_ctx->event_group, SENSOR_UPDATED_SHT41_BIT);
         ESP_LOGD(TAG, "SHT41: %.1f C, %.1f %%RH", temp_c, humidity_rh);
     } else if (ret != ESP_ERR_NOT_SUPPORTED) {
         s_runtime[SENSOR_ID_SHT41].error_count++;
@@ -275,7 +281,6 @@ static esp_err_t read_sensor_bmp280(void)
         }
         s_runtime[SENSOR_ID_BMP280].last_read_us = esp_timer_get_time();
         s_runtime[SENSOR_ID_BMP280].error_count = 0;
-        xEventGroupSetBits(s_system_ctx->event_group, SENSOR_UPDATED_BMP280_BIT);
         ESP_LOGD(TAG, "BMP280: %.1f hPa, %.1f C", pressure_hpa, temp_c);
     } else if (ret != ESP_ERR_NOT_SUPPORTED) {
         s_runtime[SENSOR_ID_BMP280].error_count++;
@@ -316,7 +321,6 @@ static esp_err_t read_sensor_sgp41(void)
         }
         s_runtime[SENSOR_ID_SGP41].last_read_us = esp_timer_get_time();
         s_runtime[SENSOR_ID_SGP41].error_count = 0;
-        xEventGroupSetBits(s_system_ctx->event_group, SENSOR_UPDATED_SGP41_BIT);
         ESP_LOGD(TAG, "SGP41: VOC=%u, NOx=%u", voc_index, nox_index);
     } else if (ret != ESP_ERR_NOT_SUPPORTED) {
         s_runtime[SENSOR_ID_SGP41].error_count++;
@@ -351,7 +355,6 @@ static esp_err_t read_sensor_pms5003(void)
         }
         s_runtime[SENSOR_ID_PMS5003].last_read_us = esp_timer_get_time();
         s_runtime[SENSOR_ID_PMS5003].error_count = 0;
-        xEventGroupSetBits(s_system_ctx->event_group, SENSOR_UPDATED_PMS5003_BIT);
         ESP_LOGD(TAG, "PMS5003: PM1.0=%.0f, PM2.5=%.0f, PM10=%.0f ug/m3", pm1_0, pm2_5, pm10);
     } else if (ret != ESP_ERR_NOT_SUPPORTED) {
         s_runtime[SENSOR_ID_PMS5003].error_count++;
@@ -382,7 +385,6 @@ static esp_err_t read_sensor_s8(void)
         }
         s_runtime[SENSOR_ID_S8].last_read_us = esp_timer_get_time();
         s_runtime[SENSOR_ID_S8].error_count = 0;
-        xEventGroupSetBits(s_system_ctx->event_group, SENSOR_UPDATED_S8_BIT);
         ESP_LOGD(TAG, "S8 CO2: %.0f ppm", co2_ppm);
     } else if (ret != ESP_ERR_NOT_SUPPORTED) {
         s_runtime[SENSOR_ID_S8].error_count++;
@@ -393,6 +395,31 @@ static esp_err_t read_sensor_s8(void)
     }
 
     return ret;
+}
+
+/**
+ * Fusion timer callback (runs at 1 Hz).
+ * Applies cross-sensor compensations to raw sensor data.
+ */
+static void fusion_timer_callback(void *arg)
+{
+    IAQ_DATA_WITH_LOCK() {
+        iaq_data_t *data = iaq_data_get();
+        fusion_apply(data);
+    }
+}
+
+/**
+ * Metrics timer callback (runs at 0.2 Hz / every 5 seconds).
+ * Calculates all derived metrics (AQI, comfort, trends).
+ * Note: MQTT publishing is now independent (timer-based), no event signaling needed.
+ */
+static void metrics_timer_callback(void *arg)
+{
+    IAQ_DATA_WITH_LOCK() {
+        iaq_data_t *data = iaq_data_get();
+        metrics_calculate_all(data);
+    }
 }
 
 /**
@@ -541,9 +568,11 @@ static void sensor_coordinator_task(void *arg)
                     default: break;
                 }
 
-                /* On successful read, signal DATA_READY */
+                /* On successful read, just update the event bit (fusion/metrics run on timers) */
                 if (read_res == ESP_OK) {
-                    xEventGroupSetBits(s_system_ctx->event_group, SENSORS_DATA_READY_BIT);
+                    /* Note: Fusion runs at 1 Hz via fusion_timer_callback */
+                    /* Note: Metrics run at 0.2 Hz via metrics_timer_callback */
+                    /* SENSORS_DATA_READY_BIT is set by metrics_timer_callback for MQTT publishing */
                 }
 
                 /* Increment from previous due time to maintain cadence without drift */
@@ -672,10 +701,48 @@ esp_err_t sensor_coordinator_init(iaq_system_context_t *ctx)
     /* Initialize schedules and defaults from Kconfig + NVS */
     init_schedule_from_config();
 
-    /* For now, just mark as initialized */
+    /* Initialize sensor fusion subsystem */
+    ret = fusion_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Sensor fusion initialization failed: %s", esp_err_to_name(ret));
+        /* Non-fatal - continue without fusion */
+    }
+
+    /* Initialize metrics calculation subsystem */
+    ret = metrics_init();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Metrics initialization failed: %s", esp_err_to_name(ret));
+        /* Non-fatal - continue without metrics */
+    }
+
+    /* Create periodic timer for fusion (1 Hz) */
+    const esp_timer_create_args_t fusion_timer_args = {
+        .callback = fusion_timer_callback,
+        .name = "fusion"
+    };
+    ret = esp_timer_create(&fusion_timer_args, &s_fusion_timer);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create fusion timer: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
+    /* Create periodic timer for metrics (0.2 Hz / 5 seconds) */
+    const esp_timer_create_args_t metrics_timer_args = {
+        .callback = metrics_timer_callback,
+        .name = "metrics"
+    };
+    ret = esp_timer_create(&metrics_timer_args, &s_metrics_timer);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create metrics timer: %s", esp_err_to_name(ret));
+        esp_timer_delete(s_fusion_timer);
+        s_fusion_timer = NULL;
+        return ret;
+    }
+
+    /* Mark as initialized */
     s_initialized = true;
 
-    ESP_LOGI(TAG, "Sensor coordinator initialized (stub - no sensors yet)");
+    ESP_LOGI(TAG, "Sensor coordinator initialized");
     return ESP_OK;
 }
 
@@ -711,6 +778,26 @@ esp_err_t sensor_coordinator_start(void)
         return ESP_FAIL;
     }
 
+    /* Start fusion timer (1 Hz = 1000000 microseconds) */
+    if (s_fusion_timer) {
+        esp_err_t timer_ret = esp_timer_start_periodic(s_fusion_timer, 1000000);
+        if (timer_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to start fusion timer: %s", esp_err_to_name(timer_ret));
+        } else {
+            ESP_LOGI(TAG, "Fusion timer started (1 Hz)");
+        }
+    }
+
+    /* Start metrics timer (0.2 Hz = 5000000 microseconds) */
+    if (s_metrics_timer) {
+        esp_err_t timer_ret = esp_timer_start_periodic(s_metrics_timer, 5000000);
+        if (timer_ret != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to start metrics timer: %s", esp_err_to_name(timer_ret));
+        } else {
+            ESP_LOGI(TAG, "Metrics timer started (0.2 Hz / 5s)");
+        }
+    }
+
     ESP_LOGD(TAG, "Sensor coordinator task created");
     return ESP_OK;
 }
@@ -723,6 +810,14 @@ esp_err_t sensor_coordinator_stop(void)
 
     ESP_LOGI(TAG, "Stopping sensor coordinator");
     s_running = false;
+
+    /* Stop timers */
+    if (s_fusion_timer) {
+        esp_timer_stop(s_fusion_timer);
+    }
+    if (s_metrics_timer) {
+        esp_timer_stop(s_metrics_timer);
+    }
 
     /* Wait for task to finish */
     vTaskDelay(pdMS_TO_TICKS(100));

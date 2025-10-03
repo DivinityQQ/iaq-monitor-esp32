@@ -57,4 +57,52 @@ menu "IAQ Monitor Configuration"
         help
             Enable runtime console commands for configuration and debugging
 
+    menu "MQTT Publishing Options"
+        config MQTT_STATE_PUBLISH_INTERVAL_SEC
+            int "State publish interval (seconds)"
+            default 30
+            range 5 300
+            help
+                How often to publish compensated sensor data to /state topic.
+                This is the primary telemetry topic with fused (compensated) values.
+                Default: 30 seconds.
+
+        config MQTT_METRICS_PUBLISH_INTERVAL_SEC
+            int "Metrics publish interval (seconds)"
+            default 30
+            range 5 300
+            help
+                How often to publish derived metrics to /metrics topic.
+                Includes AQI breakdown, comfort details, trends, and scores.
+                Default: 30 seconds.
+
+        config MQTT_PUBLISH_DIAGNOSTICS
+            bool "Publish diagnostics topic"
+            default n
+            help
+                Publish detailed diagnostics to iaq/{device}/diagnostics topic.
+                Includes raw sensor values, fusion corrections, and ABC state.
+                Published at lower rate (5 min) to reduce bandwidth.
+                Useful for validation and tuning, not needed for normal operation.
+
+        config MQTT_DIAGNOSTICS_PUBLISH_INTERVAL_SEC
+            int "Diagnostics publish interval (seconds)"
+            default 300
+            range 60 3600
+            depends on MQTT_PUBLISH_DIAGNOSTICS
+            help
+                How often to publish diagnostics data.
+                Default: 300 seconds (5 minutes).
+
+        config MQTT_PUBLISH_PM1
+            bool "Create Home Assistant entity for PM1.0"
+            default n
+            help
+                Publish PM1.0 to HA auto-discovery.
+                Most users only need PM2.5/PM10 for AQI.
+                PM1.0 is still collected and included in diagnostics.
+                Enable for advanced monitoring or sensor validation.
+
+    endmenu
+
 endmenu

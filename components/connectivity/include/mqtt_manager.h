@@ -31,21 +31,43 @@ esp_err_t mqtt_manager_start(void);
 esp_err_t mqtt_manager_stop(void);
 
 /**
- * Publish system status/health data to MQTT.
+ * Publish system status/health data to MQTT (/health topic).
+ * Contains uptime, WiFi RSSI, heap, and per-sensor state/error counts.
  *
  * @param data Pointer to iaq_data structure
  * @return ESP_OK on success, ESP_FAIL if not connected or data is NULL
  */
 esp_err_t mqtt_publish_status(const iaq_data_t *data);
 
-/* Per-sensor publishers (JSON payload per sensor) */
-esp_err_t mqtt_publish_sensor_mcu(const iaq_data_t *data);
-esp_err_t mqtt_publish_sensor_sht41(const iaq_data_t *data);
-esp_err_t mqtt_publish_sensor_bmp280(const iaq_data_t *data);
-esp_err_t mqtt_publish_sensor_sgp41(const iaq_data_t *data);
-esp_err_t mqtt_publish_sensor_pms5003(const iaq_data_t *data);
-esp_err_t mqtt_publish_sensor_s8(const iaq_data_t *data);
-esp_err_t mqtt_publish_sensor_derived(const iaq_data_t *data);
+/**
+ * Publish compensated sensor values to /state topic.
+ * Includes fused (compensated) sensor readings and basic metrics (AQI, comfort score).
+ *
+ * @param data Pointer to iaq_data structure
+ * @return ESP_OK on success, ESP_FAIL if not connected or data is NULL
+ */
+esp_err_t mqtt_publish_state(const iaq_data_t *data);
+
+/**
+ * Publish detailed derived metrics to /metrics topic.
+ * Includes AQI breakdown, comfort details, trends, scores, mold risk.
+ *
+ * @param data Pointer to iaq_data structure
+ * @return ESP_OK on success, ESP_FAIL if not connected or data is NULL
+ */
+esp_err_t mqtt_publish_metrics(const iaq_data_t *data);
+
+#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
+/**
+ * Publish diagnostic data to /diagnostics topic (optional).
+ * Includes raw sensor values and fusion algorithm parameters.
+ * Only available if CONFIG_MQTT_PUBLISH_DIAGNOSTICS is enabled.
+ *
+ * @param data Pointer to iaq_data structure
+ * @return ESP_OK on success, ESP_FAIL if not connected or data is NULL
+ */
+esp_err_t mqtt_publish_diagnostics(const iaq_data_t *data);
+#endif
 
 /**
  * Check if MQTT client is connected to broker.

@@ -8,30 +8,111 @@
 #include "freertos/semphr.h"
 
 /**
+ * Pressure trend classification based on 3-hour change.
+ */
+typedef enum {
+    PRESSURE_TREND_RISING,      // > +threshold hPa/3hr
+    PRESSURE_TREND_STABLE,      // within ±threshold
+    PRESSURE_TREND_FALLING,     // < -threshold hPa/3hr
+    PRESSURE_TREND_UNKNOWN      // insufficient data
+} pressure_trend_t;
+
+/**
+ * Compensated (fused) sensor values after cross-sensor correction.
+ * These are the "clean" values that should be displayed and published.
+ */
+typedef struct {
+    float temp_c;               // Compensated temperature (self-heating offset applied)
+    float rh_pct;               // Compensated relative humidity
+    float pressure_pa;          // Pressure (raw, used as reference for other compensations)
+    float pm1_ugm3;             // PM1.0 (raw, for diagnostics)
+    float pm25_ugm3;            // PM2.5 (RH-corrected)
+    float pm10_ugm3;            // PM10 (RH-corrected)
+    float co2_ppm;              // CO2 (pressure-compensated + ABC)
+} iaq_fused_data_t;
+
+/**
+ * Derived metrics calculated from fused sensor data.
+ */
+typedef struct {
+    /* AQI (EPA) */
+    uint16_t aqi_value;         // 0-500
+    const char* aqi_category;   // "Good", "Moderate", "Unhealthy for Sensitive Groups", etc.
+    const char* aqi_dominant;   // "pm25" or "pm10" (which pollutant drives AQI)
+    float aqi_pm25_subindex;    // PM2.5 contribution to AQI
+    float aqi_pm10_subindex;    // PM10 contribution to AQI
+
+    /* Thermal comfort (Tier 1: added abs_humidity) */
+    float dew_point_c;          // Dew point (Magnus formula)
+    float abs_humidity_gm3;     // Absolute humidity (g/m³) - moisture content
+    float heat_index_c;         // Heat index (NOAA formula)
+    uint8_t comfort_score;      // 0-100 (100 = perfectly comfortable)
+    const char* comfort_category; // "Comfortable", "Warm", "Cold", etc.
+
+    /* Air quality scores (Tier 1: added VOC/NOx categories) */
+    uint8_t co2_score;          // 0-100 (100 = excellent ventilation)
+    const char* voc_category;   // "Excellent", "Good", "Moderate", "Poor", "Very Poor", "Severe"
+    const char* nox_category;   // Same categories as VOC
+    uint8_t overall_iaq_score;  // 0-100 composite score
+
+    /* Mold risk (Tier 1) */
+    uint8_t mold_risk_score;    // 0-100 (0=no risk, 100=high risk)
+    const char* mold_risk_category; // "Low", "Moderate", "High", "Severe"
+
+    /* Trends & rates (Tier 1: added CO2 rate, PM spike) */
+    pressure_trend_t pressure_trend;
+    float pressure_delta_3hr_hpa; // Actual change over 3 hours
+    float co2_rate_ppm_hr;      // Rate of change (ppm/hour) - for occupancy/ventilation detection
+    bool pm25_spike_detected;   // Sudden PM2.5 increase (cooking, smoking, outdoor pollution)
+} iaq_metrics_t;
+
+/**
+ * Diagnostics for sensor fusion algorithms.
+ * Published to optional diagnostics topic for validation/tuning.
+ */
+typedef struct {
+    float pm_rh_factor;         // Applied PM RH correction factor (1.0 = no correction)
+    float co2_pressure_offset_ppm; // Applied CO2 pressure compensation (ppm)
+    float temp_self_heat_offset_c; // Applied temperature self-heating offset
+    uint16_t co2_abc_baseline_ppm; // Current CO2 ABC baseline
+    uint8_t co2_abc_confidence_pct; // ABC confidence (0-100, based on # nights tracked)
+    uint8_t pm25_quality;       // PM2.5 quality score (0-100, based on RH conditions)
+    float pm1_pm25_ratio;       // PM1/PM2.5 ratio for sensor health check (should be 0.6-0.9)
+} iaq_fusion_diagnostics_t;
+
+/**
  * Global data structure for all IAQ measurements and system state.
  * Access must be protected by mutex.
  */
 typedef struct {
     SemaphoreHandle_t mutex;
 
-    /* Environmental baseline */
-    float temperature;          // °C
-    float mcu_temperature;      // °C (internal MCU sensor)
-    float humidity;             // %RH
-    float pressure;             // hPa
-    float pressure_trend;       // hPa/hour (3-hour trend)
+    /* RAW sensor readings (uncompensated) - legacy fields kept for now */
+    float temperature;          // °C (SHT41 raw)
+    float mcu_temperature;      // °C (MCU internal sensor)
+    float humidity;             // %RH (SHT41 raw)
+    float pressure;             // hPa (BMP280 raw)
+    float pressure_trend;       // DEPRECATED: use metrics.pressure_delta_3hr_hpa
 
-    /* Air quality measurements */
-    float co2_ppm;              // CO₂ concentration
-    float pm1_0;                // PM1.0 µg/m³
-    float pm2_5;                // PM2.5 µg/m³
-    float pm10;                 // PM10 µg/m³
+    float co2_ppm;              // CO2 raw (ppm)
+    float pm1_0;                // PM1.0 raw (µg/m³)
+    float pm2_5;                // PM2.5 raw (µg/m³)
+    float pm10;                 // PM10 raw (µg/m³)
     uint16_t voc_index;         // VOC index (0-500)
     uint16_t nox_index;         // NOx index (0-500)
 
-    /* Derived metrics */
-    uint16_t aqi;               // Air Quality Index
-    const char *comfort;        // Comfort level string
+    /* DEPRECATED derived metrics - use metrics.* instead */
+    uint16_t aqi;               // DEPRECATED: use metrics.aqi_value
+    const char *comfort;        // DEPRECATED: use metrics.comfort_category
+
+    /* FUSED (compensated) sensor values - use these for display/publishing */
+    iaq_fused_data_t fused;
+
+    /* DERIVED metrics (AQI, comfort, trends) */
+    iaq_metrics_t metrics;
+
+    /* FUSION diagnostics (for validation/tuning) */
+    iaq_fusion_diagnostics_t fusion_diag;
 
     /* Metadata */
     struct {
