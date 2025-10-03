@@ -46,17 +46,44 @@ static int cmd_status(int argc, char **argv)
 
         /* Sensor Status */
         printf("\n--- Sensors ---\n");
-        if (data->warming_up) {
-            printf("Status: Warming up...\n");
-        } else {
-            printf("Status: Ready\n");
-        }
 
-        printf("SHT41:   %s\n", data->health.sht41_ok ? "OK" : "FAULT");
-        printf("BMP280:  %s\n", data->health.bmp280_ok ? "OK" : "FAULT");
-        printf("SGP41:   %s\n", data->health.sgp41_ok ? "OK" : "FAULT");
-        printf("PMS5003: %s\n", data->health.pms5003_ok ? "OK" : "FAULT");
-        printf("S8:      %s\n", data->health.s8_ok ? "OK" : "FAULT");
+        /* Derive warming status from sensor states */
+        sensor_runtime_info_t info;
+        bool any_warming = false;
+        for (int i = 0; i < SENSOR_ID_MAX; i++) {
+            if (sensor_coordinator_get_runtime_info((sensor_id_t)i, &info) == ESP_OK) {
+                if (info.state == SENSOR_STATE_WARMING) {
+                    any_warming = true;
+                    break;
+                }
+            }
+        }
+        printf("Status: %s\n", any_warming ? "Warming up..." : "Ready");
+        if (sensor_coordinator_get_runtime_info(SENSOR_ID_SHT41, &info) == ESP_OK) {
+            printf("SHT41:   %s\n", (info.state == SENSOR_STATE_READY || info.state == SENSOR_STATE_WARMING) ? "OK" : "FAULT");
+        } else {
+            printf("SHT41:   FAULT\n");
+        }
+        if (sensor_coordinator_get_runtime_info(SENSOR_ID_BMP280, &info) == ESP_OK) {
+            printf("BMP280:  %s\n", (info.state == SENSOR_STATE_READY || info.state == SENSOR_STATE_WARMING) ? "OK" : "FAULT");
+        } else {
+            printf("BMP280:  FAULT\n");
+        }
+        if (sensor_coordinator_get_runtime_info(SENSOR_ID_SGP41, &info) == ESP_OK) {
+            printf("SGP41:   %s\n", (info.state == SENSOR_STATE_READY || info.state == SENSOR_STATE_WARMING) ? "OK" : "FAULT");
+        } else {
+            printf("SGP41:   FAULT\n");
+        }
+        if (sensor_coordinator_get_runtime_info(SENSOR_ID_PMS5003, &info) == ESP_OK) {
+            printf("PMS5003: %s\n", (info.state == SENSOR_STATE_READY || info.state == SENSOR_STATE_WARMING) ? "OK" : "FAULT");
+        } else {
+            printf("PMS5003: FAULT\n");
+        }
+        if (sensor_coordinator_get_runtime_info(SENSOR_ID_S8, &info) == ESP_OK) {
+            printf("S8:      %s\n", (info.state == SENSOR_STATE_READY || info.state == SENSOR_STATE_WARMING) ? "OK" : "FAULT");
+        } else {
+            printf("S8:      FAULT\n");
+        }
 
         /* Sensor Readings */
         printf("\n--- Current Readings ---\n");
@@ -359,45 +386,39 @@ static bool parse_sensor_id(const char *name, sensor_id_t *out)
 
 static int cmd_sensor_status(int argc, char **argv)
 {
-    printf("\n=== Sensor Status ===\n");
+    printf("\n=== Sensor Status ===\n\n");
 
-    IAQ_DATA_WITH_LOCK() {
-        iaq_data_t *data = iaq_data_get();
+    /* Get runtime info from coordinator for each sensor */
+    int64_t now_us = esp_timer_get_time();
 
-        printf("Warming up: %s\n", data->warming_up ? "Yes" : "No");
-        long long now_s = (long long)(esp_timer_get_time() / 1000000);
-        printf("Last update per sensor:\n");
-        if (data->updated_at.mcu)
-            printf("  mcu:      %lld seconds ago\n", now_s - (long long)data->updated_at.mcu);
-        else
-            printf("  mcu:      n/a\n");
-        if (data->updated_at.sht41)
-            printf("  sht41:    %lld seconds ago\n", now_s - (long long)data->updated_at.sht41);
-        else
-            printf("  sht41:    n/a\n");
-        if (data->updated_at.bmp280)
-            printf("  bmp280:   %lld seconds ago\n", now_s - (long long)data->updated_at.bmp280);
-        else
-            printf("  bmp280:   n/a\n");
-        if (data->updated_at.sgp41)
-            printf("  sgp41:    %lld seconds ago\n", now_s - (long long)data->updated_at.sgp41);
-        else
-            printf("  sgp41:    n/a\n");
-        if (data->updated_at.pms5003)
-            printf("  pms5003:  %lld seconds ago\n", now_s - (long long)data->updated_at.pms5003);
-        else
-            printf("  pms5003:  n/a\n");
-        if (data->updated_at.s8)
-            printf("  s8:       %lld seconds ago\n", now_s - (long long)data->updated_at.s8);
-        else
-            printf("  s8:       n/a\n");
+    printf("%-10s  %-10s  %-18s  %-8s\n", "Sensor", "State", "Last Update", "Errors");
+    printf("-----------------------------------------------------------\n");
 
-        printf("\nSensor Health:\n");
-        printf("  SHT41:   %s\n", data->health.sht41_ok ? "OK" : "FAULT");
-        printf("  BMP280:  %s\n", data->health.bmp280_ok ? "OK" : "FAULT");
-        printf("  SGP41:   %s\n", data->health.sgp41_ok ? "OK" : "FAULT");
-        printf("  PMS5003: %s\n", data->health.pms5003_ok ? "OK" : "FAULT");
-        printf("  S8:      %s\n", data->health.s8_ok ? "OK" : "FAULT");
+    for (int i = 0; i < SENSOR_ID_MAX; i++) {
+        sensor_runtime_info_t info;
+        if (sensor_coordinator_get_runtime_info((sensor_id_t)i, &info) != ESP_OK) continue;
+
+        const char *name = sensor_coordinator_id_to_name((sensor_id_t)i);
+        const char *state = sensor_coordinator_state_to_string(info.state);
+
+        /* Calculate age or show warm-up countdown */
+        char age_str[24];
+        if (info.state == SENSOR_STATE_WARMING) {
+            int64_t remaining_us = info.warmup_deadline_us - now_us;
+            if (remaining_us > 0) {
+                snprintf(age_str, sizeof(age_str), "%.1fs left", remaining_us / 1e6);
+            } else {
+                snprintf(age_str, sizeof(age_str), "ready soon");
+            }
+        } else if (info.last_read_us > 0) {
+            int64_t age_s = (now_us - info.last_read_us) / 1000000LL;
+            snprintf(age_str, sizeof(age_str), "%llds ago", (long long)age_s);
+        } else {
+            snprintf(age_str, sizeof(age_str), "never");
+        }
+
+        printf("%-10s  %-10s  %-18s  %-8lu\n",
+               name, state, age_str, (unsigned long)info.error_count);
     }
 
     printf("\n");
@@ -476,19 +497,6 @@ static int cmd_sensor_calibrate(int argc, char **argv)
     return 1;
 }
 
-static const char* sensor_id_to_name(sensor_id_t id)
-{
-    switch (id) {
-        case SENSOR_ID_MCU: return "mcu";
-        case SENSOR_ID_SHT41: return "sht41";
-        case SENSOR_ID_BMP280: return "bmp280";
-        case SENSOR_ID_SGP41: return "sgp41";
-        case SENSOR_ID_PMS5003: return "pms5003";
-        case SENSOR_ID_S8: return "s8";
-        default: return "unknown";
-    }
-}
-
 static int cmd_sensor_cadence(int argc, char **argv)
 {
     if (argc == 1) {
@@ -505,7 +513,7 @@ static int cmd_sensor_cadence(int argc, char **argv)
         printf("-----------------------------------\n");
         for (int i = 0; i < SENSOR_ID_MAX; ++i) {
             printf("%-10s  %-10lu  %-8s\n",
-                   sensor_id_to_name((sensor_id_t)i),
+                   sensor_coordinator_id_to_name((sensor_id_t)i),
                    (unsigned long)ms[i],
                    from_nvs[i] ? "NVS" : "default");
         }

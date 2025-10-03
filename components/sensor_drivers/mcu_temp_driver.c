@@ -2,6 +2,11 @@
 #include "mcu_temp_driver.h"
 #include "driver/temperature_sensor.h"
 #include "esp_log.h"
+#include "sdkconfig.h"
+
+#ifdef CONFIG_IAQ_SIMULATION
+#include "sensor_sim.h"
+#endif
 
 static const char *TAG = "MCU_TEMP";
 
@@ -48,7 +53,12 @@ esp_err_t mcu_temp_driver_deinit(void)
 esp_err_t mcu_temp_driver_read_celsius(float *out_celsius)
 {
     if (!out_celsius) return ESP_ERR_INVALID_ARG;
+
+#ifdef CONFIG_IAQ_SIMULATION
+    return sensor_sim_read_mcu_temperature(out_celsius);
+#else
     if (!s_handle) return ESP_ERR_INVALID_STATE;
     return temperature_sensor_get_celsius(s_handle, out_celsius);
+#endif
 }
 

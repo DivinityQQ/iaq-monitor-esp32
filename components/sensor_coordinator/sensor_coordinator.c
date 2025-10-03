@@ -17,11 +17,11 @@
 #include "i2c_bus.h"
 #include "uart_bus.h"
 #include "mcu_temp_driver.h"
+#include "sht41_driver.h"
+#include "bmp280_driver.h"
+#include "sgp41_driver.h"
+#include "pms5003_driver.h"
 #include "s8_driver.h"
-
-#ifdef CONFIG_IAQ_SIMULATION
-#include "sensor_sim.h"
-#endif
 
 static const char *TAG = "SENSOR_COORD";
 
@@ -200,13 +200,7 @@ static esp_err_t read_sensor_mcu(void)
     }
 
     float temp_c = 0.0f;
-    esp_err_t ret;
-
-#ifdef CONFIG_IAQ_SIMULATION
-    ret = sensor_sim_read_mcu_temperature(&temp_c);
-#else
-    ret = mcu_temp_driver_read_celsius(&temp_c);
-#endif
+    esp_err_t ret = mcu_temp_driver_read_celsius(&temp_c);
 
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
@@ -230,11 +224,145 @@ static esp_err_t read_sensor_mcu(void)
     return ret;
 }
 
-/* Stub handlers for future sensors - return NOT_SUPPORTED for now */
-static esp_err_t read_sensor_sht41(void) { return ESP_ERR_NOT_SUPPORTED; }
-static esp_err_t read_sensor_bmp280(void) { return ESP_ERR_NOT_SUPPORTED; }
-static esp_err_t read_sensor_sgp41(void) { return ESP_ERR_NOT_SUPPORTED; }
-static esp_err_t read_sensor_pms5003(void) { return ESP_ERR_NOT_SUPPORTED; }
+static esp_err_t read_sensor_sht41(void)
+{
+    if (s_runtime[SENSOR_ID_SHT41].state != SENSOR_STATE_READY) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    float temp_c = 0.0f, humidity_rh = 0.0f;
+    esp_err_t ret = sht41_driver_read(&temp_c, &humidity_rh);
+
+    if (ret == ESP_OK) {
+        IAQ_DATA_WITH_LOCK() {
+            iaq_data_t *data = iaq_data_get();
+            data->temperature = temp_c;
+            data->humidity = humidity_rh;
+            data->updated_at.sht41 = esp_timer_get_time();
+            data->valid.temperature = true;
+            data->valid.humidity = true;
+        }
+        s_runtime[SENSOR_ID_SHT41].last_read_us = esp_timer_get_time();
+        s_runtime[SENSOR_ID_SHT41].error_count = 0;
+        xEventGroupSetBits(s_system_ctx->event_group, SENSOR_UPDATED_SHT41_BIT);
+        ESP_LOGD(TAG, "SHT41: %.1f C, %.1f %%RH", temp_c, humidity_rh);
+    } else if (ret != ESP_ERR_NOT_SUPPORTED) {
+        s_runtime[SENSOR_ID_SHT41].error_count++;
+        if (s_runtime[SENSOR_ID_SHT41].error_count >= ERROR_THRESHOLD) {
+            ESP_LOGW(TAG, "SHT41 sensor failed %d times, transitioning to ERROR", ERROR_THRESHOLD);
+            transition_to_state(SENSOR_ID_SHT41, SENSOR_STATE_ERROR);
+        }
+    }
+
+    return ret;
+}
+
+static esp_err_t read_sensor_bmp280(void)
+{
+    if (s_runtime[SENSOR_ID_BMP280].state != SENSOR_STATE_READY) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    float pressure_hpa = 0.0f, temp_c = 0.0f;
+    esp_err_t ret = bmp280_driver_read(&pressure_hpa, &temp_c);
+
+    if (ret == ESP_OK) {
+        IAQ_DATA_WITH_LOCK() {
+            iaq_data_t *data = iaq_data_get();
+            data->pressure = pressure_hpa;
+            data->updated_at.bmp280 = esp_timer_get_time();
+            data->valid.pressure = true;
+        }
+        s_runtime[SENSOR_ID_BMP280].last_read_us = esp_timer_get_time();
+        s_runtime[SENSOR_ID_BMP280].error_count = 0;
+        xEventGroupSetBits(s_system_ctx->event_group, SENSOR_UPDATED_BMP280_BIT);
+        ESP_LOGD(TAG, "BMP280: %.1f hPa, %.1f C", pressure_hpa, temp_c);
+    } else if (ret != ESP_ERR_NOT_SUPPORTED) {
+        s_runtime[SENSOR_ID_BMP280].error_count++;
+        if (s_runtime[SENSOR_ID_BMP280].error_count >= ERROR_THRESHOLD) {
+            ESP_LOGW(TAG, "BMP280 sensor failed %d times, transitioning to ERROR", ERROR_THRESHOLD);
+            transition_to_state(SENSOR_ID_BMP280, SENSOR_STATE_ERROR);
+        }
+    }
+
+    return ret;
+}
+
+static esp_err_t read_sensor_sgp41(void)
+{
+    if (s_runtime[SENSOR_ID_SGP41].state != SENSOR_STATE_READY) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Get current temperature and humidity for compensation */
+    float temp_c = 25.0f, humidity_rh = 50.0f;  /* defaults */
+    IAQ_DATA_WITH_LOCK() {
+        iaq_data_t *data = iaq_data_get();
+        if (data->valid.temperature) temp_c = data->temperature;
+        if (data->valid.humidity) humidity_rh = data->humidity;
+    }
+
+    uint16_t voc_index = 0, nox_index = 0;
+    esp_err_t ret = sgp41_driver_read(&voc_index, &nox_index, temp_c, humidity_rh);
+
+    if (ret == ESP_OK) {
+        IAQ_DATA_WITH_LOCK() {
+            iaq_data_t *data = iaq_data_get();
+            data->voc_index = voc_index;
+            data->nox_index = nox_index;
+            data->updated_at.sgp41 = esp_timer_get_time();
+            data->valid.voc_index = true;
+            data->valid.nox_index = true;
+        }
+        s_runtime[SENSOR_ID_SGP41].last_read_us = esp_timer_get_time();
+        s_runtime[SENSOR_ID_SGP41].error_count = 0;
+        xEventGroupSetBits(s_system_ctx->event_group, SENSOR_UPDATED_SGP41_BIT);
+        ESP_LOGD(TAG, "SGP41: VOC=%u, NOx=%u", voc_index, nox_index);
+    } else if (ret != ESP_ERR_NOT_SUPPORTED) {
+        s_runtime[SENSOR_ID_SGP41].error_count++;
+        if (s_runtime[SENSOR_ID_SGP41].error_count >= ERROR_THRESHOLD) {
+            ESP_LOGW(TAG, "SGP41 sensor failed %d times, transitioning to ERROR", ERROR_THRESHOLD);
+            transition_to_state(SENSOR_ID_SGP41, SENSOR_STATE_ERROR);
+        }
+    }
+
+    return ret;
+}
+
+static esp_err_t read_sensor_pms5003(void)
+{
+    if (s_runtime[SENSOR_ID_PMS5003].state != SENSOR_STATE_READY) {
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    float pm1_0 = 0.0f, pm2_5 = 0.0f, pm10 = 0.0f;
+    esp_err_t ret = pms5003_driver_read(&pm1_0, &pm2_5, &pm10);
+
+    if (ret == ESP_OK) {
+        IAQ_DATA_WITH_LOCK() {
+            iaq_data_t *data = iaq_data_get();
+            data->pm1_0 = pm1_0;
+            data->pm2_5 = pm2_5;
+            data->pm10 = pm10;
+            data->updated_at.pms5003 = esp_timer_get_time();
+            data->valid.pm1_0 = true;
+            data->valid.pm2_5 = true;
+            data->valid.pm10 = true;
+        }
+        s_runtime[SENSOR_ID_PMS5003].last_read_us = esp_timer_get_time();
+        s_runtime[SENSOR_ID_PMS5003].error_count = 0;
+        xEventGroupSetBits(s_system_ctx->event_group, SENSOR_UPDATED_PMS5003_BIT);
+        ESP_LOGD(TAG, "PMS5003: PM1.0=%.0f, PM2.5=%.0f, PM10=%.0f ug/m3", pm1_0, pm2_5, pm10);
+    } else if (ret != ESP_ERR_NOT_SUPPORTED) {
+        s_runtime[SENSOR_ID_PMS5003].error_count++;
+        if (s_runtime[SENSOR_ID_PMS5003].error_count >= ERROR_THRESHOLD) {
+            ESP_LOGW(TAG, "PMS5003 sensor failed %d times, transitioning to ERROR", ERROR_THRESHOLD);
+            transition_to_state(SENSOR_ID_PMS5003, SENSOR_STATE_ERROR);
+        }
+    }
+
+    return ret;
+}
 
 static esp_err_t read_sensor_s8(void)
 {
@@ -243,13 +371,7 @@ static esp_err_t read_sensor_s8(void)
     }
 
     float co2_ppm = 0.0f;
-    esp_err_t ret;
-
-#ifdef CONFIG_IAQ_SIMULATION
-    ret = sensor_sim_read_co2(&co2_ppm);
-#else
-    ret = s8_driver_read_co2(&co2_ppm);
-#endif
+    esp_err_t ret = s8_driver_read_co2(&co2_ppm);
 
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
@@ -311,17 +433,6 @@ static void sensor_coordinator_task(void *arg)
             }
         }
 
-        /* Update global warming_up flag */
-        bool any_warming = false;
-        for (int i = 0; i < SENSOR_ID_MAX; ++i) {
-            if (s_runtime[i].state == SENSOR_STATE_WARMING) {
-                any_warming = true;
-                break;
-            }
-        }
-        IAQ_DATA_WITH_LOCK() {
-            iaq_data_get()->warming_up = any_warming;
-        }
         /* Calculate time until next sensor is due */
         TickType_t now = xTaskGetTickCount();
         TickType_t next_wake = portMAX_DELAY;
@@ -367,6 +478,26 @@ static void sensor_coordinator_task(void *arg)
                             op_res = ESP_OK;
                         } else {
                             op_res = ESP_FAIL;
+                        }
+                    } else if (cmd.id == SENSOR_ID_SHT41) {
+                        op_res = sht41_driver_reset();
+                        if (op_res == ESP_OK) {
+                            transition_to_state(SENSOR_ID_SHT41, SENSOR_STATE_READY);
+                        }
+                    } else if (cmd.id == SENSOR_ID_BMP280) {
+                        op_res = bmp280_driver_reset();
+                        if (op_res == ESP_OK) {
+                            transition_to_state(SENSOR_ID_BMP280, SENSOR_STATE_READY);
+                        }
+                    } else if (cmd.id == SENSOR_ID_SGP41) {
+                        op_res = sgp41_driver_reset();
+                        if (op_res == ESP_OK) {
+                            transition_to_state(SENSOR_ID_SGP41, SENSOR_STATE_READY);
+                        }
+                    } else if (cmd.id == SENSOR_ID_PMS5003) {
+                        op_res = pms5003_driver_reset();
+                        if (op_res == ESP_OK) {
+                            transition_to_state(SENSOR_ID_PMS5003, SENSOR_STATE_READY);
                         }
                     } else if (cmd.id == SENSOR_ID_S8) {
                         op_res = s8_driver_reset();
@@ -470,20 +601,46 @@ esp_err_t sensor_coordinator_init(iaq_system_context_t *ctx)
     } else {
         ESP_LOGI(TAG, "I2C bus initialized successfully");
         i2c_bus_probe();  /* Log detected devices */
-        /* I2C sensors will be initialized in task startup */
+
+        /* Initialize SHT41 driver */
+        ret = sht41_driver_init();
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "SHT41 driver init failed: %s", esp_err_to_name(ret));
+            transition_to_state(SENSOR_ID_SHT41, SENSOR_STATE_ERROR);
+        } else {
+            ESP_LOGI(TAG, "SHT41 driver initialized");
+            transition_to_state(SENSOR_ID_SHT41, SENSOR_STATE_INIT);
+        }
+
+        /* Initialize BMP280 driver */
+        ret = bmp280_driver_init();
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "BMP280 driver init failed: %s", esp_err_to_name(ret));
+            transition_to_state(SENSOR_ID_BMP280, SENSOR_STATE_ERROR);
+        } else {
+            ESP_LOGI(TAG, "BMP280 driver initialized");
+            transition_to_state(SENSOR_ID_BMP280, SENSOR_STATE_INIT);
+        }
+
+        /* Initialize SGP41 driver */
+        ret = sgp41_driver_init();
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "SGP41 driver init failed: %s", esp_err_to_name(ret));
+            transition_to_state(SENSOR_ID_SGP41, SENSOR_STATE_ERROR);
+        } else {
+            ESP_LOGI(TAG, "SGP41 driver initialized");
+            transition_to_state(SENSOR_ID_SGP41, SENSOR_STATE_INIT);
+        }
     }
 
-    /* Initialize UART for PMS5003 */
-    ret = uart_bus_init(CONFIG_IAQ_PMS5003_UART_PORT,
-                        CONFIG_IAQ_PMS5003_TX_GPIO,
-                        CONFIG_IAQ_PMS5003_RX_GPIO,
-                        9600,
-                        CONFIG_IAQ_PMS5003_RX_BUF_SIZE);
+    /* Initialize PMS5003 driver (includes UART init) */
+    ret = pms5003_driver_init();
     if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "PMS5003 UART init failed: %s", esp_err_to_name(ret));
+        ESP_LOGW(TAG, "PMS5003 driver init failed: %s", esp_err_to_name(ret));
         transition_to_state(SENSOR_ID_PMS5003, SENSOR_STATE_ERROR);
     } else {
-        ESP_LOGI(TAG, "PMS5003 UART initialized");
+        ESP_LOGI(TAG, "PMS5003 driver initialized");
+        transition_to_state(SENSOR_ID_PMS5003, SENSOR_STATE_INIT);
     }
 
     /* Initialize S8 driver (includes UART init) */
@@ -577,6 +734,26 @@ esp_err_t sensor_coordinator_stop(void)
         transition_to_state(SENSOR_ID_MCU, SENSOR_STATE_UNINIT);
     }
 
+    if (s_runtime[SENSOR_ID_SHT41].state != SENSOR_STATE_UNINIT) {
+        sht41_driver_deinit();
+        transition_to_state(SENSOR_ID_SHT41, SENSOR_STATE_UNINIT);
+    }
+
+    if (s_runtime[SENSOR_ID_BMP280].state != SENSOR_STATE_UNINIT) {
+        bmp280_driver_deinit();
+        transition_to_state(SENSOR_ID_BMP280, SENSOR_STATE_UNINIT);
+    }
+
+    if (s_runtime[SENSOR_ID_SGP41].state != SENSOR_STATE_UNINIT) {
+        sgp41_driver_deinit();
+        transition_to_state(SENSOR_ID_SGP41, SENSOR_STATE_UNINIT);
+    }
+
+    if (s_runtime[SENSOR_ID_PMS5003].state != SENSOR_STATE_UNINIT) {
+        pms5003_driver_deinit();
+        transition_to_state(SENSOR_ID_PMS5003, SENSOR_STATE_UNINIT);
+    }
+
     if (s_runtime[SENSOR_ID_S8].state != SENSOR_STATE_UNINIT) {
         s8_driver_deinit();
         transition_to_state(SENSOR_ID_S8, SENSOR_STATE_UNINIT);
@@ -584,7 +761,7 @@ esp_err_t sensor_coordinator_stop(void)
 
     /* De-initialize buses */
     i2c_bus_deinit();
-    uart_bus_deinit(CONFIG_IAQ_PMS5003_UART_PORT);
+    /* PMS5003 UART deinitialized by pms5003_driver_deinit() */
     /* S8 UART deinitialized by s8_driver_deinit() */
 
     if (s_cmd_queue) {
@@ -692,6 +869,19 @@ const char* sensor_coordinator_state_to_string(sensor_state_t state)
         case SENSOR_STATE_READY:   return "READY";
         case SENSOR_STATE_ERROR:   return "ERROR";
         default:                   return "UNKNOWN";
+    }
+}
+
+const char* sensor_coordinator_id_to_name(sensor_id_t id)
+{
+    switch (id) {
+        case SENSOR_ID_MCU:     return "mcu";
+        case SENSOR_ID_SHT41:   return "sht41";
+        case SENSOR_ID_BMP280:  return "bmp280";
+        case SENSOR_ID_SGP41:   return "sgp41";
+        case SENSOR_ID_PMS5003: return "pms5003";
+        case SENSOR_ID_S8:      return "s8";
+        default:                return "unknown";
     }
 }
 

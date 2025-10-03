@@ -96,4 +96,12 @@ esp_err_t sensor_coordinator_get_runtime_info(sensor_id_t id, sensor_runtime_inf
  */
 const char* sensor_coordinator_state_to_string(sensor_state_t state);
 
+/**
+ * Convert sensor ID to name string.
+ *
+ * @param id Sensor ID
+ * @return Sensor name string (e.g., "mcu", "s8", "sht41")
+ */
+const char* sensor_coordinator_id_to_name(sensor_id_t id);
+
 #endif /* SENSOR_COORDINATOR_H */

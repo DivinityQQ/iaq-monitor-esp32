@@ -13,12 +13,17 @@
 #include "nvs.h"
 
 #include "mqtt_manager.h"
+#include "wifi_manager.h"
 #include "iaq_data.h"
 #include "iaq_config.h"
+#include "sensor_coordinator.h"
+#include "esp_timer.h"
 
 static const char *TAG = "MQTT_MGR";
 
 static iaq_system_context_t *s_system_ctx = NULL;
+static esp_timer_handle_t s_health_timer = NULL;
+static TaskHandle_t s_event_task_handle = NULL;
 
 /* NVS namespace for MQTT config */
 #define NVS_NAMESPACE        "mqtt_config"
@@ -55,6 +60,8 @@ static char s_password[64] = {0};
 static void mqtt_publish_ha_discovery(void);
 static void mqtt_handle_command(const char *topic, const char *data, int data_len);
 static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_t event_id, void *event_data);
+static void mqtt_health_timer_callback(void* arg);
+static void mqtt_event_task(void *arg);
 
 /* Helper: publish a single HA sensor discovery config */
 static void ha_publish_sensor_config(cJSON *device, const char *unique_suffix, const char *name,
@@ -241,7 +248,44 @@ esp_err_t mqtt_manager_init(iaq_system_context_t *ctx)
     }
 
     esp_err_t ret = create_mqtt_client();
-    if (ret != ESP_OK) return ret;
+    if (ret != ESP_OK) {
+        /* MQTT client creation failed, but still initialize to allow later config */
+        s_initialized = true;
+        return ret;
+    }
+
+    /* Create MQTT health publishing timer (only if client created successfully) */
+    const esp_timer_create_args_t health_timer_args = {
+        .callback = &mqtt_health_timer_callback,
+        .name = "mqtt_health"
+    };
+    ret = esp_timer_create(&health_timer_args, &s_health_timer);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create health timer: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ret = esp_timer_start_periodic(s_health_timer, STATUS_PUBLISH_INTERVAL_MS * 1000);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start health timer: %s", esp_err_to_name(ret));
+        return ret;
+    }
+    ESP_LOGI(TAG, "MQTT health timer started (%d ms interval)", STATUS_PUBLISH_INTERVAL_MS);
+
+    /* Create MQTT event monitoring task */
+    BaseType_t task_ret = xTaskCreatePinnedToCore(
+        mqtt_event_task,
+        "mqtt_event",
+        TASK_STACK_NETWORK_MANAGER,
+        s_system_ctx,
+        TASK_PRIORITY_NETWORK_MANAGER,
+        &s_event_task_handle,
+        TASK_CORE_NETWORK_MANAGER
+    );
+    if (task_ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create MQTT event task");
+        return ESP_FAIL;
+    }
+    ESP_LOGI(TAG, "MQTT event task created");
 
     s_initialized = true;
     ESP_LOGI(TAG, "MQTT client initialized successfully (MQTT 5.0)");
@@ -315,17 +359,44 @@ esp_err_t mqtt_publish_status(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
     cJSON *root = cJSON_CreateObject();
+
+    /* System metrics */
     cJSON_AddNumberToObject(root, "uptime", data->system.uptime_seconds);
     cJSON_AddNumberToObject(root, "wifi_rssi", data->system.wifi_rssi);
     cJSON_AddNumberToObject(root, "free_heap", data->system.free_heap);
-    cJSON *sensors_ok = cJSON_CreateArray();
-    if (data->health.sht41_ok) cJSON_AddItemToArray(sensors_ok, cJSON_CreateString("sht41"));
-    if (data->health.bmp280_ok) cJSON_AddItemToArray(sensors_ok, cJSON_CreateString("bmp280"));
-    if (data->health.sgp41_ok) cJSON_AddItemToArray(sensors_ok, cJSON_CreateString("sgp41"));
-    if (data->health.pms5003_ok) cJSON_AddItemToArray(sensors_ok, cJSON_CreateString("pms5003"));
-    if (data->health.s8_ok) cJSON_AddItemToArray(sensors_ok, cJSON_CreateString("s8"));
-    cJSON_AddItemToObject(root, "sensors_ok", sensors_ok);
-    cJSON_AddBoolToObject(root, "warming_up", data->warming_up);
+
+    /* Per-sensor state details (query coordinator API) */
+    cJSON *sensors = cJSON_CreateObject();
+
+    for (int i = 0; i < SENSOR_ID_MAX; i++) {
+        sensor_runtime_info_t info;
+        if (sensor_coordinator_get_runtime_info((sensor_id_t)i, &info) != ESP_OK) {
+            continue;
+        }
+
+        cJSON *sensor = cJSON_CreateObject();
+        cJSON_AddStringToObject(sensor, "state", sensor_coordinator_state_to_string(info.state));
+        cJSON_AddNumberToObject(sensor, "errors", info.error_count);
+
+        int64_t now_us = esp_timer_get_time();
+
+        if (info.last_read_us > 0) {
+            int64_t age_s = (now_us - info.last_read_us) / 1000000LL;
+            cJSON_AddNumberToObject(sensor, "last_read_s", (double)age_s);
+        }
+
+        if (info.state == SENSOR_STATE_WARMING) {
+            int64_t remaining_us = info.warmup_deadline_us - now_us;
+            if (remaining_us > 0) {
+                cJSON_AddNumberToObject(sensor, "warmup_remaining_s", remaining_us / 1e6);
+            }
+        }
+
+        cJSON_AddItemToObject(sensors, sensor_coordinator_id_to_name((sensor_id_t)i), sensor);
+    }
+    cJSON_AddItemToObject(root, "sensors", sensors);
+
+    /* Publish */
     char *json_string = cJSON_PrintUnformatted(root);
     if (json_string) {
         esp_mqtt_client_enqueue(s_mqtt_client, TOPIC_HEALTH, json_string, 0, CONFIG_IAQ_MQTT_QOS, 0, false);
@@ -568,6 +639,71 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
         default:
             ESP_LOGD(TAG, "Other MQTT event id:%d", event->event_id);
             break;
+    }
+}
+
+/**
+ * MQTT health timer callback - publishes /health topic to MQTT.
+ * Runs every 30 seconds when MQTT is connected.
+ * System metrics are already updated by main.c system_status_timer.
+ */
+static void mqtt_health_timer_callback(void* arg)
+{
+    (void)arg;
+
+    /* Publish health status if connected */
+    if (mqtt_manager_is_connected()) {
+        iaq_data_t snapshot;
+        IAQ_DATA_WITH_LOCK() {
+            snapshot = *iaq_data_get();
+        }
+        mqtt_publish_status(&snapshot);
+    }
+}
+
+/**
+ * MQTT event monitoring task.
+ * Monitors sensor update events and publishes sensor data when available.
+ */
+static void mqtt_event_task(void *arg)
+{
+    iaq_system_context_t *ctx = (iaq_system_context_t *)arg;
+    ESP_LOGI(TAG, "MQTT event task started");
+
+    while (1) {
+        /* Wait for any per-sensor update bits */
+        const EventBits_t sensor_bits_mask =
+            SENSOR_UPDATED_MCU_BIT |
+            SENSOR_UPDATED_SHT41_BIT |
+            SENSOR_UPDATED_BMP280_BIT |
+            SENSOR_UPDATED_SGP41_BIT |
+            SENSOR_UPDATED_PMS5003_BIT |
+            SENSOR_UPDATED_S8_BIT;
+
+        EventBits_t bits = xEventGroupWaitBits(
+            ctx->event_group,
+            sensor_bits_mask,
+            pdTRUE,   /* Clear bits on exit */
+            pdFALSE,  /* Wait for any bit */
+            pdMS_TO_TICKS(5000)  /* Timeout after 5 seconds */
+        );
+
+        if ((bits & sensor_bits_mask) && mqtt_manager_is_connected()) {
+            /* Snapshot data, release lock, then publish */
+            iaq_data_t snapshot;
+            IAQ_DATA_WITH_LOCK() {
+                snapshot = *iaq_data_get();
+            }
+            if (bits & SENSOR_UPDATED_MCU_BIT)     (void)mqtt_publish_sensor_mcu(&snapshot);
+            if (bits & SENSOR_UPDATED_SHT41_BIT)   (void)mqtt_publish_sensor_sht41(&snapshot);
+            if (bits & SENSOR_UPDATED_BMP280_BIT)  (void)mqtt_publish_sensor_bmp280(&snapshot);
+            if (bits & SENSOR_UPDATED_SGP41_BIT)   (void)mqtt_publish_sensor_sgp41(&snapshot);
+            if (bits & SENSOR_UPDATED_PMS5003_BIT) (void)mqtt_publish_sensor_pms5003(&snapshot);
+            if (bits & SENSOR_UPDATED_S8_BIT)      (void)mqtt_publish_sensor_s8(&snapshot);
+            /* Derived metrics may change with any sensor update */
+            (void)mqtt_publish_sensor_derived(&snapshot);
+            ESP_LOGD(TAG, "Published per-sensor updates to MQTT");
+        }
     }
 }
 

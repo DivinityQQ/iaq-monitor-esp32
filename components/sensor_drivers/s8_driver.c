@@ -5,6 +5,10 @@
 #include "sdkconfig.h"
 #include <math.h>
 
+#ifdef CONFIG_IAQ_SIMULATION
+#include "sensor_sim.h"
+#endif
+
 static const char *TAG = "S8_DRIVER";
 
 static bool s_initialized = false;
@@ -43,6 +47,9 @@ esp_err_t s8_driver_read_co2(float *out_co2_ppm)
         return ESP_ERR_INVALID_ARG;
     }
 
+#ifdef CONFIG_IAQ_SIMULATION
+    return sensor_sim_read_co2(out_co2_ppm);
+#else
     /* Stub: real implementation will use Modbus protocol to read CO2 */
     /* Example Modbus command: FE 04 00 03 00 01 D5 C5 (read input register 3) */
     /* Response: FE 04 02 <CO2_HIGH> <CO2_LOW> <CRC_LOW> <CRC_HIGH> */
@@ -50,6 +57,7 @@ esp_err_t s8_driver_read_co2(float *out_co2_ppm)
     ESP_LOGW(TAG, "S8 read_co2: stub implementation, returning NAN");
     *out_co2_ppm = NAN;
     return ESP_ERR_NOT_SUPPORTED;
+#endif
 }
 
 esp_err_t s8_driver_calibrate_co2(int target_ppm)

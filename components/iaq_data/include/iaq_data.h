@@ -59,17 +59,6 @@ typedef struct {
     } valid;
 
     uint8_t overall_quality;    // Overall air quality (0-100)
-    bool warming_up;            // True if sensors still warming up
-
-    /* Sensor health status */
-    struct {
-        bool sht41_ok;
-        bool bmp280_ok;
-        bool sgp41_ok;
-        bool pms5003_ok;
-        bool s8_ok;
-        uint32_t last_error_code;
-    } health;
 
     /* System status */
     struct {

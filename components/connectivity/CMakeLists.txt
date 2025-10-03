@@ -16,6 +16,7 @@ idf_component_register(
         json
         iaq_data
         system_context
+        sensor_coordinator
     PRIV_REQUIRES
         esp_timer
         driver
