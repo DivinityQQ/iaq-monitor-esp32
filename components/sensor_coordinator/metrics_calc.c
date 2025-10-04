@@ -9,9 +9,15 @@
 
 static const char *TAG = "METRICS";
 
+/* Metrics timer fires every 5 s; downsample certain histories to control memory use. */
+#define METRICS_SAMPLE_PERIOD_SEC 5U
+#define PRESSURE_SAMPLE_INTERVAL_SEC 150U
+#define CO2_SAMPLE_INTERVAL_SEC 60U
+#define PM_SAMPLE_INTERVAL_SEC 30U
+
 /* ===== Pressure Trend Tracking ===== */
 #ifdef CONFIG_METRICS_PRESSURE_TREND_ENABLE
-#define PRESSURE_HISTORY_SIZE 72  /* 3 hours @ 2.5-minute intervals */
+#define PRESSURE_HISTORY_SIZE 144  /* 6 hours @ 2.5-minute intervals */
 
 static struct {
     float pressure_pa[PRESSURE_HISTORY_SIZE];
@@ -19,11 +25,12 @@ static struct {
     uint8_t head;
     uint8_t count;
 } s_pressure_history = {0};
+static uint32_t s_pressure_sample_elapsed_sec = PRESSURE_SAMPLE_INTERVAL_SEC;
 #endif
 
 /* ===== CO2 Rate of Change Tracking ===== */
 #ifdef CONFIG_METRICS_CO2_RATE_ENABLE
-#define CO2_HISTORY_SIZE 30  /* Enough for 1 hour at 2-minute intervals */
+#define CO2_HISTORY_SIZE 64  /* ~1 hour of history at 60-second sampling */
 
 static struct {
     float co2_ppm[CO2_HISTORY_SIZE];
@@ -31,11 +38,12 @@ static struct {
     uint8_t head;
     uint8_t count;
 } s_co2_history = {0};
+static uint32_t s_co2_sample_elapsed_sec = CO2_SAMPLE_INTERVAL_SEC;
 #endif
 
 /* ===== PM2.5 Spike Detection ===== */
 #ifdef CONFIG_METRICS_PM_SPIKE_DETECTION_ENABLE
-#define PM_HISTORY_SIZE 60  /* 30 minutes @ 30-second intervals */
+#define PM_HISTORY_SIZE 120  /* 60 minutes @ 30-second intervals */
 
 static struct {
     float pm25_ugm3[PM_HISTORY_SIZE];
@@ -43,6 +51,7 @@ static struct {
     uint8_t head;
     uint8_t count;
 } s_pm_history = {0};
+static uint32_t s_pm_sample_elapsed_sec = PM_SAMPLE_INTERVAL_SEC;
 #endif
 
 esp_err_t metrics_init(void)
@@ -517,15 +526,20 @@ static void update_pressure_trend(iaq_data_t *data)
         return;
     }
 
-    /* Add to history */
-    float pressure_pa = data->fused.pressure_pa;
-    int64_t now_us = esp_timer_get_time();
+    /* Only record to the 3-hour pressure buffer at ~150 s cadence. */
+    s_pressure_sample_elapsed_sec += METRICS_SAMPLE_PERIOD_SEC;
+    if (s_pressure_sample_elapsed_sec >= PRESSURE_SAMPLE_INTERVAL_SEC) {
+        s_pressure_sample_elapsed_sec = 0;
 
-    s_pressure_history.pressure_pa[s_pressure_history.head] = pressure_pa;
-    s_pressure_history.timestamps_us[s_pressure_history.head] = now_us;
-    s_pressure_history.head = (s_pressure_history.head + 1) % PRESSURE_HISTORY_SIZE;
-    if (s_pressure_history.count < PRESSURE_HISTORY_SIZE) {
-        s_pressure_history.count++;
+        float pressure_pa = data->fused.pressure_pa;
+        int64_t now_us = esp_timer_get_time();
+
+        s_pressure_history.pressure_pa[s_pressure_history.head] = pressure_pa;
+        s_pressure_history.timestamps_us[s_pressure_history.head] = now_us;
+        s_pressure_history.head = (s_pressure_history.head + 1) % PRESSURE_HISTORY_SIZE;
+        if (s_pressure_history.count < PRESSURE_HISTORY_SIZE) {
+            s_pressure_history.count++;
+        }
     }
 
     /* Need at least 2 samples */
@@ -586,29 +600,32 @@ static void update_co2_rate(iaq_data_t *data)
         return;
     }
 
-    /* Add to history */
-    float co2 = data->fused.co2_ppm;
-    int64_t now_us = esp_timer_get_time();
+    /* Record CO2 history roughly once per minute for trend calculations. */
+    s_co2_sample_elapsed_sec += METRICS_SAMPLE_PERIOD_SEC;
+    if (s_co2_sample_elapsed_sec >= CO2_SAMPLE_INTERVAL_SEC) {
+        s_co2_sample_elapsed_sec = 0;
 
-    s_co2_history.co2_ppm[s_co2_history.head] = co2;
-    s_co2_history.timestamps_us[s_co2_history.head] = now_us;
-    s_co2_history.head = (s_co2_history.head + 1) % CO2_HISTORY_SIZE;
-    if (s_co2_history.count < CO2_HISTORY_SIZE) {
-        s_co2_history.count++;
+        float co2 = data->fused.co2_ppm;
+        int64_t now_us = esp_timer_get_time();
+
+        s_co2_history.co2_ppm[s_co2_history.head] = co2;
+        s_co2_history.timestamps_us[s_co2_history.head] = now_us;
+        s_co2_history.head = (s_co2_history.head + 1) % CO2_HISTORY_SIZE;
+        if (s_co2_history.count < CO2_HISTORY_SIZE) {
+            s_co2_history.count++;
+        }
     }
 
-    /* Need at least 2 samples */
     if (s_co2_history.count < 2) {
         data->metrics.co2_rate_ppm_hr = NAN;
         return;
     }
 
-    /* Calculate rate over configured window */
     uint32_t window_minutes = CONFIG_METRICS_CO2_RATE_WINDOW_MIN;
     int64_t window_us = (int64_t)window_minutes * 60 * 1000000;
 
-    /* Find oldest sample within window */
     int oldest_in_window = -1;
+    int64_t now_us = esp_timer_get_time();
     for (int i = s_co2_history.count - 1; i >= 0; i--) {
         int idx = (s_co2_history.head + CO2_HISTORY_SIZE - 1 - i) % CO2_HISTORY_SIZE;
         if ((now_us - s_co2_history.timestamps_us[idx]) <= window_us) {
@@ -623,7 +640,6 @@ static void update_co2_rate(iaq_data_t *data)
         return;
     }
 
-    /* Calculate rate */
     uint8_t latest_idx = (s_co2_history.head + CO2_HISTORY_SIZE - 1) % CO2_HISTORY_SIZE;
     float co2_delta = s_co2_history.co2_ppm[latest_idx] - s_co2_history.co2_ppm[oldest_in_window];
     float time_delta_hr = (float)(s_co2_history.timestamps_us[latest_idx] - s_co2_history.timestamps_us[oldest_in_window]) / (3600.0f * 1000000.0f);
@@ -647,24 +663,26 @@ static void update_pm_spike_detection(iaq_data_t *data)
         return;
     }
 
-    /* Add to history */
     float pm25 = data->fused.pm25_ugm3;
     int64_t now_us = esp_timer_get_time();
 
-    s_pm_history.pm25_ugm3[s_pm_history.head] = pm25;
-    s_pm_history.timestamps_us[s_pm_history.head] = now_us;
-    s_pm_history.head = (s_pm_history.head + 1) % PM_HISTORY_SIZE;
-    if (s_pm_history.count < PM_HISTORY_SIZE) {
-        s_pm_history.count++;
+    /* Track PM spikes at ~30 s cadence to reduce noise without missing events. */
+    s_pm_sample_elapsed_sec += METRICS_SAMPLE_PERIOD_SEC;
+    if (s_pm_sample_elapsed_sec >= PM_SAMPLE_INTERVAL_SEC) {
+        s_pm_sample_elapsed_sec = 0;
+        s_pm_history.pm25_ugm3[s_pm_history.head] = pm25;
+        s_pm_history.timestamps_us[s_pm_history.head] = now_us;
+        s_pm_history.head = (s_pm_history.head + 1) % PM_HISTORY_SIZE;
+        if (s_pm_history.count < PM_HISTORY_SIZE) {
+            s_pm_history.count++;
+        }
     }
 
-    /* Need sufficient history for baseline */
     if (s_pm_history.count < 5) {
         data->metrics.pm25_spike_detected = false;
         return;
     }
 
-    /* Calculate baseline (average of samples in window, excluding current) */
     uint32_t window_minutes = CONFIG_METRICS_PM_SPIKE_BASELINE_WINDOW_MIN;
     int64_t window_us = (int64_t)window_minutes * 60 * 1000000;
 
@@ -689,12 +707,7 @@ static void update_pm_spike_detection(iaq_data_t *data)
     float baseline = baseline_sum / (float)baseline_count;
     float spike_threshold = (float)CONFIG_METRICS_PM_SPIKE_THRESHOLD_UGPM3;
 
-    /* Detect spike */
-    if ((pm25 - baseline) >= spike_threshold) {
-        data->metrics.pm25_spike_detected = true;
-    } else {
-        data->metrics.pm25_spike_detected = false;
-    }
+    data->metrics.pm25_spike_detected = ((pm25 - baseline) >= spike_threshold);
 }
 #endif /* CONFIG_METRICS_PM_SPIKE_DETECTION_ENABLE */
 

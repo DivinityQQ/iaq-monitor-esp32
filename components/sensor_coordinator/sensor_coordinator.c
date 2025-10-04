@@ -557,22 +557,14 @@ static void sensor_coordinator_task(void *arg)
                 (int32_t)(now - s_schedule[i].next_due) >= 0) {
 
                 /* Dispatch to appropriate read handler */
-                esp_err_t read_res = ESP_ERR_NOT_SUPPORTED;
                 switch (i) {
-                    case SENSOR_ID_MCU:     read_res = read_sensor_mcu(); break;
-                    case SENSOR_ID_SHT41:   read_res = read_sensor_sht41(); break;
-                    case SENSOR_ID_BMP280:  read_res = read_sensor_bmp280(); break;
-                    case SENSOR_ID_SGP41:   read_res = read_sensor_sgp41(); break;
-                    case SENSOR_ID_PMS5003: read_res = read_sensor_pms5003(); break;
-                    case SENSOR_ID_S8:      read_res = read_sensor_s8(); break;
+                    case SENSOR_ID_MCU:     (void)read_sensor_mcu(); break;
+                    case SENSOR_ID_SHT41:   (void)read_sensor_sht41(); break;
+                    case SENSOR_ID_BMP280:  (void)read_sensor_bmp280(); break;
+                    case SENSOR_ID_SGP41:   (void)read_sensor_sgp41(); break;
+                    case SENSOR_ID_PMS5003: (void)read_sensor_pms5003(); break;
+                    case SENSOR_ID_S8:      (void)read_sensor_s8(); break;
                     default: break;
-                }
-
-                /* On successful read, just update the event bit (fusion/metrics run on timers) */
-                if (read_res == ESP_OK) {
-                    /* Note: Fusion runs at 1 Hz via fusion_timer_callback */
-                    /* Note: Metrics run at 0.2 Hz via metrics_timer_callback */
-                    /* SENSORS_DATA_READY_BIT is set by metrics_timer_callback for MQTT publishing */
                 }
 
                 /* Increment from previous due time to maintain cadence without drift */

@@ -47,7 +47,6 @@
 #define WIFI_CONNECTED_BIT          BIT0
 #define MQTT_CONNECTED_BIT          BIT1
 #define SENSORS_READY_BIT           BIT2
-#define SENSORS_CALIBRATE_BIT       BIT3
 #define DISPLAY_UPDATE_BIT          BIT4
 
 /**

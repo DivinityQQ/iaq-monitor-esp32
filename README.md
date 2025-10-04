@@ -97,34 +97,23 @@ sensor cadence set <sensor> <ms>
 ```
 
 ## MQTT Topics
-- Per‑sensor state: `iaq/{device_id}/sensor/<sensor>`
-  - `mcu`: `{ "mcu_temperature": <degC|null> }`
-  - `sht41`: `{ "temperature": <degC|null>, "humidity": <percent|null> }`
-  - `bmp280`: `{ "pressure": <hPa|null> }`
-  - `sgp41`: `{ "voc_index": <0..500|null>, "nox_index": <0..500|null> }`
-  - `pms5003`: `{ "pm1_0": <ug/m3|null>, "pm2_5": <ug/m3|null>, "pm10": <ug/m3|null> }`
-  - `s8`: `{ "co2": <ppm|null> }`
-  - `derived`: `{ "aqi": <0..500|null>, "comfort": <string|null> }`
-- Health: `iaq/{device_id}/health`
+- State: `iaq/{device_id}/state` - fused readings (temperature, humidity, pressure_hpa, PM, CO2, AQI, comfort score).
+- Metrics: `iaq/{device_id}/metrics` - derived data (AQI breakdown, comfort details, pressure trend, CO2 rate, VOC/NOx categories, mold risk, PM spike flag, overall scores).
+- Health: `iaq/{device_id}/health` - uptime, heap, Wi-Fi RSSI, per-sensor state/error counters.
+- Diagnostics (optional): `iaq/{device_id}/diagnostics` - raw values and fusion diagnostics when `CONFIG_MQTT_PUBLISH_DIAGNOSTICS=y`.
 - Status (LWT): `iaq/{device_id}/status`
-- Commands: `iaq/{device_id}/cmd/#`
+- Commands: `iaq/{device_id}/cmd/#` (`/cmd/restart`, `/cmd/calibrate`)
 
 Notes
-- Each sensor publishes to its topic when it updates; no redundant aggregate payloads.
-- Missing values publish as JSON `null` so HA shows "unknown".
-- Home Assistant discovery config points each entity to its per‑sensor topic.
+- Missing values publish as JSON `null` so Home Assistant shows `unknown`.
+- State/metrics timers default to 30 s (configurable via Kconfig); diagnostics defaults to 5 min.
+- Calibration command accepts `{"ppm": 415}` or plain integers; defaults to 400 ppm when the payload is empty.
 
 ## Home Assistant
-- Auto‑discovery is published on MQTT connect (retained).
-- Entity mapping (topic → entity):
-  - `sensor/sht41` → temperature, humidity
-  - `sensor/bmp280` → pressure
-  - `sensor/sgp41` → VOC index, NOx index
-  - `sensor/pms5003` → PM1.0, PM2.5, PM10
-  - `sensor/s8` → CO2
-  - `sensor/derived` → AQI (and comfort label)
-  - `sensor/mcu` → MCU temperature
-- Units in HA use proper symbols: "°C" and "µg/m³". Console output uses ASCII ("degC", "ug/m3") for wide terminal compatibility.
+- Home Assistant discovery payloads are published when MQTT connects (retained).
+- Core entities read from `/state` (fused values) while advanced sensors use `/metrics`.
+- Value templates in the discovery payload map JSON fields (for example `{{ value_json.temp_c }}`, `{{ value_json.aqi.value }}`, `{{ value_json.pressure.delta_3hr_hpa }}`).
+- Optional diagnostics topic is excluded from discovery; subscribe manually when tuning sensor fusion.
 
 ## Architecture Overview
 - `components/iaq_data`: single source of truth; mutex‑guarded; "no data" sentinels

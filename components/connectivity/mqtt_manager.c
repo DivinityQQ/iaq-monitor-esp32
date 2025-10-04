@@ -2,9 +2,12 @@
 #include <stdio.h>
 #include <string.h>
 #include <math.h>
+#include <ctype.h>
+#include <stdlib.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
+#include "freertos/queue.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "mqtt_client.h"
@@ -28,6 +31,18 @@ static esp_timer_handle_t s_metrics_timer = NULL;
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
 static esp_timer_handle_t s_diagnostics_timer = NULL;
 #endif
+
+typedef enum {
+    MQTT_PUBLISH_EVENT_HEALTH = 0,
+    MQTT_PUBLISH_EVENT_STATE,
+    MQTT_PUBLISH_EVENT_METRICS,
+#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
+    MQTT_PUBLISH_EVENT_DIAGNOSTICS,
+#endif
+} mqtt_publish_event_t;
+
+static QueueHandle_t s_publish_queue = NULL;
+static TaskHandle_t s_publish_task_handle = NULL;
 
 /* NVS namespace for MQTT config */
 #define NVS_NAMESPACE        "mqtt_config"
@@ -63,6 +78,11 @@ static void mqtt_metrics_timer_callback(void *arg);
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
 static void mqtt_diagnostics_timer_callback(void *arg);
 #endif
+static void mqtt_publish_worker_task(void *arg);
+static esp_err_t ensure_publish_timers_started(void);
+static bool enqueue_publish_event(mqtt_publish_event_t event);
+static esp_err_t start_periodic_timer(esp_timer_handle_t *handle, const esp_timer_create_args_t *args, uint64_t period_us);
+static bool parse_co2_calibration_payload(const char *payload, int *ppm_out);
 /* Public publish functions declared in mqtt_manager.h */
 
 /* Helper: publish a single HA sensor discovery config */
@@ -112,6 +132,18 @@ static bool is_valid_broker_url(const char *url)
     if (!host || host[0] == '\0') return false;
     for (const char *p = url; *p; ++p) {
         if (*p == ' ' || *p == '\t' || *p == '\r' || *p == '\n') return false;
+    }
+    return true;
+}
+
+static bool enqueue_publish_event(mqtt_publish_event_t event)
+{
+    if (!s_publish_queue) {
+        return false;
+    }
+    if (xQueueSend(s_publish_queue, &event, 0) != pdTRUE) {
+        ESP_LOGW(TAG, "Publish queue full (event=%d)", (int)event);
+        return false;
     }
     return true;
 }
@@ -246,92 +278,53 @@ esp_err_t mqtt_manager_init(iaq_system_context_t *ctx)
 
     load_mqtt_config();
 
-    if (!is_valid_broker_url(s_broker_url)) {
+    if (s_publish_queue == NULL) {
+        s_publish_queue = xQueueCreate(12, sizeof(mqtt_publish_event_t));
+        if (s_publish_queue == NULL) {
+            ESP_LOGE(TAG, "Failed to create MQTT publish queue");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
+    if (s_publish_task_handle == NULL) {
+        BaseType_t task_ret = xTaskCreatePinnedToCore(
+            mqtt_publish_worker_task,
+            "mqtt_publish",
+            TASK_STACK_NETWORK_MANAGER,
+            NULL,
+            TASK_PRIORITY_NETWORK_MANAGER,
+            &s_publish_task_handle,
+            TASK_CORE_NETWORK_MANAGER
+        );
+        if (task_ret != pdPASS) {
+            ESP_LOGE(TAG, "Failed to create MQTT publish worker task");
+            return ESP_FAIL;
+        }
+    }
+
+    esp_err_t timer_ret = ensure_publish_timers_started();
+    if (timer_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to start MQTT timers: %s", esp_err_to_name(timer_ret));
+        return timer_ret;
+    }
+
+    esp_err_t client_ret = ESP_OK;
+    if (is_valid_broker_url(s_broker_url)) {
+        client_ret = create_mqtt_client();
+        if (client_ret != ESP_OK) {
+            ESP_LOGE(TAG, "Failed to create MQTT client: %s", esp_err_to_name(client_ret));
+        }
+    } else {
         ESP_LOGW(TAG, "MQTT disabled: invalid broker URL. Set with 'mqtt set <url> [user] [pass]'.");
-        s_initialized = true;
-        return ESP_OK;
     }
-
-    esp_err_t ret = create_mqtt_client();
-    if (ret != ESP_OK) {
-        /* MQTT client creation failed, but still initialize to allow later config */
-        s_initialized = true;
-        return ret;
-    }
-
-    /* Create MQTT health publishing timer (only if client created successfully) */
-    const esp_timer_create_args_t health_timer_args = {
-        .callback = &mqtt_health_timer_callback,
-        .name = "mqtt_health"
-    };
-    ret = esp_timer_create(&health_timer_args, &s_health_timer);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create health timer: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    ret = esp_timer_start_periodic(s_health_timer, STATUS_PUBLISH_INTERVAL_MS * 1000);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start health timer: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    ESP_LOGI(TAG, "MQTT health timer started (%d ms interval)", STATUS_PUBLISH_INTERVAL_MS);
-
-    /* Create MQTT state publishing timer (default 30s, configurable via Kconfig) */
-    const esp_timer_create_args_t state_timer_args = {
-        .callback = &mqtt_state_timer_callback,
-        .name = "mqtt_state"
-    };
-    ret = esp_timer_create(&state_timer_args, &s_state_timer);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create state timer: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    ret = esp_timer_start_periodic(s_state_timer, CONFIG_MQTT_STATE_PUBLISH_INTERVAL_SEC * 1000000);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start state timer: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    ESP_LOGI(TAG, "MQTT state timer started (%d s interval)", CONFIG_MQTT_STATE_PUBLISH_INTERVAL_SEC);
-
-    /* Create MQTT metrics publishing timer (default 30s, configurable via Kconfig) */
-    const esp_timer_create_args_t metrics_timer_args = {
-        .callback = &mqtt_metrics_timer_callback,
-        .name = "mqtt_metrics"
-    };
-    ret = esp_timer_create(&metrics_timer_args, &s_metrics_timer);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create metrics timer: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    ret = esp_timer_start_periodic(s_metrics_timer, CONFIG_MQTT_METRICS_PUBLISH_INTERVAL_SEC * 1000000);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start metrics timer: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    ESP_LOGI(TAG, "MQTT metrics timer started (%d s interval)", CONFIG_MQTT_METRICS_PUBLISH_INTERVAL_SEC);
-
-#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
-    /* Create MQTT diagnostics publishing timer (default 5 min, only if diagnostics enabled) */
-    const esp_timer_create_args_t diagnostics_timer_args = {
-        .callback = &mqtt_diagnostics_timer_callback,
-        .name = "mqtt_diagnostics"
-    };
-    ret = esp_timer_create(&diagnostics_timer_args, &s_diagnostics_timer);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to create diagnostics timer: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    ret = esp_timer_start_periodic(s_diagnostics_timer, CONFIG_MQTT_DIAGNOSTICS_PUBLISH_INTERVAL_SEC * 1000000);
-    if (ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start diagnostics timer: %s", esp_err_to_name(ret));
-        return ret;
-    }
-    ESP_LOGI(TAG, "MQTT diagnostics timer started (%d s interval)", CONFIG_MQTT_DIAGNOSTICS_PUBLISH_INTERVAL_SEC);
-#endif
 
     s_initialized = true;
-    ESP_LOGI(TAG, "MQTT client initialized successfully (MQTT 5.0)");
-    return ESP_OK;
+
+    if (client_ret == ESP_OK) {
+        ESP_LOGI(TAG, "MQTT client initialized successfully (MQTT 5.0)");
+    }
+
+    return client_ret;
 }
 
 esp_err_t mqtt_manager_start(void)
@@ -340,6 +333,13 @@ esp_err_t mqtt_manager_start(void)
         ESP_LOGE(TAG, "MQTT manager not initialized");
         return ESP_ERR_INVALID_STATE;
     }
+
+    esp_err_t timer_ret = ensure_publish_timers_started();
+    if (timer_ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to ensure MQTT timers running: %s", esp_err_to_name(timer_ret));
+        return timer_ret;
+    }
+
     if (s_mqtt_client == NULL) {
         if (!is_valid_broker_url(s_broker_url)) {
             ESP_LOGW(TAG, "MQTT not started: disabled or invalid broker. Use console to configure.");
@@ -746,7 +746,24 @@ static void mqtt_handle_command(const char *topic, const char *data, int data_le
         esp_restart();
     } else if (strcmp(topic, TOPIC_CMD_CALIBRATE) == 0) {
         ESP_LOGI(TAG, "Calibrate command received");
-        xEventGroupSetBits(s_system_ctx->event_group, SENSORS_CALIBRATE_BIT);
+
+        int ppm = 400;
+        bool has_payload = data && data[0] != '\0';
+        if (has_payload) {
+            if (!parse_co2_calibration_payload(data, &ppm)) {
+                ESP_LOGW(TAG, "Invalid calibration payload: %s", data);
+                return;
+            }
+        } else {
+            ESP_LOGI(TAG, "Calibration payload empty, defaulting to 400 ppm");
+        }
+
+        esp_err_t op_res = sensor_coordinator_calibrate(SENSOR_ID_S8, ppm);
+        if (op_res == ESP_OK) {
+            ESP_LOGI(TAG, "CO2 calibration enqueued (%d ppm)", ppm);
+        } else {
+            ESP_LOGE(TAG, "Failed to queue CO2 calibration: %s", esp_err_to_name(op_res));
+        }
     } else {
         ESP_LOGW(TAG, "Unknown command: %s", topic);
     }
@@ -825,15 +842,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
 static void mqtt_health_timer_callback(void* arg)
 {
     (void)arg;
-
-    /* Publish health status if connected */
-    if (mqtt_manager_is_connected()) {
-        iaq_data_t snapshot;
-        IAQ_DATA_WITH_LOCK() {
-            snapshot = *iaq_data_get();
-        }
-        mqtt_publish_status(&snapshot);
-    }
+    enqueue_publish_event(MQTT_PUBLISH_EVENT_HEALTH);
 }
 
 /**
@@ -844,18 +853,7 @@ static void mqtt_health_timer_callback(void* arg)
 static void mqtt_state_timer_callback(void *arg)
 {
     (void)arg;
-
-    if (!mqtt_manager_is_connected()) {
-        return;
-    }
-
-    /* Snapshot data and publish */
-    iaq_data_t snapshot;
-    IAQ_DATA_WITH_LOCK() {
-        snapshot = *iaq_data_get();
-    }
-
-    mqtt_publish_state(&snapshot);
+    enqueue_publish_event(MQTT_PUBLISH_EVENT_STATE);
 }
 
 /**
@@ -866,18 +864,7 @@ static void mqtt_state_timer_callback(void *arg)
 static void mqtt_metrics_timer_callback(void *arg)
 {
     (void)arg;
-
-    if (!mqtt_manager_is_connected()) {
-        return;
-    }
-
-    /* Snapshot data and publish */
-    iaq_data_t snapshot;
-    IAQ_DATA_WITH_LOCK() {
-        snapshot = *iaq_data_get();
-    }
-
-    mqtt_publish_metrics(&snapshot);
+    enqueue_publish_event(MQTT_PUBLISH_EVENT_METRICS);
 }
 
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
@@ -889,20 +876,163 @@ static void mqtt_metrics_timer_callback(void *arg)
 static void mqtt_diagnostics_timer_callback(void *arg)
 {
     (void)arg;
-
-    if (!mqtt_manager_is_connected()) {
-        return;
-    }
-
-    /* Snapshot data and publish */
-    iaq_data_t snapshot;
-    IAQ_DATA_WITH_LOCK() {
-        snapshot = *iaq_data_get();
-    }
-
-    mqtt_publish_diagnostics(&snapshot);
+    enqueue_publish_event(MQTT_PUBLISH_EVENT_DIAGNOSTICS);
 }
 #endif /* CONFIG_MQTT_PUBLISH_DIAGNOSTICS */
 
 
 
+
+
+static bool parse_co2_calibration_payload(const char *payload, int *ppm_out)
+{
+    if (!payload || !ppm_out) {
+        return false;
+    }
+
+    while (*payload && isspace((unsigned char)*payload)) {
+        payload++;
+    }
+
+    if (*payload == '{') {
+        cJSON *root = cJSON_Parse(payload);
+        if (!root) {
+            return false;
+        }
+
+        const cJSON *ppm = cJSON_GetObjectItemCaseSensitive(root, "ppm");
+        bool ok = false;
+        if (cJSON_IsNumber(ppm)) {
+            int value = (int)ppm->valuedouble;
+            if (value > 0 && value <= 5000) {
+                *ppm_out = value;
+                ok = true;
+            }
+        }
+
+        cJSON_Delete(root);
+        return ok;
+    }
+
+    char *endptr = NULL;
+    long value = strtol(payload, &endptr, 10);
+    if (endptr == payload) {
+        return false;
+    }
+    while (endptr && *endptr && isspace((unsigned char)*endptr)) {
+        endptr++;
+    }
+    if (endptr && *endptr != '\0') {
+        return false;
+    }
+    if (value <= 0 || value > 5000) {
+        return false;
+    }
+
+    *ppm_out = (int)value;
+    return true;
+}
+
+static esp_err_t start_periodic_timer(esp_timer_handle_t *handle,
+                                      const esp_timer_create_args_t *args,
+                                      uint64_t period_us)
+{
+    if (*handle == NULL) {
+        esp_err_t ret = esp_timer_create(args, handle);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+
+    if (!esp_timer_is_active(*handle)) {
+        esp_err_t ret = esp_timer_start_periodic(*handle, period_us);
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+            return ret;
+        }
+    }
+
+    return ESP_OK;
+}
+
+static esp_err_t ensure_publish_timers_started(void)
+{
+    const esp_timer_create_args_t health_args = {
+        .callback = &mqtt_health_timer_callback,
+        .name = "mqtt_health"
+    };
+    esp_err_t ret = start_periodic_timer(&s_health_timer, &health_args, STATUS_PUBLISH_INTERVAL_MS * 1000ULL);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    const esp_timer_create_args_t state_args = {
+        .callback = &mqtt_state_timer_callback,
+        .name = "mqtt_state"
+    };
+    ret = start_periodic_timer(&s_state_timer, &state_args, CONFIG_MQTT_STATE_PUBLISH_INTERVAL_SEC * 1000000ULL);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+    const esp_timer_create_args_t metrics_args = {
+        .callback = &mqtt_metrics_timer_callback,
+        .name = "mqtt_metrics"
+    };
+    ret = start_periodic_timer(&s_metrics_timer, &metrics_args, CONFIG_MQTT_METRICS_PUBLISH_INTERVAL_SEC * 1000000ULL);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+
+#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
+    const esp_timer_create_args_t diag_args = {
+        .callback = &mqtt_diagnostics_timer_callback,
+        .name = "mqtt_diag"
+    };
+    ret = start_periodic_timer(&s_diagnostics_timer, &diag_args, CONFIG_MQTT_DIAGNOSTICS_PUBLISH_INTERVAL_SEC * 1000000ULL);
+    if (ret != ESP_OK) {
+        return ret;
+    }
+#endif
+
+    return ESP_OK;
+}
+
+static void mqtt_publish_worker_task(void *arg)
+{
+    (void)arg;
+    mqtt_publish_event_t event;
+    iaq_data_t snapshot;
+
+    while (true) {
+        if (xQueueReceive(s_publish_queue, &event, portMAX_DELAY) != pdTRUE) {
+            continue;
+        }
+
+        if (!mqtt_manager_is_connected()) {
+            continue;
+        }
+
+        IAQ_DATA_WITH_LOCK() {
+            snapshot = *iaq_data_get();
+        }
+
+        switch (event) {
+            case MQTT_PUBLISH_EVENT_HEALTH:
+                mqtt_publish_status(&snapshot);
+                break;
+            case MQTT_PUBLISH_EVENT_STATE:
+                mqtt_publish_state(&snapshot);
+                break;
+            case MQTT_PUBLISH_EVENT_METRICS:
+                mqtt_publish_metrics(&snapshot);
+                break;
+#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
+            case MQTT_PUBLISH_EVENT_DIAGNOSTICS:
+                mqtt_publish_diagnostics(&snapshot);
+                break;
+#endif
+            default:
+                break;
+        }
+    }
+}
