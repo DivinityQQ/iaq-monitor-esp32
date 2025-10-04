@@ -390,13 +390,13 @@ static void mqtt_publish_ha_discovery(void)
 #endif
     ha_publish_sensor_config(device, "pm25",        "PM2.5",       TOPIC_STATE, "pm25", "\xC2\xB5g/m\xC2\xB3", "{{ value_json.pm25_ugm3 }}", NULL);
     ha_publish_sensor_config(device, "pm10",        "PM10",        TOPIC_STATE, "pm10", "\xC2\xB5g/m\xC2\xB3", "{{ value_json.pm10_ugm3 }}",  NULL);
-    ha_publish_sensor_config(device, "voc",             "VOC Index",       TOPIC_STATE,  NULL,               NULL,     "{{ value_json.voc_index }}",       "mdi:chemical-weapon");
-    ha_publish_sensor_config(device, "nox",             "NOx Index",       TOPIC_STATE,  NULL,               NULL,     "{{ value_json.nox_index }}",       "mdi:smog");
+    ha_publish_sensor_config(device, "voc",             "VOC Index",       TOPIC_STATE,  NULL,               "index",     "{{ value_json.voc_index }}",       "mdi:chemical-weapon");
+    ha_publish_sensor_config(device, "nox",             "NOx Index",       TOPIC_STATE,  NULL,               "index",     "{{ value_json.nox_index }}",       "mdi:smog");
     ha_publish_sensor_config(device, "mcu_temp", "MCU Temperature", TOPIC_STATE,    "temperature",     "\xC2\xB0""C",    "{{ value_json.mcu_temp_c }}", NULL);
 
     /* Basic metrics from /state topic */
     ha_publish_sensor_config(device, "aqi",             "AQI",             TOPIC_STATE,"aqi",             NULL,     "{{ value_json.aqi }}",             NULL);
-    ha_publish_sensor_config(device, "comfort_score", "Comfort Score", TOPIC_STATE, NULL, NULL, "{{ value_json.comfort_score }}", "mdi:thermometer-lines");
+    ha_publish_sensor_config(device, "comfort_score", "Comfort Score", TOPIC_STATE, NULL, "score", "{{ value_json.comfort_score }}", "mdi:thermometer-lines");
 
     /* Detailed metrics from /metrics topic */
     ha_publish_sensor_config(device, "aqi_category", "AQI Category", TOPIC_METRICS, NULL, NULL, "{{ value_json.aqi.category }}", "mdi:air-filter");
@@ -405,11 +405,11 @@ static void mqtt_publish_ha_discovery(void)
     ha_publish_sensor_config(device, "abs_humidity", "Absolute Humidity", TOPIC_METRICS, "absolute_humidity", "g/m\xC2\xB3", "{{ value_json.comfort.abs_humidity_gm3 }}", NULL);
     ha_publish_sensor_config(device, "heat_index", "Heat Index", TOPIC_METRICS, "temperature", "\xC2\xB0""C", "{{ value_json.comfort.heat_index_c }}", "mdi:thermometer-alert");
     ha_publish_sensor_config(device, "comfort_category", "Comfort Category", TOPIC_METRICS, NULL, NULL, "{{ value_json.comfort.category }}", "mdi:sofa");
-    ha_publish_sensor_config(device, "co2_score", "CO2 Score", TOPIC_METRICS, NULL, NULL, "{{ value_json.co2_score }}", "mdi:air-purifier");
+    ha_publish_sensor_config(device, "co2_score", "CO2 Score", TOPIC_METRICS, NULL, "score", "{{ value_json.co2_score }}", "mdi:air-purifier");
     ha_publish_sensor_config(device, "voc_category", "VOC Category", TOPIC_METRICS, NULL, NULL, "{{ value_json.voc_category }}", "mdi:chemical-weapon");
     ha_publish_sensor_config(device, "nox_category", "NOx Category", TOPIC_METRICS, NULL, NULL, "{{ value_json.nox_category }}", "mdi:smog");
-    ha_publish_sensor_config(device, "overall_iaq_score", "Overall IAQ Score", TOPIC_METRICS, NULL, NULL, "{{ value_json.overall_iaq_score }}", "mdi:air-filter");
-    ha_publish_sensor_config(device, "mold_risk", "Mold Risk Score", TOPIC_METRICS, NULL, NULL, "{{ value_json.mold_risk.score }}", "mdi:water-percent");
+    ha_publish_sensor_config(device, "overall_iaq_score", "Overall IAQ Score", TOPIC_METRICS, NULL, "score", "{{ value_json.overall_iaq_score }}", "mdi:air-filter");
+    ha_publish_sensor_config(device, "mold_risk", "Mold Risk Score", TOPIC_METRICS, NULL, "score", "{{ value_json.mold_risk.score }}", "mdi:water-percent");
     ha_publish_sensor_config(device, "mold_category", "Mold Risk Category", TOPIC_METRICS, NULL, NULL, "{{ value_json.mold_risk.category }}", "mdi:water-alert");
     ha_publish_sensor_config(device, "pressure_trend", "Pressure Trend", TOPIC_METRICS, NULL, NULL, "{{ value_json.pressure.trend }}", "mdi:trending-up");
     ha_publish_sensor_config(device, "pressure_delta_3hr", "Pressure Change (3hr)", TOPIC_METRICS, "pressure", "hPa", "{{ value_json.pressure.delta_3hr_hpa }}", NULL);
