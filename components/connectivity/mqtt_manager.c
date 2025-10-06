@@ -21,6 +21,7 @@
 #include "iaq_config.h"
 #include "sensor_coordinator.h"
 #include "esp_timer.h"
+#include "esp_task_wdt.h"
 
 static const char *TAG = "MQTT_MGR";
 
@@ -793,6 +794,18 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             s_mqtt_connected = false;
             IAQ_DATA_WITH_LOCK() { iaq_data_get()->system.mqtt_connected = false; }
             xEventGroupClearBits(s_system_ctx->event_group, MQTT_CONNECTED_BIT);
+
+            /* Drain publish queue to prevent stale bursts after reconnect */
+            if (s_publish_queue) {
+                mqtt_publish_event_t discard;
+                int drained = 0;
+                while (xQueueReceive(s_publish_queue, &discard, 0) == pdTRUE) {
+                    drained++;
+                }
+                if (drained > 0) {
+                    ESP_LOGD(TAG, "Drained %d pending publish events on disconnect", drained);
+                }
+            }
             break;
         case MQTT_EVENT_SUBSCRIBED:
             ESP_LOGI(TAG, "MQTT subscribed, msg_id=%d", event->msg_id);
@@ -854,6 +867,11 @@ static void mqtt_state_timer_callback(void *arg)
 {
     (void)arg;
     enqueue_publish_event(MQTT_PUBLISH_EVENT_STATE);
+
+    /* After first one-shot trigger, switch to periodic mode */
+    if (s_state_timer && !esp_timer_is_active(s_state_timer)) {
+        esp_timer_start_periodic(s_state_timer, CONFIG_MQTT_STATE_PUBLISH_INTERVAL_SEC * 1000000ULL);
+    }
 }
 
 /**
@@ -865,6 +883,11 @@ static void mqtt_metrics_timer_callback(void *arg)
 {
     (void)arg;
     enqueue_publish_event(MQTT_PUBLISH_EVENT_METRICS);
+
+    /* After first one-shot trigger, switch to periodic mode */
+    if (s_metrics_timer && !esp_timer_is_active(s_metrics_timer)) {
+        esp_timer_start_periodic(s_metrics_timer, CONFIG_MQTT_METRICS_PUBLISH_INTERVAL_SEC * 1000000ULL);
+    }
 }
 
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
@@ -877,6 +900,11 @@ static void mqtt_diagnostics_timer_callback(void *arg)
 {
     (void)arg;
     enqueue_publish_event(MQTT_PUBLISH_EVENT_DIAGNOSTICS);
+
+    /* After first one-shot trigger, switch to periodic mode */
+    if (s_diagnostics_timer && !esp_timer_is_active(s_diagnostics_timer)) {
+        esp_timer_start_periodic(s_diagnostics_timer, CONFIG_MQTT_DIAGNOSTICS_PUBLISH_INTERVAL_SEC * 1000000ULL);
+    }
 }
 #endif /* CONFIG_MQTT_PUBLISH_DIAGNOSTICS */
 
@@ -956,41 +984,78 @@ static esp_err_t start_periodic_timer(esp_timer_handle_t *handle,
 
 static esp_err_t ensure_publish_timers_started(void)
 {
+    /* Stagger timer starts by 5 seconds each to prevent simultaneous firing
+     * and flatten CPU/network bursts. Health fires immediately, state after 5s,
+     * metrics after 10s, diagnostics after 15s. */
+
+    esp_err_t ret;
+
+    /* Health timer - starts immediately */
     const esp_timer_create_args_t health_args = {
         .callback = &mqtt_health_timer_callback,
         .name = "mqtt_health"
     };
-    esp_err_t ret = start_periodic_timer(&s_health_timer, &health_args, STATUS_PUBLISH_INTERVAL_MS * 1000ULL);
+    ret = start_periodic_timer(&s_health_timer, &health_args, STATUS_PUBLISH_INTERVAL_MS * 1000ULL);
     if (ret != ESP_OK) {
         return ret;
     }
 
-    const esp_timer_create_args_t state_args = {
-        .callback = &mqtt_state_timer_callback,
-        .name = "mqtt_state"
-    };
-    ret = start_periodic_timer(&s_state_timer, &state_args, CONFIG_MQTT_STATE_PUBLISH_INTERVAL_SEC * 1000000ULL);
-    if (ret != ESP_OK) {
-        return ret;
+    /* State timer - stagger by 5 seconds */
+    if (s_state_timer == NULL) {
+        const esp_timer_create_args_t state_args = {
+            .callback = &mqtt_state_timer_callback,
+            .name = "mqtt_state"
+        };
+        ret = esp_timer_create(&state_args, &s_state_timer);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    if (!esp_timer_is_active(s_state_timer)) {
+        /* Start with 5 second initial delay, then periodic */
+        ret = esp_timer_start_once(s_state_timer, 5000000ULL);
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+            return ret;
+        }
     }
 
-    const esp_timer_create_args_t metrics_args = {
-        .callback = &mqtt_metrics_timer_callback,
-        .name = "mqtt_metrics"
-    };
-    ret = start_periodic_timer(&s_metrics_timer, &metrics_args, CONFIG_MQTT_METRICS_PUBLISH_INTERVAL_SEC * 1000000ULL);
-    if (ret != ESP_OK) {
-        return ret;
+    /* Metrics timer - stagger by 10 seconds */
+    if (s_metrics_timer == NULL) {
+        const esp_timer_create_args_t metrics_args = {
+            .callback = &mqtt_metrics_timer_callback,
+            .name = "mqtt_metrics"
+        };
+        ret = esp_timer_create(&metrics_args, &s_metrics_timer);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    if (!esp_timer_is_active(s_metrics_timer)) {
+        /* Start with 10 second initial delay, then periodic */
+        ret = esp_timer_start_once(s_metrics_timer, 10000000ULL);
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+            return ret;
+        }
     }
 
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
-    const esp_timer_create_args_t diag_args = {
-        .callback = &mqtt_diagnostics_timer_callback,
-        .name = "mqtt_diag"
-    };
-    ret = start_periodic_timer(&s_diagnostics_timer, &diag_args, CONFIG_MQTT_DIAGNOSTICS_PUBLISH_INTERVAL_SEC * 1000000ULL);
-    if (ret != ESP_OK) {
-        return ret;
+    /* Diagnostics timer - stagger by 15 seconds */
+    if (s_diagnostics_timer == NULL) {
+        const esp_timer_create_args_t diag_args = {
+            .callback = &mqtt_diagnostics_timer_callback,
+            .name = "mqtt_diag"
+        };
+        ret = esp_timer_create(&diag_args, &s_diagnostics_timer);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    if (!esp_timer_is_active(s_diagnostics_timer)) {
+        /* Start with 15 second initial delay, then periodic */
+        ret = esp_timer_start_once(s_diagnostics_timer, 15000000ULL);
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+            return ret;
+        }
     }
 #endif
 
@@ -1003,7 +1068,19 @@ static void mqtt_publish_worker_task(void *arg)
     mqtt_publish_event_t event;
     iaq_data_t snapshot;
 
+    /* Subscribe this task to the Task Watchdog Timer for deadlock detection */
+    esp_err_t wdt_ret = esp_task_wdt_add(NULL);
+    if (wdt_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to add MQTT worker to TWDT: %s", esp_err_to_name(wdt_ret));
+    }
+
     while (true) {
+        /* Reset watchdog - confirms task is still running */
+        if (wdt_ret == ESP_OK) {
+            esp_task_wdt_reset();
+        }
+
+        /* Block on first event */
         if (xQueueReceive(s_publish_queue, &event, portMAX_DELAY) != pdTRUE) {
             continue;
         }
@@ -1012,27 +1089,33 @@ static void mqtt_publish_worker_task(void *arg)
             continue;
         }
 
+        /* Coalesce pending events: drain queue and OR into bitmask.
+         * This reduces lock contention when multiple timers fire close together. */
+        uint8_t pending_events = (1 << event);
+        mqtt_publish_event_t next_event;
+        while (xQueueReceive(s_publish_queue, &next_event, 0) == pdTRUE) {
+            pending_events |= (1 << next_event);
+        }
+
+        /* Take single snapshot for all pending publications */
         IAQ_DATA_WITH_LOCK() {
             snapshot = *iaq_data_get();
         }
 
-        switch (event) {
-            case MQTT_PUBLISH_EVENT_HEALTH:
-                mqtt_publish_status(&snapshot);
-                break;
-            case MQTT_PUBLISH_EVENT_STATE:
-                mqtt_publish_state(&snapshot);
-                break;
-            case MQTT_PUBLISH_EVENT_METRICS:
-                mqtt_publish_metrics(&snapshot);
-                break;
-#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
-            case MQTT_PUBLISH_EVENT_DIAGNOSTICS:
-                mqtt_publish_diagnostics(&snapshot);
-                break;
-#endif
-            default:
-                break;
+        /* Publish all requested topics from single snapshot */
+        if (pending_events & (1 << MQTT_PUBLISH_EVENT_HEALTH)) {
+            mqtt_publish_status(&snapshot);
         }
+        if (pending_events & (1 << MQTT_PUBLISH_EVENT_STATE)) {
+            mqtt_publish_state(&snapshot);
+        }
+        if (pending_events & (1 << MQTT_PUBLISH_EVENT_METRICS)) {
+            mqtt_publish_metrics(&snapshot);
+        }
+#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
+        if (pending_events & (1 << MQTT_PUBLISH_EVENT_DIAGNOSTICS)) {
+            mqtt_publish_diagnostics(&snapshot);
+        }
+#endif
     }
 }

@@ -26,6 +26,7 @@
 /* Fusion and metrics */
 #include "sensor_fusion.h"
 #include "metrics_calc.h"
+#include "esp_task_wdt.h"
 
 static const char *TAG = "SENSOR_COORD";
 
@@ -45,8 +46,24 @@ typedef struct {
     uint32_t error_count;
 } sensor_runtime_t;
 
+/**
+ * Per-sensor auto-recovery tracking.
+ * Implements exponential backoff for ERROR state sensors.
+ */
+typedef struct {
+    int64_t last_retry_us;      // Last recovery attempt timestamp
+    uint8_t retry_count;         // Number of retries since entering ERROR
+    uint32_t next_retry_delay_ms; // Next retry delay (exponential: 30s, 60s, 120s, 300s)
+} sensor_recovery_t;
+
 /* Per-sensor runtime state tracking */
 static sensor_runtime_t s_runtime[SENSOR_ID_MAX];
+
+/* Per-sensor auto-recovery tracking */
+static sensor_recovery_t s_recovery[SENSOR_ID_MAX];
+
+/* Spinlock for protecting runtime info reads (prevents torn 64-bit reads) */
+static portMUX_TYPE s_runtime_spinlock = portMUX_INITIALIZER_UNLOCKED;
 
 /* Warm-up durations from Kconfig (milliseconds) */
 static const uint32_t s_warmup_ms[SENSOR_ID_MAX] = {
@@ -133,11 +150,15 @@ static void init_schedule_from_config(void)
     s_cadence_ms[SENSOR_ID_PMS5003] = load_cadence_ms("cad_pms5003", CONFIG_IAQ_CADENCE_PMS5003_MS, &s_cadence_from_nvs[SENSOR_ID_PMS5003]);
     s_cadence_ms[SENSOR_ID_S8]      = load_cadence_ms("cad_s8",      CONFIG_IAQ_CADENCE_S8_MS,      &s_cadence_from_nvs[SENSOR_ID_S8]);
 
+    /* Stagger initial sensor reads to avoid thundering herd on boot.
+     * Spread sensors evenly across first period to flatten I2C/UART load. */
     TickType_t now = xTaskGetTickCount();
     for (int i = 0; i < SENSOR_ID_MAX; ++i) {
         s_schedule[i].enabled = (s_cadence_ms[i] > 0);
         s_schedule[i].period_ticks = pdMS_TO_TICKS(s_cadence_ms[i]);
-        s_schedule[i].next_due = now + s_schedule[i].period_ticks;
+        /* Stagger: sensor i starts at (period * i / MAX) to spread load */
+        TickType_t offset = (s_schedule[i].period_ticks * i) / SENSOR_ID_MAX;
+        s_schedule[i].next_due = now + offset;
     }
 }
 
@@ -430,6 +451,12 @@ static void sensor_coordinator_task(void *arg)
 {
     ESP_LOGI(TAG, "Sensor coordinator task started");
 
+    /* Subscribe this task to the Task Watchdog Timer for deadlock detection */
+    esp_err_t wdt_ret = esp_task_wdt_add(NULL);
+    if (wdt_ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to add sensor coordinator to TWDT: %s", esp_err_to_name(wdt_ret));
+    }
+
     /* Brief delay for hardware stabilization */
     vTaskDelay(pdMS_TO_TICKS(500));
 
@@ -448,6 +475,11 @@ static void sensor_coordinator_task(void *arg)
     xEventGroupSetBits(s_system_ctx->event_group, SENSORS_READY_BIT);
 
     while (s_running) {
+        /* Reset watchdog - confirms task is still running and not deadlocked */
+        if (wdt_ret == ESP_OK) {
+            esp_task_wdt_reset();
+        }
+
         int64_t now_us = esp_timer_get_time();
 
         /* Check warm-up deadlines, promote WARMING -> READY */
@@ -456,6 +488,63 @@ static void sensor_coordinator_task(void *arg)
                 if (now_us >= s_runtime[i].warmup_deadline_us) {
                     ESP_LOGI(TAG, "%s warm-up complete", sensor_id_to_string(i));
                     transition_to_state(i, SENSOR_STATE_READY);
+                }
+            }
+        }
+
+        /* Auto-recovery: periodically retry ERROR state sensors with exponential backoff */
+        for (int i = 0; i < SENSOR_ID_MAX; ++i) {
+            if (s_runtime[i].state == SENSOR_STATE_ERROR) {
+                int64_t time_since_retry_us = now_us - s_recovery[i].last_retry_us;
+                uint64_t retry_delay_us = (uint64_t)s_recovery[i].next_retry_delay_ms * 1000ULL;
+
+                if (time_since_retry_us >= retry_delay_us || s_recovery[i].last_retry_us == 0) {
+                    ESP_LOGI(TAG, "%s auto-recovery attempt %d (backoff: %d ms)",
+                             sensor_id_to_string(i), s_recovery[i].retry_count + 1,
+                             s_recovery[i].next_retry_delay_ms);
+
+                    esp_err_t reset_result = ESP_FAIL;
+                    /* Attempt driver reset/re-init */
+                    if (i == SENSOR_ID_MCU) {
+                        mcu_temp_driver_disable();
+                        reset_result = mcu_temp_driver_enable();
+                    } else if (i == SENSOR_ID_SHT41) {
+                        reset_result = sht41_driver_reset();
+                    } else if (i == SENSOR_ID_BMP280) {
+                        reset_result = bmp280_driver_reset();
+                    } else if (i == SENSOR_ID_SGP41) {
+                        reset_result = sgp41_driver_reset();
+                    } else if (i == SENSOR_ID_PMS5003) {
+                        reset_result = pms5003_driver_reset();
+                    } else if (i == SENSOR_ID_S8) {
+                        reset_result = s8_driver_reset();
+                    }
+
+                    s_recovery[i].last_retry_us = now_us;
+                    s_recovery[i].retry_count++;
+
+                    if (reset_result == ESP_OK) {
+                        ESP_LOGI(TAG, "%s auto-recovery succeeded", sensor_id_to_string(i));
+                        /* Reset successful - transition to INIT/WARMING */
+                        if (s_warmup_ms[i] > 0) {
+                            transition_to_state(i, SENSOR_STATE_WARMING);
+                        } else {
+                            transition_to_state(i, SENSOR_STATE_READY);
+                        }
+                        /* Reset recovery tracking */
+                        s_recovery[i].retry_count = 0;
+                        s_recovery[i].next_retry_delay_ms = 30000; // Reset to initial delay
+                    } else {
+                        /* Recovery failed - exponential backoff: 30s, 60s, 120s, 300s (cap) */
+                        if (s_recovery[i].next_retry_delay_ms < 300000) {
+                            s_recovery[i].next_retry_delay_ms = s_recovery[i].next_retry_delay_ms * 2;
+                            if (s_recovery[i].next_retry_delay_ms > 300000) {
+                                s_recovery[i].next_retry_delay_ms = 300000; // Cap at 5 minutes
+                            }
+                        }
+                        ESP_LOGW(TAG, "%s auto-recovery failed, next retry in %d ms",
+                                 sensor_id_to_string(i), s_recovery[i].next_retry_delay_ms);
+                    }
                 }
             }
         }
@@ -599,6 +688,11 @@ esp_err_t sensor_coordinator_init(iaq_system_context_t *ctx)
     for (int i = 0; i < SENSOR_ID_MAX; ++i) {
         memset(&s_runtime[i], 0, sizeof(sensor_runtime_t));
         s_runtime[i].state = SENSOR_STATE_UNINIT;
+
+        /* Initialize auto-recovery tracking */
+        s_recovery[i].last_retry_us = 0;
+        s_recovery[i].retry_count = 0;
+        s_recovery[i].next_retry_delay_ms = 30000; // Initial delay: 30 seconds
     }
 
     /* Create command queue */
@@ -880,6 +974,18 @@ esp_err_t sensor_coordinator_reset(sensor_id_t id)
 
 esp_err_t sensor_coordinator_calibrate(sensor_id_t id, int value)
 {
+    /* Gate calibration: only accept if sensor is in READY state */
+    if (id < 0 || id >= SENSOR_ID_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    if (s_runtime[id].state != SENSOR_STATE_READY) {
+        ESP_LOGW(TAG, "Cannot calibrate %s: sensor not ready (state=%s)",
+                 sensor_id_to_string(id),
+                 sensor_coordinator_state_to_string(s_runtime[id].state));
+        return ESP_ERR_INVALID_STATE;
+    }
+
     return enqueue_cmd(CMD_CALIBRATE, id, value, NULL);
 }
 
@@ -938,11 +1044,14 @@ esp_err_t sensor_coordinator_get_runtime_info(sensor_id_t id, sensor_runtime_inf
         return ESP_ERR_INVALID_ARG;
     }
 
-    /* Copy runtime state (safe without lock as reads are atomic on this platform) */
+    /* Protect 64-bit timestamp reads with critical section to prevent torn reads.
+     * ESP32 does not guarantee atomicity for 64-bit accesses. */
+    portENTER_CRITICAL(&s_runtime_spinlock);
     out_info->state = s_runtime[id].state;
     out_info->warmup_deadline_us = s_runtime[id].warmup_deadline_us;
     out_info->last_read_us = s_runtime[id].last_read_us;
     out_info->error_count = s_runtime[id].error_count;
+    portEXIT_CRITICAL(&s_runtime_spinlock);
 
     return ESP_OK;
 }

@@ -593,6 +593,20 @@ static void update_pressure_trend(iaq_data_t *data)
 
 #ifdef CONFIG_METRICS_CO2_RATE_ENABLE
 
+/* Helper: median of 3 values (for filtering noisy CO2 readings before rate calc) */
+static float median3(float a, float b, float c)
+{
+    if (a > b) {
+        if (b > c) return b;       // a > b > c
+        else if (a > c) return c;  // a > c >= b
+        else return a;             // c >= a > b
+    } else {
+        if (a > c) return a;       // b >= a > c
+        else if (b > c) return c;  // b > c >= a
+        else return b;             // c >= b >= a
+    }
+}
+
 static void update_co2_rate(iaq_data_t *data)
 {
     if (!data->valid.co2_ppm) {
@@ -641,7 +655,44 @@ static void update_co2_rate(iaq_data_t *data)
     }
 
     uint8_t latest_idx = (s_co2_history.head + CO2_HISTORY_SIZE - 1) % CO2_HISTORY_SIZE;
-    float co2_delta = s_co2_history.co2_ppm[latest_idx] - s_co2_history.co2_ppm[oldest_in_window];
+
+    /* Apply median filter to CO2 values to suppress sensor jitter while preserving real spikes.
+     * Use last 3 samples for both endpoints if available. */
+    float co2_latest, co2_oldest;
+
+    if (s_co2_history.count >= 3) {
+        uint8_t idx0 = (s_co2_history.head + CO2_HISTORY_SIZE - 1) % CO2_HISTORY_SIZE;
+        uint8_t idx1 = (s_co2_history.head + CO2_HISTORY_SIZE - 2) % CO2_HISTORY_SIZE;
+        uint8_t idx2 = (s_co2_history.head + CO2_HISTORY_SIZE - 3) % CO2_HISTORY_SIZE;
+        co2_latest = median3(s_co2_history.co2_ppm[idx0],
+                             s_co2_history.co2_ppm[idx1],
+                             s_co2_history.co2_ppm[idx2]);
+    } else {
+        co2_latest = s_co2_history.co2_ppm[latest_idx];
+    }
+
+    /* For oldest, check if we have 3 samples around it */
+    int oldest_pos = 0;
+    for (int i = 0; i < s_co2_history.count; i++) {
+        int idx = (s_co2_history.head + CO2_HISTORY_SIZE - 1 - i) % CO2_HISTORY_SIZE;
+        if (idx == oldest_in_window) {
+            oldest_pos = i;
+            break;
+        }
+    }
+
+    if (oldest_pos >= 2 && oldest_pos < s_co2_history.count - 1) {
+        /* We have samples on both sides */
+        uint8_t idx_p1 = (oldest_in_window + 1) % CO2_HISTORY_SIZE;
+        uint8_t idx_m1 = (oldest_in_window + CO2_HISTORY_SIZE - 1) % CO2_HISTORY_SIZE;
+        co2_oldest = median3(s_co2_history.co2_ppm[oldest_in_window],
+                             s_co2_history.co2_ppm[idx_p1],
+                             s_co2_history.co2_ppm[idx_m1]);
+    } else {
+        co2_oldest = s_co2_history.co2_ppm[oldest_in_window];
+    }
+
+    float co2_delta = co2_latest - co2_oldest;
     float time_delta_hr = (float)(s_co2_history.timestamps_us[latest_idx] - s_co2_history.timestamps_us[oldest_in_window]) / (3600.0f * 1000000.0f);
 
     if (time_delta_hr > 0.0f) {
