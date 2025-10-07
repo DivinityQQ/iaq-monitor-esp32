@@ -139,6 +139,11 @@ static bool is_valid_broker_url(const char *url)
 
 static bool enqueue_publish_event(mqtt_publish_event_t event)
 {
+    /* Only enqueue if connected - prevents queue churn and log noise when offline.
+     * Worker still drains queue on disconnect as a safety net. */
+    if (!s_mqtt_connected) {
+        return false;
+    }
     if (!s_publish_queue) {
         return false;
     }

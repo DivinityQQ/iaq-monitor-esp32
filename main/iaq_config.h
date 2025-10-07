@@ -44,10 +44,10 @@
  * Event bits for inter-task synchronization
  * Used with FreeRTOS EventGroup
  */
-#define WIFI_CONNECTED_BIT          BIT0
-#define MQTT_CONNECTED_BIT          BIT1
-#define SENSORS_READY_BIT           BIT2
-#define DISPLAY_UPDATE_BIT          BIT4
+#define WIFI_CONNECTED_BIT                  BIT0
+#define MQTT_CONNECTED_BIT                  BIT1
+#define SENSOR_COORDINATOR_STARTED_BIT      BIT2  /* Set when coordinator task starts (not when all sensors ready) */
+#define DISPLAY_UPDATE_BIT                  BIT4
 
 /**
  * Status publishing interval (milliseconds)

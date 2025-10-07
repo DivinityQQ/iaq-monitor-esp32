@@ -472,7 +472,8 @@ static void sensor_coordinator_task(void *arg)
         }
     }
 
-    xEventGroupSetBits(s_system_ctx->event_group, SENSORS_READY_BIT);
+    /* Signal that coordinator task has started (individual sensors may still be warming up) */
+    xEventGroupSetBits(s_system_ctx->event_group, SENSOR_COORDINATOR_STARTED_BIT);
 
     while (s_running) {
         /* Reset watchdog - confirms task is still running and not deadlocked */
