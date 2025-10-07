@@ -25,21 +25,17 @@ esp_err_t iaq_data_init(void)
         return ESP_FAIL;
     }
 
-    /* Mark no-data for all numeric fields (RAW sensor values) */
-    g_iaq_data.temperature = NAN;
-    g_iaq_data.humidity = NAN;
-    g_iaq_data.pressure = NAN;
-    g_iaq_data.pressure_trend = NAN;
-    g_iaq_data.co2_ppm = NAN;
-    g_iaq_data.pm1_0 = NAN;
-    g_iaq_data.pm2_5 = NAN;
-    g_iaq_data.pm10 = NAN;
-    g_iaq_data.voc_index = UINT16_MAX;
-    g_iaq_data.nox_index = UINT16_MAX;
-    g_iaq_data.aqi = UINT16_MAX;
-    g_iaq_data.overall_quality = 0xFF;
-    g_iaq_data.mcu_temperature = NAN;
-    g_iaq_data.comfort = "unknown";
+    /* Initialize RAW sensor values */
+    g_iaq_data.raw.temp_c = NAN;
+    g_iaq_data.raw.rh_pct = NAN;
+    g_iaq_data.raw.pressure_pa = NAN;
+    g_iaq_data.raw.mcu_temp_c = NAN;
+    g_iaq_data.raw.co2_ppm = NAN;
+    g_iaq_data.raw.pm1_ugm3 = NAN;
+    g_iaq_data.raw.pm25_ugm3 = NAN;
+    g_iaq_data.raw.pm10_ugm3 = NAN;
+    g_iaq_data.raw.voc_index = UINT16_MAX;
+    g_iaq_data.raw.nox_index = UINT16_MAX;
 
     /* Initialize FUSED (compensated) sensor values */
     g_iaq_data.fused.temp_c = NAN;
@@ -82,14 +78,14 @@ esp_err_t iaq_data_init(void)
     g_iaq_data.fusion_diag.pm1_pm25_ratio = NAN;
 
     /* Initialize all validity flags to false */
-    g_iaq_data.valid.temperature = false;
-    g_iaq_data.valid.mcu_temperature = false;
-    g_iaq_data.valid.humidity = false;
-    g_iaq_data.valid.pressure = false;
+    g_iaq_data.valid.temp_c = false;
+    g_iaq_data.valid.mcu_temp_c = false;
+    g_iaq_data.valid.rh_pct = false;
+    g_iaq_data.valid.pressure_pa = false;
     g_iaq_data.valid.co2_ppm = false;
-    g_iaq_data.valid.pm1_0 = false;
-    g_iaq_data.valid.pm2_5 = false;
-    g_iaq_data.valid.pm10 = false;
+    g_iaq_data.valid.pm1_ugm3 = false;
+    g_iaq_data.valid.pm25_ugm3 = false;
+    g_iaq_data.valid.pm10_ugm3 = false;
     g_iaq_data.valid.voc_index = false;
     g_iaq_data.valid.nox_index = false;
 

@@ -156,7 +156,7 @@ static const char* aqi_value_to_category(uint16_t aqi)
  */
 static void calculate_aqi(iaq_data_t *data)
 {
-    if (!data->valid.pm2_5 && !data->valid.pm10) {
+    if (!data->valid.pm25_ugm3 && !data->valid.pm10_ugm3) {
         data->metrics.aqi_value = UINT16_MAX;
         data->metrics.aqi_category = "unknown";
         data->metrics.aqi_dominant = "none";
@@ -168,14 +168,14 @@ static void calculate_aqi(iaq_data_t *data)
     uint16_t pm25_aqi = UINT16_MAX;
     uint16_t pm10_aqi = UINT16_MAX;
 
-    if (data->valid.pm2_5) {
+    if (data->valid.pm25_ugm3) {
         pm25_aqi = calculate_aqi_subindex(data->fused.pm25_ugm3, pm25_breakpoints, PM25_BREAKPOINT_COUNT);
         data->metrics.aqi_pm25_subindex = (float)pm25_aqi;
     } else {
         data->metrics.aqi_pm25_subindex = NAN;
     }
 
-    if (data->valid.pm10) {
+    if (data->valid.pm10_ugm3) {
         pm10_aqi = calculate_aqi_subindex(data->fused.pm10_ugm3, pm10_breakpoints, PM10_BREAKPOINT_COUNT);
         data->metrics.aqi_pm10_subindex = (float)pm10_aqi;
     } else {
@@ -290,7 +290,7 @@ static float calculate_heat_index(float temp_c, float rh_pct)
  */
 static void calculate_comfort_score(iaq_data_t *data)
 {
-    if (!data->valid.temperature || !data->valid.humidity) {
+    if (!data->valid.temp_c || !data->valid.rh_pct) {
         data->metrics.comfort_score = 0;
         data->metrics.comfort_category = "unknown";
         data->metrics.dew_point_c = NAN;
@@ -439,13 +439,13 @@ static const char* index_to_category(uint16_t index)
 static void calculate_voc_nox_categories(iaq_data_t *data)
 {
     if (data->valid.voc_index) {
-        data->metrics.voc_category = index_to_category(data->voc_index);
+        data->metrics.voc_category = index_to_category(data->raw.voc_index);
     } else {
         data->metrics.voc_category = "unknown";
     }
 
     if (data->valid.nox_index) {
-        data->metrics.nox_category = index_to_category(data->nox_index);
+        data->metrics.nox_category = index_to_category(data->raw.nox_index);
     } else {
         data->metrics.nox_category = "unknown";
     }
@@ -464,7 +464,7 @@ static void calculate_voc_nox_categories(iaq_data_t *data)
  */
 static void calculate_mold_risk(iaq_data_t *data)
 {
-    if (!data->valid.temperature || !data->valid.humidity) {
+    if (!data->valid.temp_c || !data->valid.rh_pct) {
         data->metrics.mold_risk_score = 0;
         data->metrics.mold_risk_category = "unknown";
         return;
@@ -520,7 +520,7 @@ static void calculate_mold_risk(iaq_data_t *data)
 
 static void update_pressure_trend(iaq_data_t *data)
 {
-    if (!data->valid.pressure) {
+    if (!data->valid.pressure_pa) {
         data->metrics.pressure_trend = PRESSURE_TREND_UNKNOWN;
         data->metrics.pressure_delta_3hr_hpa = NAN;
         return;
@@ -709,7 +709,7 @@ static void update_co2_rate(iaq_data_t *data)
 
 static void update_pm_spike_detection(iaq_data_t *data)
 {
-    if (!data->valid.pm2_5) {
+    if (!data->valid.pm25_ugm3) {
         data->metrics.pm25_spike_detected = false;
         return;
     }

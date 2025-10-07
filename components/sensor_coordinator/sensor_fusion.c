@@ -122,23 +122,23 @@ esp_err_t fusion_init(void)
 static void apply_pm_rh_correction(iaq_data_t *data)
 {
 #ifdef CONFIG_FUSION_PM_RH_ENABLE
-    if (!data->valid.humidity || !data->valid.pm2_5) {
+    if (!data->valid.rh_pct || !data->valid.pm25_ugm3) {
         /* Copy raw values to fused (no correction possible) */
-        data->fused.pm1_ugm3 = data->pm1_0;
-        data->fused.pm25_ugm3 = data->pm2_5;
-        data->fused.pm10_ugm3 = data->pm10;
+        data->fused.pm1_ugm3 = data->raw.pm1_ugm3;
+        data->fused.pm25_ugm3 = data->raw.pm25_ugm3;
+        data->fused.pm10_ugm3 = data->raw.pm10_ugm3;
         data->fusion_diag.pm_rh_factor = 1.0f;
         data->fusion_diag.pm25_quality = 0;
         return;
     }
 
-    float rh = data->humidity;
+    float rh = data->raw.rh_pct;
 
     /* If RH too high, don't apply correction (sensor unreliable) */
     if (rh >= CONFIG_FUSION_PM_RH_MAX_PERCENT) {
-        data->fused.pm1_ugm3 = data->pm1_0;
-        data->fused.pm25_ugm3 = data->pm2_5;
-        data->fused.pm10_ugm3 = data->pm10;
+        data->fused.pm1_ugm3 = data->raw.pm1_ugm3;
+        data->fused.pm25_ugm3 = data->raw.pm25_ugm3;
+        data->fused.pm10_ugm3 = data->raw.pm10_ugm3;
         data->fusion_diag.pm_rh_factor = 1.0f;
         data->fusion_diag.pm25_quality = 20;  /* Low quality at high RH */
         ESP_LOGD(TAG, "PM RH correction skipped (RH=%.1f%% > %d%%)", rh, CONFIG_FUSION_PM_RH_MAX_PERCENT);
@@ -150,9 +150,9 @@ static void apply_pm_rh_correction(iaq_data_t *data)
     float correction_factor = 1.0f + s_pm_rh_a * powf(rh_normalized, s_pm_rh_b);
 
     /* Apply correction */
-    data->fused.pm1_ugm3 = data->pm1_0 / correction_factor;
-    data->fused.pm25_ugm3 = data->pm2_5 / correction_factor;
-    data->fused.pm10_ugm3 = data->pm10 / correction_factor;
+    data->fused.pm1_ugm3 = data->raw.pm1_ugm3 / correction_factor;
+    data->fused.pm25_ugm3 = data->raw.pm25_ugm3 / correction_factor;
+    data->fused.pm10_ugm3 = data->raw.pm10_ugm3 / correction_factor;
 
     /* Calculate PM1/PM2.5 ratio for sensor health check */
     if (data->fused.pm25_ugm3 > 1.0f) {
@@ -173,18 +173,18 @@ static void apply_pm_rh_correction(iaq_data_t *data)
     data->fusion_diag.pm_rh_factor = correction_factor;
 
     ESP_LOGD(TAG, "PM RH correction: factor=%.3f, PM2.5: %.1f -> %.1f ug/m3",
-             correction_factor, data->pm2_5, data->fused.pm25_ugm3);
+             correction_factor, data->raw.pm25_ugm3, data->fused.pm25_ugm3);
 #else
     /* PM RH correction disabled - copy raw to fused */
-    data->fused.pm1_ugm3 = data->pm1_0;
-    data->fused.pm25_ugm3 = data->pm2_5;
-    data->fused.pm10_ugm3 = data->pm10;
+    data->fused.pm1_ugm3 = data->raw.pm1_ugm3;
+    data->fused.pm25_ugm3 = data->raw.pm25_ugm3;
+    data->fused.pm10_ugm3 = data->raw.pm10_ugm3;
     data->fusion_diag.pm_rh_factor = 1.0f;
     data->fusion_diag.pm25_quality = 100;
 
     /* Still calculate PM1/PM2.5 ratio for diagnostics */
-    if (data->pm2_5 > 1.0f) {
-        data->fusion_diag.pm1_pm25_ratio = data->pm1_0 / data->pm2_5;
+    if (data->raw.pm25_ugm3 > 1.0f) {
+        data->fusion_diag.pm1_pm25_ratio = data->raw.pm1_ugm3 / data->raw.pm25_ugm3;
     } else {
         data->fusion_diag.pm1_pm25_ratio = NAN;
     }
@@ -202,13 +202,13 @@ static void apply_pm_rh_correction(iaq_data_t *data)
 static void apply_co2_pressure_compensation(iaq_data_t *data)
 {
 #ifdef CONFIG_FUSION_CO2_PRESSURE_ENABLE
-    if (!data->valid.co2_ppm || !data->valid.pressure) {
+    if (!data->valid.co2_ppm || !data->valid.pressure_pa) {
         /* No compensation possible */
         data->fusion_diag.co2_pressure_offset_ppm = 0.0f;
         return;
     }
 
-    float pressure_pa = data->pressure * 100.0f;  /* hPa -> Pa */
+    float pressure_pa = data->raw.pressure_pa;
 
     /* Sanity check pressure (95-106 kPa) */
     if (pressure_pa < 95000.0f || pressure_pa > 106000.0f) {
@@ -217,7 +217,7 @@ static void apply_co2_pressure_compensation(iaq_data_t *data)
         return;
     }
 
-    float co2_raw = data->co2_ppm;
+    float co2_raw = data->raw.co2_ppm;
     float p_ref = (float)CONFIG_FUSION_CO2_PRESSURE_REF_PA;
     float co2_compensated = co2_raw * (p_ref / pressure_pa);
 
@@ -232,7 +232,7 @@ static void apply_co2_pressure_compensation(iaq_data_t *data)
     /* Pressure compensation disabled */
     data->fusion_diag.co2_pressure_offset_ppm = 0.0f;
     if (data->valid.co2_ppm) {
-        data->fused.co2_ppm = data->co2_ppm;
+        data->fused.co2_ppm = data->raw.co2_ppm;
     }
 #endif
 }
@@ -243,17 +243,17 @@ static void apply_co2_pressure_compensation(iaq_data_t *data)
  */
 static void apply_temp_self_heat_correction(iaq_data_t *data)
 {
-    if (!data->valid.temperature) {
+    if (!data->valid.temp_c) {
         return;
     }
 
-    float temp_compensated = data->temperature - s_temp_offset_c;
+    float temp_compensated = data->raw.temp_c - s_temp_offset_c;
     data->fused.temp_c = temp_compensated;
     data->fusion_diag.temp_self_heat_offset_c = s_temp_offset_c;
 
     if (fabs(s_temp_offset_c) > 0.01f) {
         ESP_LOGD(TAG, "Temp self-heat correction: %.2f -> %.2f C (offset: %.2f C)",
-                 data->temperature, temp_compensated, s_temp_offset_c);
+                 data->raw.temp_c, temp_compensated, s_temp_offset_c);
     }
 }
 
@@ -262,8 +262,8 @@ static void apply_temp_self_heat_correction(iaq_data_t *data)
  */
 static void apply_humidity_passthrough(iaq_data_t *data)
 {
-    if (data->valid.humidity) {
-        data->fused.rh_pct = data->humidity;
+    if (data->valid.rh_pct) {
+        data->fused.rh_pct = data->raw.rh_pct;
     }
 }
 
@@ -272,8 +272,8 @@ static void apply_humidity_passthrough(iaq_data_t *data)
  */
 static void apply_pressure_passthrough(iaq_data_t *data)
 {
-    if (data->valid.pressure) {
-        data->fused.pressure_pa = data->pressure * 100.0f;  /* hPa -> Pa */
+    if (data->valid.pressure_pa) {
+        data->fused.pressure_pa = data->raw.pressure_pa;
     }
 }
 

@@ -545,21 +545,21 @@ esp_err_t mqtt_publish_state(const iaq_data_t *data)
     }
 
     /* VOC/NOx indices (not compensated, use raw) */
-    if (data->voc_index != UINT16_MAX) {
-        cJSON_AddNumberToObject(root, "voc_index", data->voc_index);
+    if (data->raw.voc_index != UINT16_MAX) {
+        cJSON_AddNumberToObject(root, "voc_index", data->raw.voc_index);
     } else {
         cJSON_AddNullToObject(root, "voc_index");
     }
 
-    if (data->nox_index != UINT16_MAX) {
-        cJSON_AddNumberToObject(root, "nox_index", data->nox_index);
+    if (data->raw.nox_index != UINT16_MAX) {
+        cJSON_AddNumberToObject(root, "nox_index", data->raw.nox_index);
     } else {
         cJSON_AddNullToObject(root, "nox_index");
     }
 
     /* MCU temperature (not compensated) */
-    if (!isnan(data->mcu_temperature)) {
-        cJSON_AddNumberToObject(root, "mcu_temp_c", round(data->mcu_temperature * 10.0) / 10.0);
+    if (!isnan(data->raw.mcu_temp_c)) {
+        cJSON_AddNumberToObject(root, "mcu_temp_c", round(data->raw.mcu_temp_c * 10.0) / 10.0);
     } else {
         cJSON_AddNullToObject(root, "mcu_temp_c");
     }
@@ -669,13 +669,13 @@ esp_err_t mqtt_publish_diagnostics(const iaq_data_t *data)
 
     /* Raw (uncompensated) sensor values */
     cJSON *raw = cJSON_CreateObject();
-    if (!isnan(data->temperature)) cJSON_AddNumberToObject(raw, "temp_c", round(data->temperature * 10.0) / 10.0);
-    if (!isnan(data->humidity)) cJSON_AddNumberToObject(raw, "rh_pct", round(data->humidity * 10.0) / 10.0);
-    if (!isnan(data->pressure)) cJSON_AddNumberToObject(raw, "pressure_hpa", round(data->pressure * 10.0) / 10.0);
-    if (!isnan(data->pm1_0)) cJSON_AddNumberToObject(raw, "pm1_ugm3", round(data->pm1_0 * 10.0) / 10.0);
-    if (!isnan(data->pm2_5)) cJSON_AddNumberToObject(raw, "pm25_ugm3", round(data->pm2_5 * 10.0) / 10.0);
-    if (!isnan(data->pm10)) cJSON_AddNumberToObject(raw, "pm10_ugm3", round(data->pm10 * 10.0) / 10.0);
-    if (!isnan(data->co2_ppm)) cJSON_AddNumberToObject(raw, "co2_ppm", round(data->co2_ppm));
+    if (!isnan(data->raw.temp_c)) cJSON_AddNumberToObject(raw, "temp_c", round(data->raw.temp_c * 10.0) / 10.0);
+    if (!isnan(data->raw.rh_pct)) cJSON_AddNumberToObject(raw, "rh_pct", round(data->raw.rh_pct * 10.0) / 10.0);
+    if (!isnan(data->raw.pressure_pa)) cJSON_AddNumberToObject(raw, "pressure_hpa", round(data->raw.pressure_pa / 10.0) / 10.0);  /* Pa -> hPa */
+    if (!isnan(data->raw.pm1_ugm3)) cJSON_AddNumberToObject(raw, "pm1_ugm3", round(data->raw.pm1_ugm3 * 10.0) / 10.0);
+    if (!isnan(data->raw.pm25_ugm3)) cJSON_AddNumberToObject(raw, "pm25_ugm3", round(data->raw.pm25_ugm3 * 10.0) / 10.0);
+    if (!isnan(data->raw.pm10_ugm3)) cJSON_AddNumberToObject(raw, "pm10_ugm3", round(data->raw.pm10_ugm3 * 10.0) / 10.0);
+    if (!isnan(data->raw.co2_ppm)) cJSON_AddNumberToObject(raw, "co2_ppm", round(data->raw.co2_ppm));
     cJSON_AddItemToObject(root, "raw", raw);
 
     /* Fusion diagnostics */

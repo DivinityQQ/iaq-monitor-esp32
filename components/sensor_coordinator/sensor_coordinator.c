@@ -234,9 +234,9 @@ static esp_err_t read_sensor_mcu(void)
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
             iaq_data_t *data = iaq_data_get();
-            data->mcu_temperature = temp_c;
+            data->raw.mcu_temp_c = temp_c;
             data->updated_at.mcu = esp_timer_get_time();
-            data->valid.mcu_temperature = true;
+            data->valid.mcu_temp_c = true;
         }
         s_runtime[SENSOR_ID_MCU].last_read_us = esp_timer_get_time();
         s_runtime[SENSOR_ID_MCU].error_count = 0;
@@ -264,11 +264,11 @@ static esp_err_t read_sensor_sht41(void)
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
             iaq_data_t *data = iaq_data_get();
-            data->temperature = temp_c;
-            data->humidity = humidity_rh;
+            data->raw.temp_c = temp_c;
+            data->raw.rh_pct = humidity_rh;
             data->updated_at.sht41 = esp_timer_get_time();
-            data->valid.temperature = true;
-            data->valid.humidity = true;
+            data->valid.temp_c = true;
+            data->valid.rh_pct = true;
         }
         s_runtime[SENSOR_ID_SHT41].last_read_us = esp_timer_get_time();
         s_runtime[SENSOR_ID_SHT41].error_count = 0;
@@ -296,9 +296,9 @@ static esp_err_t read_sensor_bmp280(void)
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
             iaq_data_t *data = iaq_data_get();
-            data->pressure = pressure_hpa;
+            data->raw.pressure_pa = pressure_hpa * 100.0f;  /* hPa -> Pa */
             data->updated_at.bmp280 = esp_timer_get_time();
-            data->valid.pressure = true;
+            data->valid.pressure_pa = true;
         }
         s_runtime[SENSOR_ID_BMP280].last_read_us = esp_timer_get_time();
         s_runtime[SENSOR_ID_BMP280].error_count = 0;
@@ -324,8 +324,8 @@ static esp_err_t read_sensor_sgp41(void)
     float temp_c = 25.0f, humidity_rh = 50.0f;  /* defaults */
     IAQ_DATA_WITH_LOCK() {
         iaq_data_t *data = iaq_data_get();
-        if (data->valid.temperature) temp_c = data->temperature;
-        if (data->valid.humidity) humidity_rh = data->humidity;
+        if (data->valid.temp_c) temp_c = data->raw.temp_c;
+        if (data->valid.rh_pct) humidity_rh = data->raw.rh_pct;
     }
 
     uint16_t voc_index = 0, nox_index = 0;
@@ -334,8 +334,8 @@ static esp_err_t read_sensor_sgp41(void)
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
             iaq_data_t *data = iaq_data_get();
-            data->voc_index = voc_index;
-            data->nox_index = nox_index;
+            data->raw.voc_index = voc_index;
+            data->raw.nox_index = nox_index;
             data->updated_at.sgp41 = esp_timer_get_time();
             data->valid.voc_index = true;
             data->valid.nox_index = true;
@@ -366,13 +366,13 @@ static esp_err_t read_sensor_pms5003(void)
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
             iaq_data_t *data = iaq_data_get();
-            data->pm1_0 = pm1_0;
-            data->pm2_5 = pm2_5;
-            data->pm10 = pm10;
+            data->raw.pm1_ugm3 = pm1_0;
+            data->raw.pm25_ugm3 = pm2_5;
+            data->raw.pm10_ugm3 = pm10;
             data->updated_at.pms5003 = esp_timer_get_time();
-            data->valid.pm1_0 = true;
-            data->valid.pm2_5 = true;
-            data->valid.pm10 = true;
+            data->valid.pm1_ugm3 = true;
+            data->valid.pm25_ugm3 = true;
+            data->valid.pm10_ugm3 = true;
         }
         s_runtime[SENSOR_ID_PMS5003].last_read_us = esp_timer_get_time();
         s_runtime[SENSOR_ID_PMS5003].error_count = 0;
@@ -400,7 +400,7 @@ static esp_err_t read_sensor_s8(void)
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
             iaq_data_t *data = iaq_data_get();
-            data->co2_ppm = co2_ppm;
+            data->raw.co2_ppm = co2_ppm;
             data->updated_at.s8 = esp_timer_get_time();
             data->valid.co2_ppm = true;
         }

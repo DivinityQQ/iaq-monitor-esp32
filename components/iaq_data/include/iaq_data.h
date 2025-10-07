@@ -18,6 +18,23 @@ typedef enum {
 } pressure_trend_t;
 
 /**
+ * Raw (uncompensated) sensor readings.
+ * These are direct measurements from sensors, used as input to fusion algorithms.
+ */
+typedef struct {
+    float temp_c;               // °C (SHT41 raw)
+    float rh_pct;               // %RH (SHT41 raw)
+    float pressure_pa;          // Pa (BMP280 raw)
+    float mcu_temp_c;           // °C (MCU internal sensor)
+    float co2_ppm;              // ppm (S8 raw)
+    float pm1_ugm3;             // µg/m³ (PMS5003 raw)
+    float pm25_ugm3;            // µg/m³ (PMS5003 raw)
+    float pm10_ugm3;            // µg/m³ (PMS5003 raw)
+    uint16_t voc_index;         // 0-500 (SGP41)
+    uint16_t nox_index;         // 0-500 (SGP41)
+} iaq_raw_data_t;
+
+/**
  * Compensated (fused) sensor values after cross-sensor correction.
  * These are the "clean" values that should be displayed and published.
  */
@@ -87,27 +104,8 @@ typedef struct {
 typedef struct {
     SemaphoreHandle_t mutex;
 
-    /* LEGACY FIELDS - Kept for backward compatibility, will be removed in v1.0.0
-     * - New code should use fused.* for compensated values and metrics.* for derived data
-     * - These fields may not be populated in future releases */
-
-    /* RAW sensor readings (uncompensated) - legacy fields */
-    float temperature;          // °C (SHT41 raw)
-    float mcu_temperature;      // °C (MCU internal sensor)
-    float humidity;             // %RH (SHT41 raw)
-    float pressure;             // hPa (BMP280 raw)
-    float pressure_trend;       // DEPRECATED: use metrics.pressure_delta_3hr_hpa
-
-    float co2_ppm;              // CO2 raw (ppm)
-    float pm1_0;                // PM1.0 raw (µg/m³)
-    float pm2_5;                // PM2.5 raw (µg/m³)
-    float pm10;                 // PM10 raw (µg/m³)
-    uint16_t voc_index;         // VOC index (0-500)
-    uint16_t nox_index;         // NOx index (0-500)
-
-    /* DEPRECATED derived metrics - use metrics.* instead */
-    uint16_t aqi;               // DEPRECATED: use metrics.aqi_value
-    const char *comfort;        // DEPRECATED: use metrics.comfort_category
+    /* RAW sensor readings (uncompensated) - input to fusion algorithms */
+    iaq_raw_data_t raw;
 
     /* FUSED (compensated) sensor values - use these for display/publishing */
     iaq_fused_data_t fused;
@@ -131,19 +129,17 @@ typedef struct {
 
     /* Validity flags - true if sensor has provided at least one valid reading */
     struct {
-        bool temperature;       // SHT41 temperature valid
-        bool mcu_temperature;   // MCU internal temperature valid
-        bool humidity;          // SHT41 humidity valid
-        bool pressure;          // BMP280 pressure valid
+        bool temp_c;            // SHT41 temperature valid
+        bool mcu_temp_c;        // MCU internal temperature valid
+        bool rh_pct;            // SHT41 humidity valid
+        bool pressure_pa;       // BMP280 pressure valid
         bool co2_ppm;           // S8 CO2 valid
-        bool pm1_0;             // PMS5003 PM1.0 valid
-        bool pm2_5;             // PMS5003 PM2.5 valid
-        bool pm10;              // PMS5003 PM10 valid
+        bool pm1_ugm3;          // PMS5003 PM1.0 valid
+        bool pm25_ugm3;         // PMS5003 PM2.5 valid
+        bool pm10_ugm3;         // PMS5003 PM10 valid
         bool voc_index;         // SGP41 VOC index valid
         bool nox_index;         // SGP41 NOx index valid
     } valid;
-
-    uint8_t overall_quality;    // Overall air quality (0-100)
 
     /* System status */
     struct {

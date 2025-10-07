@@ -85,17 +85,21 @@ static int cmd_status(int argc, char **argv)
             printf("S8:      FAULT\n");
         }
 
-        /* Sensor Readings */
-        printf("\n--- Current Readings ---\n");
-        if (isnan(data->temperature)) printf("Temperature: n/a\n"); else printf("Temperature: %.1f degC\n", data->temperature);
-        if (isnan(data->humidity))    printf("Humidity: n/a\n");    else printf("Humidity: %.1f%%\n", data->humidity);
-        if (isnan(data->pressure))    printf("Pressure: n/a\n");    else printf("Pressure: %.1f hPa\n", data->pressure);
-        if (isnan(data->mcu_temperature)) printf("MCU Temp: n/a\n"); else printf("MCU Temp: %.1f degC\n", data->mcu_temperature);
-        if (isnan(data->co2_ppm))     printf("CO2: n/a\n");       else printf("CO2: %.0f ppm\n", data->co2_ppm);
-        if (isnan(data->pm2_5))       printf("PM2.5: n/a\n");     else printf("PM2.5: %.1f ug/m3\n", data->pm2_5);
-        if (data->voc_index == UINT16_MAX) printf("VOC Index: n/a\n"); else printf("VOC Index: %u\n", data->voc_index);
-        if (data->aqi == UINT16_MAX)       printf("AQI: n/a\n");       else printf("AQI: %u\n", data->aqi);
-        printf("Comfort: %s\n", data->comfort ? data->comfort : "unknown");
+        /* Compensated (Fused) Sensor Readings */
+        printf("\n--- Sensor Readings (Compensated) ---\n");
+        if (isnan(data->fused.temp_c)) printf("Temperature: n/a\n"); else printf("Temperature: %.1f degC\n", data->fused.temp_c);
+        if (isnan(data->fused.rh_pct))    printf("Humidity: n/a\n");    else printf("Humidity: %.1f%%\n", data->fused.rh_pct);
+        if (isnan(data->fused.pressure_pa))    printf("Pressure: n/a\n");    else printf("Pressure: %.1f hPa\n", data->fused.pressure_pa / 100.0f);
+        if (isnan(data->raw.mcu_temp_c)) printf("MCU Temp: n/a\n"); else printf("MCU Temp: %.1f degC\n", data->raw.mcu_temp_c);
+        if (isnan(data->fused.co2_ppm))     printf("CO2: n/a\n");       else printf("CO2: %.0f ppm\n", data->fused.co2_ppm);
+        if (isnan(data->fused.pm25_ugm3))       printf("PM2.5: n/a\n");     else printf("PM2.5: %.1f ug/m3\n", data->fused.pm25_ugm3);
+        if (data->raw.voc_index == UINT16_MAX) printf("VOC Index: n/a\n"); else printf("VOC Index: %u\n", data->raw.voc_index);
+
+        /* Derived Metrics */
+        printf("\n--- Air Quality Metrics ---\n");
+        if (data->metrics.aqi_value == UINT16_MAX) printf("AQI: n/a\n"); else printf("AQI: %u (%s)\n", data->metrics.aqi_value, data->metrics.aqi_category);
+        printf("Comfort: %s (score: %u/100)\n", data->metrics.comfort_category, data->metrics.comfort_score);
+        printf("Overall IAQ Score: %u/100\n", data->metrics.overall_iaq_score);
     }
 
     printf("\n");
