@@ -1,6 +1,6 @@
 # IAQ Monitor (ESP32-S3, ESP-IDF)
 Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, robust defaults, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery.
-Current version: 0.5.0
+Current version: 0.5.1
 ## Features
 - Wi‑Fi station mode with NVS‑stored credentials (console configurable)
 - MQTT 5.0 client, retained LWT/status, HA auto‑discovery
@@ -162,7 +162,7 @@ sensor cadence set <sensor> <ms>
 - For new settings, consider Kconfig defaults and NVS persistence
 - Follow CONTRIBUTING.md for coding and component guidelines
 ## Development Status
-**Current Status (v0.5.0)**
+**Current Status (v0.5.1)**
 - ✅ Core infrastructure (WiFi, MQTT 5.0, Home Assistant auto-discovery)
 - ✅ 6 sensor drivers: MCU temp (real), 5 simulated (SHT41, BMP280, SGP41, PMS5003, S8)
 - ✅ Full simulation mode for testing without hardware
@@ -177,7 +177,15 @@ sensor cadence set <sensor> <ms>
 - 📋 Future: Display, LED status indicators, web configuration interface, real sensor hardware
 ## Changelog
 
-### v0.5.0 (Current)
+### v0.5.1 (Current)
+**Refactoring:**
+- Restructured IAQ data model to separate raw and fused sensor readings
+  - Added `iaq_data.raw` structure for uncompensated sensor values
+  - Renamed compensated values to `iaq_data.fused` for clarity
+  - Updated all components (MQTT, console, fusion, metrics) to use new structure
+  - Improved data flow transparency for diagnostics and validation
+
+### v0.5.0
 **Major Features:**
 - Added sensor fusion with cross-sensor compensation:
   - PM humidity correction using RH-dependent factor
