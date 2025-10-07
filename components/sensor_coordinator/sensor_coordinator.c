@@ -433,7 +433,7 @@ static void fusion_timer_callback(void *arg)
 /**
  * Metrics timer callback (runs at 0.2 Hz / every 5 seconds).
  * Calculates all derived metrics (AQI, comfort, trends).
- * Note: MQTT publishing is now independent (timer-based), no event signaling needed.
+ * Metrics are calculated and stored in iaq_data; MQTT publishing uses timer-based intervals.
  */
 static void metrics_timer_callback(void *arg)
 {

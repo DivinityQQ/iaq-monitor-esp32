@@ -1,11 +1,13 @@
 # IAQ Monitor (ESP32-S3, ESP-IDF)
 Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, robust defaults, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery.
-Current version: 0.4.0
+Current version: 0.5.0
 ## Features
 - Wi‑Fi station mode with NVS‑stored credentials (console configurable)
 - MQTT 5.0 client, retained LWT/status, HA auto‑discovery
 - Central data model with explicit "no data" until sensors report
-- **6 sensor drivers**: 1 real (MCU temp), 5 stubs with full simulation support
+- **6 sensor drivers**: 1 real (MCU temp), 5 simulated (ready for hardware implementation)
+- **Sensor fusion**: Cross-sensor compensation (PM/RH, CO₂/pressure, temp self-heating, ABC baseline)
+- **Derived metrics**: EPA AQI, thermal comfort, CO₂ rate, PM spike detection, mold risk, pressure trends
 - **Simulation mode**: Complete MQTT/HA integration testing without physical sensors
 - Sensor coordinator with state machine (UNINIT → INIT → WARMING → READY → ERROR)
 - Per‑sensor cadences (configurable via Kconfig/console, persisted in NVS)
@@ -79,16 +81,22 @@ sensor cadence
 sensor cadence set <sensor> <ms>
 ```
 ## MQTT Topics
-- State: `iaq/{device_id}/state` - fused readings (temperature, humidity, pressure_hpa, PM, CO2, AQI, comfort score).
-- Metrics: `iaq/{device_id}/metrics` - derived data (AQI breakdown, comfort details, pressure trend, CO2 rate, VOC/NOx categories, mold risk, PM spike flag, overall scores).
-- Health: `iaq/{device_id}/health` - uptime, heap, Wi-Fi RSSI, per-sensor state/error counters.
-- Diagnostics (optional): `iaq/{device_id}/diagnostics` - raw values and fusion diagnostics when `CONFIG_MQTT_PUBLISH_DIAGNOSTICS=y`.
-- Status (LWT): `iaq/{device_id}/status`
-- Commands: `iaq/{device_id}/cmd/#` (`/cmd/restart`, `/cmd/calibrate`)
-Notes
-- Missing values publish as JSON `null` so Home Assistant shows `unknown`.
-- State/metrics timers default to 30 s (configurable via Kconfig); diagnostics defaults to 5 min.
-- Calibration command accepts `{"ppm": 415}` or plain integers; defaults to 400 ppm when the payload is empty.
+
+**Publishing** (timer-based with staggered starts):
+- **State**: `iaq/{device_id}/state` - Fused (compensated) readings: temp, humidity, pressure, PM1/2.5/10, CO₂, VOC/NOx indices, MCU temp, plus basic metrics (AQI value, comfort score). *Default: 30s interval*
+- **Metrics**: `iaq/{device_id}/metrics` - Derived data: AQI breakdown, comfort details, pressure trend, CO₂ rate, VOC/NOx categories, mold risk, PM spike detection, overall IAQ score. *Default: 30s interval*
+- **Health**: `iaq/{device_id}/health` - System diagnostics: uptime, heap, WiFi RSSI, per-sensor state/error counts/warmup status. *Default: 30s interval*
+- **Diagnostics**: `iaq/{device_id}/diagnostics` - Raw (uncompensated) values + fusion parameters for validation/tuning. *Optional, default: 5min interval, enable with `CONFIG_MQTT_PUBLISH_DIAGNOSTICS=y`*
+- **Status (LWT)**: `iaq/{device_id}/status` - `online`/`offline` (Last Will & Testament)
+
+**Subscriptions** (commands):
+- **Restart**: `iaq/{device_id}/cmd/restart` - Reboot device
+- **Calibrate CO₂**: `iaq/{device_id}/cmd/calibrate` - Payload: `{"ppm": 415}` or `415` (defaults to 400 if empty)
+
+**Notes:**
+- Missing values publish as JSON `null` (Home Assistant shows `unknown`)
+- All timers use staggered starts (0s, 5s, 10s, 15s) to flatten CPU/network load
+- MQTT worker uses event coalescing: drains queue and takes single data snapshot for burst efficiency
 ## Home Assistant
 - Home Assistant discovery payloads are published when MQTT connects (retained).
 - Core entities read from `/state` (fused values) while advanced sensors use `/metrics`.
@@ -154,15 +162,60 @@ Notes
 - For new settings, consider Kconfig defaults and NVS persistence
 - Follow CONTRIBUTING.md for coding and component guidelines
 ## Development Status
-**Current Status (v0.4.0)**
-- ✅ Core infrastructure (WiFi, MQTT, HA discovery)
-- ✅ MCU temperature sensor (real driver)
-- ✅ Full simulation mode for all 6 sensors
-- ✅ Sensor state machine and coordinator
-- ✅ Per-sensor MQTT publishing with JSON null handling
-- ✅ Console commands for configuration and diagnostics
-- 🚧 Hardware sensor protocols (stubs ready for implementation)
-- 📋 Future: Display, LED status indicators, web configuration interface
+**Current Status (v0.5.0)**
+- ✅ Core infrastructure (WiFi, MQTT 5.0, Home Assistant auto-discovery)
+- ✅ 6 sensor drivers: MCU temp (real), 5 simulated (SHT41, BMP280, SGP41, PMS5003, S8)
+- ✅ Full simulation mode for testing without hardware
+- ✅ Sensor state machine with auto-recovery (exponential backoff for ERROR states)
+- ✅ Sensor fusion (PM humidity correction, CO₂ pressure/ABC compensation, temp self-heating)
+- ✅ Derived metrics (EPA AQI, thermal comfort, pressure trends, CO₂ rate, PM spike detection, mold risk)
+- ✅ Unified MQTT topics (/state, /metrics, /health, /diagnostics)
+- ✅ Timer-based publishing with event coalescing and staggered starts
+- ✅ Task Watchdog integration for deadlock detection
+- ✅ Console commands for configuration, diagnostics, and sensor control
+- 🚧 Hardware sensor protocols (stub drivers ready for I2C/UART implementation)
+- 📋 Future: Display, LED status indicators, web configuration interface, real sensor hardware
+## Changelog
+
+### v0.5.0 (Current)
+**Major Features:**
+- Added sensor fusion with cross-sensor compensation:
+  - PM humidity correction using RH-dependent factor
+  - CO₂ pressure compensation (reference 101.325 kPa)
+  - CO₂ ABC (Automatic Baseline Correction) with 7-day tracking
+  - Temperature self-heating offset
+- Implemented derived metrics calculation (0.2 Hz timer):
+  - EPA AQI (PM2.5/PM10 piecewise linear)
+  - Thermal comfort (dew point, absolute humidity, heat index, comfort score/category)
+  - Pressure trend (3-hour window, rising/stable/falling)
+  - CO₂ rate of change (ppm/hr with median filtering)
+  - PM2.5 spike detection (statistical + absolute threshold)
+  - Mold risk index (dew point-based, 0-100 score)
+  - VOC/NOx categorization (Excellent/Good/Moderate/Poor/Very Poor/Severe)
+  - Overall IAQ score (weighted average of sub-scores)
+- Enhanced MQTT architecture:
+  - Migrated to unified topics (/state, /metrics, /health, /diagnostics)
+  - Timer-based publishing with staggered starts (reduces CPU/network bursts)
+  - Event coalescing in publish worker (single snapshot for efficiency)
+  - Queue draining on disconnect (prevents stale message bursts)
+- Sensor auto-recovery:
+  - Exponential backoff for ERROR state sensors (30s → 60s → 120s → 300s cap)
+  - Automatic reset attempts with state machine transitions
+- Robustness improvements:
+  - Task Watchdog Timer (TWDT) integration for deadlock detection
+  - Median filtering for CO₂ rate calculation (noise suppression)
+  - Enhanced error handling and logging
+
+**Documentation:**
+- Added comprehensive [METRICS.md](METRICS.md) with calculation details and interpretation guidelines
+- Updated architecture diagrams and data flow documentation
+
+### v0.4.0
+- Sensor coordinator with state machine (UNINIT → INIT → WARMING → READY → ERROR)
+- Per-sensor configurable cadences and warm-up periods
+- Console commands for sensor control and diagnostics
+- Basic MQTT integration with Home Assistant discovery
+
 ## Troubleshooting
 - On Windows, use the `\\.\COMx` device path
 - If MQTT does not start: set a valid broker URL via console

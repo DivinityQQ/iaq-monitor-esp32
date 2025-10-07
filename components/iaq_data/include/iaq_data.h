@@ -87,7 +87,11 @@ typedef struct {
 typedef struct {
     SemaphoreHandle_t mutex;
 
-    /* RAW sensor readings (uncompensated) - legacy fields kept for now */
+    /* LEGACY FIELDS - Kept for backward compatibility, will be removed in v1.0.0
+     * - New code should use fused.* for compensated values and metrics.* for derived data
+     * - These fields may not be populated in future releases */
+
+    /* RAW sensor readings (uncompensated) - legacy fields */
     float temperature;          // °C (SHT41 raw)
     float mcu_temperature;      // °C (MCU internal sensor)
     float humidity;             // %RH (SHT41 raw)

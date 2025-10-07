@@ -53,7 +53,7 @@ Thanks for your interest in contributing to the IAQ Monitor firmware. This docum
 - MQTT config in NVS (`mqtt_config/{broker_url,username,password}`). Reject invalid URLs (must include `mqtt://` or `mqtts://`).
 - MQTT operations should be non‑blocking; use `esp_mqtt_client_enqueue()`.
 - Home Assistant discovery payloads should be retained.
- - State is published per-sensor to `iaq/<device_id>/sensor/<sensor>` when that sensor updates; avoid redundant publishes.
+- State is published to unified topics: `iaq/<device_id>/state` (fused values), `iaq/<device_id>/metrics` (derived metrics), and `iaq/<device_id>/health` (system/sensor status). Publishing uses timer-based intervals with event coalescing to avoid bursts.
 
 ## Console Commands
 - Keep commands simple and fail‑safe; return 0 for usage (not an error).

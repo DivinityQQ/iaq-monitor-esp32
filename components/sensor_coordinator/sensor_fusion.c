@@ -280,9 +280,9 @@ static void apply_pressure_passthrough(iaq_data_t *data)
 void fusion_update_abc(float co2_ppm, int64_t timestamp_us)
 {
 #ifdef CONFIG_FUSION_CO2_ABC_ENABLE
-    /* Get current hour (requires RTC or NTP - stub for now) */
-    /* TODO: Integrate with system time when RTC/NTP available */
-    /* For now, use uptime modulo to simulate day/night cycle for testing */
+    /* TODO: Replace uptime-based hour calculation with real RTC/NTP time when available.
+     * Current implementation: Uses (uptime_hours % 24) for ABC night window detection.
+     * This works for testing but won't match actual day/night cycles without time sync. */
     uint32_t uptime_hours = (uint32_t)(timestamp_us / (3600LL * 1000000LL));
     uint8_t hour_of_day = uptime_hours % 24;
 

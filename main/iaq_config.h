@@ -10,7 +10,7 @@
  * Version information
  */
 #define IAQ_VERSION_MAJOR  0
-#define IAQ_VERSION_MINOR  4
+#define IAQ_VERSION_MINOR  5
 #define IAQ_VERSION_PATCH  0
 
 /**

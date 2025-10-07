@@ -473,9 +473,9 @@ esp_err_t mqtt_publish_status(const iaq_data_t *data)
     return ESP_OK;
 }
 
-/* Aggregated publisher removed in favor of per-sensor topics. */
+/* Unified topics architecture: /state (fused values), /metrics (derived), /health (diagnostics). */
 
-/* Per-sensor publishers */
+/* Topic publishing helpers */
 static esp_err_t publish_json(const char *topic, cJSON *obj)
 {
     if (!s_mqtt_connected || !obj || !topic) { if (obj) cJSON_Delete(obj); return ESP_FAIL; }
