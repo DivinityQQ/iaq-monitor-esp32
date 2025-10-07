@@ -599,14 +599,20 @@ esp_err_t mqtt_publish_metrics(const iaq_data_t *data)
     cJSON *aqi = cJSON_CreateObject();
     if (data->metrics.aqi_value != UINT16_MAX) {
         cJSON_AddNumberToObject(aqi, "value", data->metrics.aqi_value);
-        cJSON_AddStringToObject(aqi, "category", data->metrics.aqi_category);
-        cJSON_AddStringToObject(aqi, "dominant", data->metrics.aqi_dominant);
-        if (!isnan(data->metrics.aqi_pm25_subindex)) {
-            cJSON_AddNumberToObject(aqi, "pm25_subindex", round(data->metrics.aqi_pm25_subindex * 10.0) / 10.0);
-        }
-        if (!isnan(data->metrics.aqi_pm10_subindex)) {
-            cJSON_AddNumberToObject(aqi, "pm10_subindex", round(data->metrics.aqi_pm10_subindex * 10.0) / 10.0);
-        }
+    } else {
+        cJSON_AddNullToObject(aqi, "value");
+    }
+    cJSON_AddStringToObject(aqi, "category", data->metrics.aqi_category);
+    cJSON_AddStringToObject(aqi, "dominant", data->metrics.aqi_dominant);
+    if (!isnan(data->metrics.aqi_pm25_subindex)) {
+        cJSON_AddNumberToObject(aqi, "pm25_subindex", round(data->metrics.aqi_pm25_subindex * 10.0) / 10.0);
+    } else {
+        cJSON_AddNullToObject(aqi, "pm25_subindex");
+    }
+    if (!isnan(data->metrics.aqi_pm10_subindex)) {
+        cJSON_AddNumberToObject(aqi, "pm10_subindex", round(data->metrics.aqi_pm10_subindex * 10.0) / 10.0);
+    } else {
+        cJSON_AddNullToObject(aqi, "pm10_subindex");
     }
     cJSON_AddItemToObject(root, "aqi", aqi);
 
@@ -616,12 +622,18 @@ esp_err_t mqtt_publish_metrics(const iaq_data_t *data)
     cJSON_AddStringToObject(comfort, "category", data->metrics.comfort_category);
     if (!isnan(data->metrics.dew_point_c)) {
         cJSON_AddNumberToObject(comfort, "dew_point_c", round(data->metrics.dew_point_c * 10.0) / 10.0);
+    } else {
+        cJSON_AddNullToObject(comfort, "dew_point_c");
     }
     if (!isnan(data->metrics.abs_humidity_gm3)) {
         cJSON_AddNumberToObject(comfort, "abs_humidity_gm3", round(data->metrics.abs_humidity_gm3 * 10.0) / 10.0);
+    } else {
+        cJSON_AddNullToObject(comfort, "abs_humidity_gm3");
     }
     if (!isnan(data->metrics.heat_index_c)) {
         cJSON_AddNumberToObject(comfort, "heat_index_c", round(data->metrics.heat_index_c * 10.0) / 10.0);
+    } else {
+        cJSON_AddNullToObject(comfort, "heat_index_c");
     }
     cJSON_AddItemToObject(root, "comfort", comfort);
 
@@ -637,6 +649,8 @@ esp_err_t mqtt_publish_metrics(const iaq_data_t *data)
     cJSON_AddStringToObject(pressure, "trend", trend_str);
     if (!isnan(data->metrics.pressure_delta_3hr_hpa)) {
         cJSON_AddNumberToObject(pressure, "delta_3hr_hpa", round(data->metrics.pressure_delta_3hr_hpa * 100.0) / 100.0);
+    } else {
+        cJSON_AddNullToObject(pressure, "delta_3hr_hpa");
     }
     cJSON_AddItemToObject(root, "pressure", pressure);
 
@@ -655,6 +669,8 @@ esp_err_t mqtt_publish_metrics(const iaq_data_t *data)
     /* Trends */
     if (!isnan(data->metrics.co2_rate_ppm_hr)) {
         cJSON_AddNumberToObject(root, "co2_rate_ppm_hr", round(data->metrics.co2_rate_ppm_hr * 10.0) / 10.0);
+    } else {
+        cJSON_AddNullToObject(root, "co2_rate_ppm_hr");
     }
     cJSON_AddBoolToObject(root, "pm25_spike_detected", data->metrics.pm25_spike_detected);
 
