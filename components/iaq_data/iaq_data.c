@@ -55,13 +55,13 @@ esp_err_t iaq_data_init(void)
     g_iaq_data.metrics.dew_point_c = NAN;
     g_iaq_data.metrics.abs_humidity_gm3 = NAN;  // Tier 1
     g_iaq_data.metrics.heat_index_c = NAN;
-    g_iaq_data.metrics.comfort_score = 0;
+    g_iaq_data.metrics.comfort_score = UINT8_MAX;  // 255 = unknown/invalid
     g_iaq_data.metrics.comfort_category = "unknown";
-    g_iaq_data.metrics.co2_score = 0;
+    g_iaq_data.metrics.co2_score = UINT8_MAX;  // 255 = unknown/invalid
     g_iaq_data.metrics.voc_category = "unknown";  // Tier 1
     g_iaq_data.metrics.nox_category = "unknown";  // Tier 1
-    g_iaq_data.metrics.overall_iaq_score = 0;
-    g_iaq_data.metrics.mold_risk_score = 0;  // Tier 1
+    g_iaq_data.metrics.overall_iaq_score = UINT8_MAX;  // 255 = unknown/invalid
+    g_iaq_data.metrics.mold_risk_score = UINT8_MAX;  // Tier 1, 255 = unknown/invalid
     g_iaq_data.metrics.mold_risk_category = "unknown";  // Tier 1
     g_iaq_data.metrics.pressure_trend = PRESSURE_TREND_UNKNOWN;
     g_iaq_data.metrics.pressure_delta_3hr_hpa = NAN;

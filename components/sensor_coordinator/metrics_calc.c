@@ -9,6 +9,14 @@
 
 static const char *TAG = "METRICS";
 
+/* Helper: comparison function for qsort (used in median calculation) */
+static int compare_float(const void *a, const void *b)
+{
+    float fa = *(const float*)a;
+    float fb = *(const float*)b;
+    return (fa > fb) - (fa < fb);
+}
+
 /* Metrics timer fires every 5 s; downsample certain histories to control memory use. */
 #define METRICS_SAMPLE_PERIOD_SEC 5U
 #define PRESSURE_SAMPLE_INTERVAL_SEC 150U
@@ -291,7 +299,7 @@ static float calculate_heat_index(float temp_c, float rh_pct)
 static void calculate_comfort_score(iaq_data_t *data)
 {
     if (!data->valid.temp_c || !data->valid.rh_pct) {
-        data->metrics.comfort_score = 0;
+        data->metrics.comfort_score = UINT8_MAX;  // Unknown/invalid
         data->metrics.comfort_category = "unknown";
         data->metrics.dew_point_c = NAN;
         data->metrics.abs_humidity_gm3 = NAN;
@@ -373,7 +381,7 @@ static void calculate_comfort_score(iaq_data_t *data)
 static void calculate_co2_score(iaq_data_t *data)
 {
     if (!data->valid.co2_ppm) {
-        data->metrics.co2_score = 0;
+        data->metrics.co2_score = UINT8_MAX;  // Unknown/invalid
         return;
     }
 
@@ -402,6 +410,12 @@ static void calculate_co2_score(iaq_data_t *data)
  */
 static void calculate_overall_iaq_score(iaq_data_t *data)
 {
+    /* Can't calculate overall score if component scores are invalid */
+    if (data->metrics.co2_score == UINT8_MAX || data->metrics.comfort_score == UINT8_MAX) {
+        data->metrics.overall_iaq_score = UINT8_MAX;  // Unknown/invalid
+        return;
+    }
+
     /* Normalize AQI (0-500) to 0-100 scale (inverted: lower AQI = higher score) */
     float aqi_normalized = 0.0f;
     if (data->metrics.aqi_value != UINT16_MAX && data->metrics.aqi_value <= 500) {
@@ -465,7 +479,7 @@ static void calculate_voc_nox_categories(iaq_data_t *data)
 static void calculate_mold_risk(iaq_data_t *data)
 {
     if (!data->valid.temp_c || !data->valid.rh_pct) {
-        data->metrics.mold_risk_score = 0;
+        data->metrics.mold_risk_score = UINT8_MAX;  // Unknown/invalid
         data->metrics.mold_risk_category = "unknown";
         return;
     }
@@ -737,14 +751,14 @@ static void update_pm_spike_detection(iaq_data_t *data)
     uint32_t window_minutes = CONFIG_METRICS_PM_SPIKE_BASELINE_WINDOW_MIN;
     int64_t window_us = (int64_t)window_minutes * 60 * 1000000;
 
-    float baseline_sum = 0.0f;
+    /* Collect baseline samples into temporary array for median calculation */
+    float baseline_samples[PM_HISTORY_SIZE];
     int baseline_count = 0;
 
     for (int i = 1; i < s_pm_history.count; i++) {  /* Start from 1 to exclude current */
         int idx = (s_pm_history.head + PM_HISTORY_SIZE - 1 - i) % PM_HISTORY_SIZE;
         if ((now_us - s_pm_history.timestamps_us[idx]) <= window_us) {
-            baseline_sum += s_pm_history.pm25_ugm3[idx];
-            baseline_count++;
+            baseline_samples[baseline_count++] = s_pm_history.pm25_ugm3[idx];
         } else {
             break;
         }
@@ -755,7 +769,15 @@ static void update_pm_spike_detection(iaq_data_t *data)
         return;
     }
 
-    float baseline = baseline_sum / (float)baseline_count;
+    /* Calculate median baseline (robust to outliers/spikes) */
+    qsort(baseline_samples, baseline_count, sizeof(float), compare_float);
+    float baseline;
+    if (baseline_count % 2 == 0) {
+        baseline = (baseline_samples[baseline_count/2 - 1] + baseline_samples[baseline_count/2]) / 2.0f;
+    } else {
+        baseline = baseline_samples[baseline_count/2];
+    }
+
     float spike_threshold = (float)CONFIG_METRICS_PM_SPIKE_THRESHOLD_UGPM3;
 
     data->metrics.pm25_spike_detected = ((pm25 - baseline) >= spike_threshold);

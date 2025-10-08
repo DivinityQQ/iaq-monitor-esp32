@@ -618,7 +618,11 @@ esp_err_t mqtt_publish_metrics(const iaq_data_t *data)
 
     /* Comfort breakdown */
     cJSON *comfort = cJSON_CreateObject();
-    cJSON_AddNumberToObject(comfort, "score", data->metrics.comfort_score);
+    if (data->metrics.comfort_score != UINT8_MAX) {
+        cJSON_AddNumberToObject(comfort, "score", data->metrics.comfort_score);
+    } else {
+        cJSON_AddNullToObject(comfort, "score");
+    }
     cJSON_AddStringToObject(comfort, "category", data->metrics.comfort_category);
     if (!isnan(data->metrics.dew_point_c)) {
         cJSON_AddNumberToObject(comfort, "dew_point_c", round(data->metrics.dew_point_c * 10.0) / 10.0);
@@ -655,14 +659,26 @@ esp_err_t mqtt_publish_metrics(const iaq_data_t *data)
     cJSON_AddItemToObject(root, "pressure", pressure);
 
     /* Air quality scores */
-    cJSON_AddNumberToObject(root, "co2_score", data->metrics.co2_score);
+    if (data->metrics.co2_score != UINT8_MAX) {
+        cJSON_AddNumberToObject(root, "co2_score", data->metrics.co2_score);
+    } else {
+        cJSON_AddNullToObject(root, "co2_score");
+    }
     cJSON_AddStringToObject(root, "voc_category", data->metrics.voc_category);
     cJSON_AddStringToObject(root, "nox_category", data->metrics.nox_category);
-    cJSON_AddNumberToObject(root, "overall_iaq_score", data->metrics.overall_iaq_score);
+    if (data->metrics.overall_iaq_score != UINT8_MAX) {
+        cJSON_AddNumberToObject(root, "overall_iaq_score", data->metrics.overall_iaq_score);
+    } else {
+        cJSON_AddNullToObject(root, "overall_iaq_score");
+    }
 
     /* Mold risk */
     cJSON *mold = cJSON_CreateObject();
-    cJSON_AddNumberToObject(mold, "score", data->metrics.mold_risk_score);
+    if (data->metrics.mold_risk_score != UINT8_MAX) {
+        cJSON_AddNumberToObject(mold, "score", data->metrics.mold_risk_score);
+    } else {
+        cJSON_AddNullToObject(mold, "score");
+    }
     cJSON_AddStringToObject(mold, "category", data->metrics.mold_risk_category);
     cJSON_AddItemToObject(root, "mold_risk", mold);
 
