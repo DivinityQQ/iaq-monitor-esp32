@@ -84,6 +84,7 @@ static esp_err_t ensure_publish_timers_started(void);
 static bool enqueue_publish_event(mqtt_publish_event_t event);
 static esp_err_t start_periodic_timer(esp_timer_handle_t *handle, const esp_timer_create_args_t *args, uint64_t period_us);
 static bool parse_co2_calibration_payload(const char *payload, int *ppm_out);
+static esp_err_t publish_json(const char *topic, cJSON *obj);
 /* Public publish functions declared in mqtt_manager.h */
 
 /* Helper: publish a single HA sensor discovery config */
@@ -113,7 +114,7 @@ static void ha_publish_sensor_config(cJSON *device, const char *unique_suffix, c
     snprintf(topic, sizeof(topic), "homeassistant/sensor/%s/config", unique_id);
     char *json_string = cJSON_PrintUnformatted(config);
     if (json_string) {
-        esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, 1, 1, true);
+        esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, CONFIG_IAQ_MQTT_CRITICAL_QOS, 1, true);
         free(json_string);
     }
     cJSON_Delete(config);
@@ -468,14 +469,8 @@ esp_err_t mqtt_publish_status(const iaq_data_t *data)
     }
     cJSON_AddItemToObject(root, "sensors", sensors);
 
-    /* Publish */
-    char *json_string = cJSON_PrintUnformatted(root);
-    if (json_string) {
-        esp_mqtt_client_enqueue(s_mqtt_client, TOPIC_HEALTH, json_string, 0, CONFIG_IAQ_MQTT_QOS, 0, false);
-        free(json_string);
-    }
-    cJSON_Delete(root);
-    return ESP_OK;
+    /* Publish using helper (takes ownership of root) */
+    return publish_json(TOPIC_HEALTH, root);
 }
 
 /* Unified topics architecture: /state (fused values), /metrics (derived), /health (diagnostics). */
@@ -486,7 +481,13 @@ static esp_err_t publish_json(const char *topic, cJSON *obj)
     if (!s_mqtt_connected || !obj || !topic) { if (obj) cJSON_Delete(obj); return ESP_FAIL; }
     char *json_string = cJSON_PrintUnformatted(obj);
     if (json_string) {
-        int msg_id = esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, CONFIG_IAQ_MQTT_QOS, 0, false);
+        int msg_id = esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, CONFIG_IAQ_MQTT_TELEMETRY_QOS, 0, true);
+        if (msg_id < 0) {
+            ESP_LOGW(TAG, "MQTT enqueue failed (topic=%s, msg_id=%d), dropping message", topic, msg_id);
+            free(json_string);
+            cJSON_Delete(obj);
+            return ESP_FAIL;
+        }
         ESP_LOGD(TAG, "Enqueued %s, msg_id=%d", topic, msg_id);
         free(json_string);
     }
@@ -820,10 +821,10 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             IAQ_DATA_WITH_LOCK() { iaq_data_get()->system.mqtt_connected = true; }
             xEventGroupSetBits(s_system_ctx->event_group, MQTT_CONNECTED_BIT);
             {
-                int msg_id = esp_mqtt_client_subscribe(client, TOPIC_COMMAND, CONFIG_IAQ_MQTT_QOS);
+                int msg_id = esp_mqtt_client_subscribe(client, TOPIC_COMMAND, CONFIG_IAQ_MQTT_CRITICAL_QOS);
                 ESP_LOGD(TAG, "Subscribing to %s, msg_id=%d", TOPIC_COMMAND, msg_id);
             }
-            esp_mqtt_client_enqueue(client, TOPIC_STATUS, "online", 0, 1, 1, true);
+            esp_mqtt_client_enqueue(client, TOPIC_STATUS, "online", 0, CONFIG_IAQ_MQTT_CRITICAL_QOS, 1, true);
             mqtt_publish_ha_discovery();
             break;
         case MQTT_EVENT_DISCONNECTED:
@@ -1117,9 +1118,14 @@ static void mqtt_publish_worker_task(void *arg)
             esp_task_wdt_reset();
         }
 
-        /* Block on first event */
-        if (xQueueReceive(s_publish_queue, &event, portMAX_DELAY) != pdTRUE) {
-            continue;
+        /* Block on first event with timeout to prevent permanent blocking */
+        if (xQueueReceive(s_publish_queue, &event, pdMS_TO_TICKS(5000)) != pdTRUE) {
+            continue;  /* Timeout or error - loop to reset watchdog */
+        }
+
+        /* Reset watchdog after receiving event */
+        if (wdt_ret == ESP_OK) {
+            esp_task_wdt_reset();
         }
 
         if (!mqtt_manager_is_connected()) {
@@ -1142,16 +1148,20 @@ static void mqtt_publish_worker_task(void *arg)
         /* Publish all requested topics from single snapshot */
         if (pending_events & (1 << MQTT_PUBLISH_EVENT_HEALTH)) {
             mqtt_publish_status(&snapshot);
+            if (wdt_ret == ESP_OK) esp_task_wdt_reset();
         }
         if (pending_events & (1 << MQTT_PUBLISH_EVENT_STATE)) {
             mqtt_publish_state(&snapshot);
+            if (wdt_ret == ESP_OK) esp_task_wdt_reset();
         }
         if (pending_events & (1 << MQTT_PUBLISH_EVENT_METRICS)) {
             mqtt_publish_metrics(&snapshot);
+            if (wdt_ret == ESP_OK) esp_task_wdt_reset();
         }
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
         if (pending_events & (1 << MQTT_PUBLISH_EVENT_DIAGNOSTICS)) {
             mqtt_publish_diagnostics(&snapshot);
+            if (wdt_ret == ESP_OK) esp_task_wdt_reset();
         }
 #endif
     }

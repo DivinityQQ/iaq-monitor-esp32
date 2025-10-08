@@ -38,12 +38,26 @@ menu "IAQ Monitor Configuration"
         help
             Unique identifier for this device. Used in MQTT topics.
 
-    config IAQ_MQTT_QOS
-        int "MQTT QoS Level"
+    config IAQ_MQTT_CRITICAL_QOS
+        int "MQTT Critical Messages QoS Level"
         default 1
         range 0 2
         help
-            MQTT Quality of Service level (0=At most once, 1=At least once, 2=Exactly once)
+            QoS for critical, non-periodic messages (status LWT, HA discovery).
+            Recommended: 1 (At least once) - ensures delivery of important state changes.
+
+    config IAQ_MQTT_TELEMETRY_QOS
+        int "MQTT Telemetry QoS Level"
+        default 0
+        range 0 2
+        help
+            QoS for periodic telemetry topics (/health, /state, /metrics, /diagnostics).
+            These are published every 30-300 seconds and are idempotent.
+            Recommended: 0 (At most once) - prevents outbox congestion, missing one
+            message is acceptable since the next one arrives soon.
+
+            Using QoS 1 for high-frequency telemetry can cause MQTT outbox buildup
+            and block the publish worker after hours of operation.
 
     config IAQ_STATUS_LED_GPIO
         int "Status LED GPIO number"
