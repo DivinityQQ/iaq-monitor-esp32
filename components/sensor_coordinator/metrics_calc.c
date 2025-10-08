@@ -254,7 +254,7 @@ static float calculate_absolute_humidity(float temp_c, float rh_pct)
     float temp_k = temp_c + 273.15f;
     float es = 6.112f * expf((17.67f * temp_c) / (temp_c + 243.5f));  /* Saturation vapor pressure (hPa) */
     float e = es * (rh_pct / 100.0f);  /* Actual vapor pressure (hPa) */
-    float ah = (e * 2.1674f) / temp_k;  /* g/m³ (constant 2.1674 = 1000/461.5 where 461.5 is water vapor gas constant) */
+    float ah = (e * 216.7f) / temp_k;  /* g/m³ (constant 216.7 = 100 * 2.1674, converts hPa to Pa and applies gas law) */
 
     return ah;
 }
