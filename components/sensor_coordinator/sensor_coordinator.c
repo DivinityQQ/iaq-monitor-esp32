@@ -17,7 +17,7 @@
 #include "i2c_bus.h"
 #include "uart_bus.h"
 #include "mcu_temp_driver.h"
-#include "sht41_driver.h"
+#include "sht45_driver.h"
 #include "bmp280_driver.h"
 #include "sgp41_driver.h"
 #include "pms5003_driver.h"
@@ -68,7 +68,7 @@ static portMUX_TYPE s_runtime_spinlock = portMUX_INITIALIZER_UNLOCKED;
 /* Warm-up durations from Kconfig (milliseconds) */
 static const uint32_t s_warmup_ms[SENSOR_ID_MAX] = {
     [SENSOR_ID_MCU]     = CONFIG_IAQ_WARMUP_MCU_MS,
-    [SENSOR_ID_SHT41]   = CONFIG_IAQ_WARMUP_SHT41_MS,
+    [SENSOR_ID_SHT45]   = CONFIG_IAQ_WARMUP_SHT45_MS,
     [SENSOR_ID_BMP280]  = CONFIG_IAQ_WARMUP_BMP280_MS,
     [SENSOR_ID_SGP41]   = CONFIG_IAQ_WARMUP_SGP41_MS,
     [SENSOR_ID_PMS5003] = CONFIG_IAQ_WARMUP_PMS5003_MS,
@@ -144,7 +144,7 @@ static void save_cadence_ms(const char *key, uint32_t ms)
 static void init_schedule_from_config(void)
 {
     s_cadence_ms[SENSOR_ID_MCU]     = load_cadence_ms("cad_mcu",     CONFIG_IAQ_CADENCE_MCU_MS,     &s_cadence_from_nvs[SENSOR_ID_MCU]);
-    s_cadence_ms[SENSOR_ID_SHT41]   = load_cadence_ms("cad_sht41",   CONFIG_IAQ_CADENCE_SHT41_MS,   &s_cadence_from_nvs[SENSOR_ID_SHT41]);
+    s_cadence_ms[SENSOR_ID_SHT45]   = load_cadence_ms("cad_sht45",   CONFIG_IAQ_CADENCE_SHT45_MS,   &s_cadence_from_nvs[SENSOR_ID_SHT45]);
     s_cadence_ms[SENSOR_ID_BMP280]  = load_cadence_ms("cad_bmp280",  CONFIG_IAQ_CADENCE_BMP280_MS,  &s_cadence_from_nvs[SENSOR_ID_BMP280]);
     s_cadence_ms[SENSOR_ID_SGP41]   = load_cadence_ms("cad_sgp41",   CONFIG_IAQ_CADENCE_SGP41_MS,   &s_cadence_from_nvs[SENSOR_ID_SGP41]);
     s_cadence_ms[SENSOR_ID_PMS5003] = load_cadence_ms("cad_pms5003", CONFIG_IAQ_CADENCE_PMS5003_MS, &s_cadence_from_nvs[SENSOR_ID_PMS5003]);
@@ -195,7 +195,7 @@ static const char* sensor_id_to_string(sensor_id_t id)
 {
     switch (id) {
         case SENSOR_ID_MCU:     return "MCU";
-        case SENSOR_ID_SHT41:   return "SHT41";
+        case SENSOR_ID_SHT45:   return "SHT45";
         case SENSOR_ID_BMP280:  return "BMP280";
         case SENSOR_ID_SGP41:   return "SGP41";
         case SENSOR_ID_PMS5003: return "PMS5003";
@@ -252,32 +252,32 @@ static esp_err_t read_sensor_mcu(void)
     return ret;
 }
 
-static esp_err_t read_sensor_sht41(void)
+static esp_err_t read_sensor_sht45(void)
 {
-    if (s_runtime[SENSOR_ID_SHT41].state != SENSOR_STATE_READY) {
+    if (s_runtime[SENSOR_ID_SHT45].state != SENSOR_STATE_READY) {
         return ESP_ERR_INVALID_STATE;
     }
 
     float temp_c = 0.0f, humidity_rh = 0.0f;
-    esp_err_t ret = sht41_driver_read(&temp_c, &humidity_rh);
+    esp_err_t ret = sht45_driver_read(&temp_c, &humidity_rh);
 
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
             iaq_data_t *data = iaq_data_get();
             data->raw.temp_c = temp_c;
             data->raw.rh_pct = humidity_rh;
-            data->updated_at.sht41 = esp_timer_get_time();
+            data->updated_at.sht45 = esp_timer_get_time();
             data->valid.temp_c = true;
             data->valid.rh_pct = true;
         }
-        s_runtime[SENSOR_ID_SHT41].last_read_us = esp_timer_get_time();
-        s_runtime[SENSOR_ID_SHT41].error_count = 0;
-        ESP_LOGD(TAG, "SHT41: %.1f C, %.1f %%RH", temp_c, humidity_rh);
+        s_runtime[SENSOR_ID_SHT45].last_read_us = esp_timer_get_time();
+        s_runtime[SENSOR_ID_SHT45].error_count = 0;
+        ESP_LOGD(TAG, "SHT45: %.1f C, %.1f %%RH", temp_c, humidity_rh);
     } else if (ret != ESP_ERR_NOT_SUPPORTED) {
-        s_runtime[SENSOR_ID_SHT41].error_count++;
-        if (s_runtime[SENSOR_ID_SHT41].error_count >= ERROR_THRESHOLD) {
-            ESP_LOGW(TAG, "SHT41 sensor failed %d times, transitioning to ERROR", ERROR_THRESHOLD);
-            transition_to_state(SENSOR_ID_SHT41, SENSOR_STATE_ERROR);
+        s_runtime[SENSOR_ID_SHT45].error_count++;
+        if (s_runtime[SENSOR_ID_SHT45].error_count >= ERROR_THRESHOLD) {
+            ESP_LOGW(TAG, "SHT45 sensor failed %d times, transitioning to ERROR", ERROR_THRESHOLD);
+            transition_to_state(SENSOR_ID_SHT45, SENSOR_STATE_ERROR);
         }
     }
 
@@ -509,8 +509,8 @@ static void sensor_coordinator_task(void *arg)
                     if (i == SENSOR_ID_MCU) {
                         mcu_temp_driver_disable();
                         reset_result = mcu_temp_driver_enable();
-                    } else if (i == SENSOR_ID_SHT41) {
-                        reset_result = sht41_driver_reset();
+                    } else if (i == SENSOR_ID_SHT45) {
+                        reset_result = sht45_driver_reset();
                     } else if (i == SENSOR_ID_BMP280) {
                         reset_result = bmp280_driver_reset();
                     } else if (i == SENSOR_ID_SGP41) {
@@ -578,7 +578,7 @@ static void sensor_coordinator_task(void *arg)
                     /* Dispatch to per-sensor read handler */
                     switch (cmd.id) {
                         case SENSOR_ID_MCU:     op_res = read_sensor_mcu(); break;
-                        case SENSOR_ID_SHT41:   op_res = read_sensor_sht41(); break;
+                        case SENSOR_ID_SHT45:   op_res = read_sensor_sht45(); break;
                         case SENSOR_ID_BMP280:  op_res = read_sensor_bmp280(); break;
                         case SENSOR_ID_SGP41:   op_res = read_sensor_sgp41(); break;
                         case SENSOR_ID_PMS5003: op_res = read_sensor_pms5003(); break;
@@ -596,10 +596,10 @@ static void sensor_coordinator_task(void *arg)
                         } else {
                             op_res = ESP_FAIL;
                         }
-                    } else if (cmd.id == SENSOR_ID_SHT41) {
-                        op_res = sht41_driver_reset();
+                    } else if (cmd.id == SENSOR_ID_SHT45) {
+                        op_res = sht45_driver_reset();
                         if (op_res == ESP_OK) {
-                            transition_to_state(SENSOR_ID_SHT41, SENSOR_STATE_READY);
+                            transition_to_state(SENSOR_ID_SHT45, SENSOR_STATE_READY);
                         }
                     } else if (cmd.id == SENSOR_ID_BMP280) {
                         op_res = bmp280_driver_reset();
@@ -649,7 +649,7 @@ static void sensor_coordinator_task(void *arg)
                 /* Dispatch to appropriate read handler */
                 switch (i) {
                     case SENSOR_ID_MCU:     (void)read_sensor_mcu(); break;
-                    case SENSOR_ID_SHT41:   (void)read_sensor_sht41(); break;
+                    case SENSOR_ID_SHT45:   (void)read_sensor_sht45(); break;
                     case SENSOR_ID_BMP280:  (void)read_sensor_bmp280(); break;
                     case SENSOR_ID_SGP41:   (void)read_sensor_sgp41(); break;
                     case SENSOR_ID_PMS5003: (void)read_sensor_pms5003(); break;
@@ -707,25 +707,25 @@ esp_err_t sensor_coordinator_init(iaq_system_context_t *ctx)
     ESP_LOGW(TAG, "*** SIMULATION MODE ENABLED - Using fake sensor data ***");
 #endif
 
-    /* Initialize I2C bus for SHT41, BMP280, SGP41 */
+    /* Initialize I2C bus for SHT4x (SHT45), BMP280, SGP41 */
     esp_err_t ret = i2c_bus_init();
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "I2C bus init failed: %s (I2C sensors disabled)", esp_err_to_name(ret));
-        transition_to_state(SENSOR_ID_SHT41, SENSOR_STATE_ERROR);
+        transition_to_state(SENSOR_ID_SHT45, SENSOR_STATE_ERROR);
         transition_to_state(SENSOR_ID_BMP280, SENSOR_STATE_ERROR);
         transition_to_state(SENSOR_ID_SGP41, SENSOR_STATE_ERROR);
     } else {
         ESP_LOGI(TAG, "I2C bus initialized successfully");
         i2c_bus_probe();  /* Log detected devices */
 
-        /* Initialize SHT41 driver */
-        ret = sht41_driver_init();
+        /* Initialize SHT45 driver */
+        ret = sht45_driver_init();
         if (ret != ESP_OK) {
-            ESP_LOGW(TAG, "SHT41 driver init failed: %s", esp_err_to_name(ret));
-            transition_to_state(SENSOR_ID_SHT41, SENSOR_STATE_ERROR);
+            ESP_LOGW(TAG, "SHT45 driver init failed: %s", esp_err_to_name(ret));
+            transition_to_state(SENSOR_ID_SHT45, SENSOR_STATE_ERROR);
         } else {
-            ESP_LOGI(TAG, "SHT41 driver initialized");
-            transition_to_state(SENSOR_ID_SHT41, SENSOR_STATE_INIT);
+            ESP_LOGI(TAG, "SHT45 driver initialized");
+            transition_to_state(SENSOR_ID_SHT45, SENSOR_STATE_INIT);
         }
 
         /* Initialize BMP280 driver */
@@ -916,9 +916,9 @@ esp_err_t sensor_coordinator_stop(void)
         transition_to_state(SENSOR_ID_MCU, SENSOR_STATE_UNINIT);
     }
 
-    if (s_runtime[SENSOR_ID_SHT41].state != SENSOR_STATE_UNINIT) {
-        sht41_driver_deinit();
-        transition_to_state(SENSOR_ID_SHT41, SENSOR_STATE_UNINIT);
+    if (s_runtime[SENSOR_ID_SHT45].state != SENSOR_STATE_UNINIT) {
+        sht45_driver_deinit();
+        transition_to_state(SENSOR_ID_SHT45, SENSOR_STATE_UNINIT);
     }
 
     if (s_runtime[SENSOR_ID_BMP280].state != SENSOR_STATE_UNINIT) {
@@ -1001,7 +1001,7 @@ esp_err_t sensor_coordinator_set_cadence(sensor_id_t id, uint32_t interval_ms)
     s_cadence_from_nvs[id] = true; /* persisted */
     switch (id) {
         case SENSOR_ID_MCU:      save_cadence_ms("cad_mcu", interval_ms); break;
-        case SENSOR_ID_SHT41:    save_cadence_ms("cad_sht41", interval_ms); break;
+        case SENSOR_ID_SHT45:    save_cadence_ms("cad_sht45", interval_ms); break;
         case SENSOR_ID_BMP280:   save_cadence_ms("cad_bmp280", interval_ms); break;
         case SENSOR_ID_SGP41:    save_cadence_ms("cad_sgp41", interval_ms); break;
         case SENSOR_ID_PMS5003:  save_cadence_ms("cad_pms5003", interval_ms); break;
@@ -1073,7 +1073,7 @@ const char* sensor_coordinator_id_to_name(sensor_id_t id)
 {
     switch (id) {
         case SENSOR_ID_MCU:     return "mcu";
-        case SENSOR_ID_SHT41:   return "sht41";
+        case SENSOR_ID_SHT45:   return "sht45";
         case SENSOR_ID_BMP280:  return "bmp280";
         case SENSOR_ID_SGP41:   return "sgp41";
         case SENSOR_ID_PMS5003: return "pms5003";
@@ -1081,4 +1081,3 @@ const char* sensor_coordinator_id_to_name(sensor_id_t id)
         default:                return "unknown";
     }
 }
-

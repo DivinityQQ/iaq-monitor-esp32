@@ -22,8 +22,8 @@ typedef enum {
  * These are direct measurements from sensors, used as input to fusion algorithms.
  */
 typedef struct {
-    float temp_c;               // °C (SHT41 raw)
-    float rh_pct;               // %RH (SHT41 raw)
+    float temp_c;               // °C (SHT45 raw)
+    float rh_pct;               // %RH (SHT45 raw)
     float pressure_pa;          // Pa (BMP280 raw)
     float mcu_temp_c;           // °C (MCU internal sensor)
     float co2_ppm;              // ppm (S8 raw)
@@ -120,7 +120,7 @@ typedef struct {
     struct {
         /* Per-sensor last update timestamps (microseconds since boot). 0 = never */
         int64_t mcu;
-        int64_t sht41;
+        int64_t sht45; // timestamp for SHT45
         int64_t bmp280;
         int64_t sgp41;
         int64_t pms5003;
@@ -129,9 +129,9 @@ typedef struct {
 
     /* Validity flags - true if sensor has provided at least one valid reading */
     struct {
-        bool temp_c;            // SHT41 temperature valid
+        bool temp_c;            // SHT45 temperature valid
         bool mcu_temp_c;        // MCU internal temperature valid
-        bool rh_pct;            // SHT41 humidity valid
+        bool rh_pct;            // SHT45 humidity valid
         bool pressure_pa;       // BMP280 pressure valid
         bool co2_ppm;           // S8 CO2 valid
         bool pm1_ugm3;          // PMS5003 PM1.0 valid

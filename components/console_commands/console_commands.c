@@ -59,10 +59,10 @@ static int cmd_status(int argc, char **argv)
             }
         }
         printf("Status: %s\n", any_warming ? "Warming up..." : "Ready");
-        if (sensor_coordinator_get_runtime_info(SENSOR_ID_SHT41, &info) == ESP_OK) {
-            printf("SHT41:   %s\n", (info.state == SENSOR_STATE_READY || info.state == SENSOR_STATE_WARMING) ? "OK" : "FAULT");
+        if (sensor_coordinator_get_runtime_info(SENSOR_ID_SHT45, &info) == ESP_OK) {
+            printf("SHT45:   %s\n", (info.state == SENSOR_STATE_READY || info.state == SENSOR_STATE_WARMING) ? "OK" : "FAULT");
         } else {
-            printf("SHT41:   FAULT\n");
+            printf("SHT45:   FAULT\n");
         }
         if (sensor_coordinator_get_runtime_info(SENSOR_ID_BMP280, &info) == ESP_OK) {
             printf("BMP280:  %s\n", (info.state == SENSOR_STATE_READY || info.state == SENSOR_STATE_WARMING) ? "OK" : "FAULT");
@@ -392,7 +392,7 @@ static bool parse_sensor_id(const char *name, sensor_id_t *out)
     if (!name || !out) return false;
     if (strcmp(name, "mcu") == 0) { *out = SENSOR_ID_MCU; return true; }
     if (strcmp(name, "s8") == 0 || strcmp(name, "co2") == 0) { *out = SENSOR_ID_S8; return true; }
-    if (strcmp(name, "sht41") == 0) { *out = SENSOR_ID_SHT41; return true; }
+    if (strcmp(name, "sht45") == 0) { *out = SENSOR_ID_SHT45; return true; }
     if (strcmp(name, "bmp280") == 0) { *out = SENSOR_ID_BMP280; return true; }
     if (strcmp(name, "sgp41") == 0) { *out = SENSOR_ID_SGP41; return true; }
     if (strcmp(name, "pms5003") == 0) { *out = SENSOR_ID_PMS5003; return true; }
@@ -444,7 +444,7 @@ static int cmd_sensor_read(int argc, char **argv)
 {
     if (argc < 2) {
         printf("Usage: sensor read <sensor>\n");
-        printf("  sensors: mcu, sht41, bmp280, sgp41, pms5003, s8\n");
+        printf("  sensors: mcu, sht45, bmp280, sgp41, pms5003, s8\n");
         return 1;
     }
 
@@ -727,7 +727,3 @@ esp_err_t console_commands_init(void)
 
     return ESP_OK;
 }
-
-
-
-

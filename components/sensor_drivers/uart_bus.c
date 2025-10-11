@@ -49,6 +49,49 @@ esp_err_t uart_bus_init(uart_port_t uart_port, int tx_gpio, int rx_gpio,
     return ESP_OK;
 }
 
+esp_err_t uart_bus_init_with_queue(uart_port_t uart_port, int tx_gpio, int rx_gpio,
+                                   int baud_rate, int rx_buffer_size,
+                                   int queue_size, QueueHandle_t *out_queue)
+{
+    if (rx_buffer_size <= 128) {
+        ESP_LOGE(TAG, "UART%d: RX buffer size must be > 128 bytes (UART FIFO size), got %d",
+                 uart_port, rx_buffer_size);
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    uart_config_t uart_config = {
+        .baud_rate = baud_rate,
+        .data_bits = UART_DATA_8_BITS,
+        .parity = UART_PARITY_DISABLE,
+        .stop_bits = UART_STOP_BITS_1,
+        .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
+        .source_clk = UART_SCLK_DEFAULT,
+    };
+
+    esp_err_t ret = uart_param_config(uart_port, &uart_config);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "UART%d param config failed: %s", uart_port, esp_err_to_name(ret));
+        return ret;
+    }
+
+    ret = uart_set_pin(uart_port, tx_gpio, rx_gpio, UART_PIN_NO_CHANGE, UART_PIN_NO_CHANGE);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "UART%d set pin failed: %s", uart_port, esp_err_to_name(ret));
+        return ret;
+    }
+
+    /* Install UART driver with RX buffer and event queue */
+    ret = uart_driver_install(uart_port, rx_buffer_size, 0, queue_size, out_queue, 0);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "UART%d driver install (queue) failed: %s", uart_port, esp_err_to_name(ret));
+        return ret;
+    }
+
+    ESP_LOGI(TAG, "UART%d initialized (TX=%d, RX=%d, baud=%d, rx_buf=%d, queue=%d)",
+             uart_port, tx_gpio, rx_gpio, baud_rate, rx_buffer_size, queue_size);
+    return ESP_OK;
+}
+
 int uart_bus_write_bytes(uart_port_t uart_port, const uint8_t *data, size_t len)
 {
     return uart_write_bytes(uart_port, (const char *)data, len);

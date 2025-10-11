@@ -42,7 +42,7 @@ esp_err_t bmp280_driver_read(float *out_pressure_hpa, float *out_temp_c)
         if (ret != ESP_OK) return ret;
     }
     if (out_temp_c) {
-        /* BMP280 also provides temperature, but we use SHT41 as primary */
+        /* BMP280 also provides temperature, but we use SHT4x as primary */
         ret = sensor_sim_read_temperature(out_temp_c);
     }
     return ret;

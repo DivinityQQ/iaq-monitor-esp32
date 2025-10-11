@@ -24,7 +24,7 @@ Current version: 0.5.1
 **Fully Supported** (real driver):
 - ESP32-S3 internal temperature sensor (MCU)
 **Simulated** (stub drivers, ready for hardware implementation):
-- SHT41 (I2C 0x44) - Temperature & Humidity
+- SHT45 (I2C 0x44) - Temperature & Humidity
 - BMP280 (I2C 0x76) - Barometric Pressure
 - SGP41 (I2C 0x59) - VOC & NOx Indices
 - PMS5003 (UART) - PM1.0, PM2.5, PM10 Particulate Matter
@@ -59,7 +59,7 @@ sensor calibrate co2 <ppm>
 sensor cadence | sensor cadence set <sensor> <ms>
 free | version | restart
 ```
-Sensors: mcu (internal temp), sht41, bmp280, sgp41, pms5003, s8 (as drivers are wired).
+Sensors: mcu (internal temp), sht45, bmp280, sgp41, pms5003, s8 (as drivers are wired).
 ## Simulation Mode
 Enable simulation to test the full MQTT/HA integration without physical sensors:
 ```bash
@@ -106,7 +106,7 @@ sensor cadence set <sensor> <ms>
 ### Data Flow Pipeline
 ```
 ┌─────────────────┐
-│ Sensor Drivers  │  (MCU, SHT41, BMP280, SGP41, PMS5003, S8)
+│ Sensor Drivers  │  (MCU, SHT45, BMP280, SGP41, PMS5003, S8)
 └────────┬────────┘
          │ Raw readings (5-10s cadence, staggered)
          ↓
@@ -144,14 +144,14 @@ sensor cadence set <sensor> <ms>
 - **Watchdog monitoring:** Coordinator and MQTT tasks feed TWDT to detect deadlocks
 ### Component Responsibilities
 - `components/iaq_data`: Single source of truth; mutex-guarded; "no data" sentinels
-- `components/sensor_drivers`: Individual sensor drivers (mcu, sht41, bmp280, sgp41, pms5003, s8)
+- `components/sensor_drivers`: Individual sensor drivers (mcu, sht45, bmp280, sgp41, pms5003, s8)
   - Bus abstraction: `i2c_bus.c` (shared), `uart_bus.c` (per-driver)
   - Simulation support: `sensor_sim.c` (conditional compilation)
 - `components/sensor_coordinator`: Schedules sensor reads; state machine; owns driver lifecycle; runs fusion & metrics timers
 - `components/connectivity`: Wi-Fi and MQTT; non-blocking enqueue; HA discovery; queue-based worker with coalescing
 - `components/console_commands`: Shell-style commands; interact via coordinator APIs
 ### Bus Ownership
-- **Shared buses** (I2C for SHT41/BMP280/SGP41): Coordinator initializes once; ESP-IDF framework provides internal locking
+- **Shared buses** (I2C for SHT4x/BMP280/SGP41): Coordinator initializes once; ESP-IDF framework provides internal locking
 - **Dedicated buses** (UART for PMS5003/S8): Each driver owns its port lifecycle
 **For detailed metrics documentation, see [METRICS.md](METRICS.md).**
 ## Logging
@@ -164,7 +164,7 @@ sensor cadence set <sensor> <ms>
 ## Development Status
 **Current Status (v0.5.1)**
 - ✅ Core infrastructure (WiFi, MQTT 5.0, Home Assistant auto-discovery)
-- ✅ 6 sensor drivers: MCU temp (real), 5 simulated (SHT41, BMP280, SGP41, PMS5003, S8)
+- ✅ 6 sensor drivers: MCU temp (real), 5 simulated (SHT45, BMP280, SGP41, PMS5003, S8)
 - ✅ Full simulation mode for testing without hardware
 - ✅ Sensor state machine with auto-recovery (exponential backoff for ERROR states)
 - ✅ Sensor fusion (PM humidity correction, CO₂ pressure/ABC compensation, temp self-heating)

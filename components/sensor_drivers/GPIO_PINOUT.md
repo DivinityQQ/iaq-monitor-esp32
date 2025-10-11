@@ -4,7 +4,7 @@ This document defines GPIO ownership for sensor hardware and buses.
 
 ## Pin Assignments
 
-### I2C Bus (Shared by SHT41, BMP280, SGP41)
+### I2C Bus (Shared by SHT4x, BMP280, SGP41)
 
 | Signal | GPIO | Kconfig Variable         | Notes                          |
 |--------|------|--------------------------|--------------------------------|
@@ -14,7 +14,7 @@ This document defines GPIO ownership for sensor hardware and buses.
 **Frequency:** 100 kHz (configurable via `IAQ_I2C_FREQ_HZ`)
 
 **Connected Sensors:**
-- **SHT41:** Temperature & Humidity (I2C addr: 0x44)
+- **SHT45:** Temperature & Humidity (I2C addr: 0x44)
 - **BMP280:** Barometric Pressure (I2C addr: 0x76 or 0x77)
 - **SGP41:** VOC & NOx Gas Sensor (I2C addr: 0x59)
 

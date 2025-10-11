@@ -8,7 +8,7 @@ menu "Sensor Hardware Configuration"
             range 0 48
             help
                 GPIO number for I2C SDA (Serial Data Line).
-                Shared by SHT41, BMP280, and SGP41 sensors.
+                Shared by SHT4x (SHT45), BMP280, and SGP41 sensors.
                 Default: GPIO8 (safe for ESP32-S3 DevKit).
 
         config IAQ_I2C_SCL_GPIO
@@ -17,7 +17,7 @@ menu "Sensor Hardware Configuration"
             range 0 48
             help
                 GPIO number for I2C SCL (Serial Clock Line).
-                Shared by SHT41, BMP280, and SGP41 sensors.
+                Shared by SHT4x (SHT45), BMP280, and SGP41 sensors.
                 Default: GPIO9 (safe for ESP32-S3 DevKit).
 
         config IAQ_I2C_FREQ_HZ
@@ -86,6 +86,44 @@ menu "Sensor Hardware Configuration"
                     MUST be > 128 bytes (ESP32-S3 UART FIFO size).
                     PMS5003 frame is 32 bytes; buffer should accommodate bursts.
                     Default: 256 bytes.
+
+            menu "Filtering and Background Reader"
+
+                config IAQ_PMS5003_BG_READER
+                    bool "Enable background UART reader"
+                    default y
+                    help
+                        Continuously parse PMS5003 frames at ~1 Hz in the background
+                        and maintain a smoothed reading. The coordinator read will
+                        fetch the latest smoothed value without blocking on UART.
+
+                config IAQ_PMS5003_RING_SIZE
+                    int "Median window (samples)"
+                    default 5
+                    range 3 9
+                    depends on IAQ_PMS5003_BG_READER
+                    help
+                        Number of recent samples used for median filtering
+                        before EWMA smoothing. Use an odd number (3,5,7,9).
+
+                config IAQ_PMS5003_EWMA_ALPHA
+                    string "EWMA alpha (0.0-1.0)"
+                    default "0.3"
+                    depends on IAQ_PMS5003_BG_READER
+                    help
+                        Exponential moving average weight. Higher alpha reacts
+                        faster to changes, lower alpha smooths more. Example: 0.3.
+
+                config IAQ_PMS5003_STALE_MS
+                    int "Stale timeout (ms)"
+                    default 5000
+                    range 1000 60000
+                    depends on IAQ_PMS5003_BG_READER
+                    help
+                        If no valid frame is received within this time, the
+                        next driver read reports timeout.
+
+            endmenu
 
         endmenu
 

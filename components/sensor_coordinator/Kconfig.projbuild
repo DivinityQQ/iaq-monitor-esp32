@@ -8,12 +8,12 @@ config IAQ_CADENCE_MCU_MS
         Period between MCU internal temperature sensor reads.
         0 disables periodic reads.
 
-config IAQ_CADENCE_SHT41_MS
-    int "SHT41 cadence (ms)"
+config IAQ_CADENCE_SHT45_MS
+    int "SHT45 cadence (ms)"
     default 30000
     range 0 600000
     help
-        Period between SHT41 reads. 0 disables.
+        Period between SHT45 reads. 0 disables.
 
 config IAQ_CADENCE_BMP280_MS
     int "BMP280 cadence (ms)"
@@ -53,12 +53,12 @@ menu "Sensor Warm-up Durations"
             MCU sensor warm-up time. Reads are blocked until this period elapses.
             Default: 0 (no warm-up needed).
 
-    config IAQ_WARMUP_SHT41_MS
-        int "SHT41 warm-up (ms)"
+config IAQ_WARMUP_SHT45_MS
+        int "SHT45 warm-up (ms)"
         default 0
         range 0 60000
         help
-            SHT41 warm-up time after power-on.
+            SHT45 warm-up time after power-on.
             Default: 0 (ready immediately).
 
     config IAQ_WARMUP_BMP280_MS
@@ -162,7 +162,7 @@ menu "Sensor Fusion"
         default "0.0"
         help
             Offset to compensate for sensor self-heating.
-            If SHT41 reads warmer than ambient due to board heat, set positive offset.
+            If SHT45 reads warmer than ambient due to board heat, set positive offset.
             Example: "0.5" if sensor reads 0.5°C high.
             Runtime adjustable via console 'fusion set temp_offset'.
 
@@ -332,4 +332,3 @@ menu "Derived Metrics"
 endmenu
 
 endmenu
-

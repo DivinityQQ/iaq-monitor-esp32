@@ -4,6 +4,7 @@
 
 #include "esp_err.h"
 #include "driver/uart.h"
+#include "freertos/queue.h"
 #include <stdint.h>
 #include <stddef.h>
 
@@ -23,6 +24,17 @@ extern "C" {
  */
 esp_err_t uart_bus_init(uart_port_t uart_port, int tx_gpio, int rx_gpio,
                         int baud_rate, int rx_buffer_size);
+
+/**
+ * Initialize a UART port like uart_bus_init, but also create an event queue.
+ * Useful for event-driven RX parsing without polling timeouts.
+ *
+ * @param queue_size Length of the UART event queue
+ * @param out_queue  Returned queue handle
+ */
+esp_err_t uart_bus_init_with_queue(uart_port_t uart_port, int tx_gpio, int rx_gpio,
+                                   int baud_rate, int rx_buffer_size,
+                                   int queue_size, QueueHandle_t *out_queue);
 
 /**
  * Write bytes to UART.

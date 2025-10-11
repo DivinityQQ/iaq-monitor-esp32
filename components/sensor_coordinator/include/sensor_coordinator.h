@@ -7,7 +7,7 @@
 
 typedef enum {
     SENSOR_ID_MCU = 0,
-    SENSOR_ID_SHT41,
+    SENSOR_ID_SHT45,
     SENSOR_ID_BMP280,
     SENSOR_ID_SGP41,
     SENSOR_ID_PMS5003,
@@ -100,7 +100,7 @@ const char* sensor_coordinator_state_to_string(sensor_state_t state);
  * Convert sensor ID to name string.
  *
  * @param id Sensor ID
- * @return Sensor name string (e.g., "mcu", "s8", "sht41")
+ * @return Sensor name string (e.g., "mcu", "s8", "sht45")
  */
 const char* sensor_coordinator_id_to_name(sensor_id_t id);
 

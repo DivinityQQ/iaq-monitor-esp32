@@ -2,7 +2,7 @@ set(SRCS
     "i2c_bus.c"
     "uart_bus.c"
     "mcu_temp_driver.c"
-    "sht41_driver.c"
+    "sht45_driver.c"
     "bmp280_driver.c"
     "sgp41_driver.c"
     "pms5003_driver.c"

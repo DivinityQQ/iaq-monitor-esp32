@@ -18,7 +18,7 @@ esp_err_t fusion_init(void);
  * Apply cross-sensor compensations to raw sensor data.
  *
  * This function performs the following compensations in order:
- * 1. Temperature self-heating correction (SHT41)
+ * 1. Temperature self-heating correction (SHT4x)
  * 2. PM humidity correction (PMS5003)
  * 3. CO2 pressure compensation (S8)
  * 4. CO2 ABC baseline correction (S8)

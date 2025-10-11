@@ -24,8 +24,8 @@ esp_err_t sgp41_driver_init(void);
  *
  * @param out_voc_index Pointer to store VOC index (can be NULL)
  * @param out_nox_index Pointer to store NOx index (can be NULL)
- * @param temp_c Temperature for compensation (from SHT41)
- * @param humidity_rh Humidity for compensation (from SHT41)
+ * @param temp_c Temperature for compensation (from SHT4x)
+ * @param humidity_rh Humidity for compensation (from SHT4x)
  * @return ESP_OK on success, ESP_ERR_NOT_SUPPORTED if stub, error code otherwise
  */
 esp_err_t sgp41_driver_read(uint16_t *out_voc_index, uint16_t *out_nox_index,

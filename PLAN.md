@@ -341,7 +341,7 @@ iaq_fusion_diagnostics_t fusion_diag;
 
 - [x] Implement temperature self-heating correction:
   - Load offset from NVS or use Kconfig default
-  - `temp_ambient = temp_sht41 - offset_c`
+  - `temp_ambient = temp_sht45 - offset_c`
 
 - [x] Implement CO2 ABC baseline tracking:
   - Ring buffer for nightly minima (7 days)
