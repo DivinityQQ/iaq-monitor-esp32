@@ -202,9 +202,18 @@ static void apply_pm_rh_correction(iaq_data_t *data)
 static void apply_co2_pressure_compensation(iaq_data_t *data)
 {
 #ifdef CONFIG_FUSION_CO2_PRESSURE_ENABLE
-    if (!data->valid.co2_ppm || !data->valid.pressure_pa) {
-        /* No compensation possible */
+    if (!data->valid.co2_ppm) {
+        /* No CO2 available */
         data->fusion_diag.co2_pressure_offset_ppm = 0.0f;
+        return;
+    }
+
+    /* Default to passthrough when pressure is unavailable */
+    data->fused.co2_ppm = data->raw.co2_ppm;
+    data->fusion_diag.co2_pressure_offset_ppm = 0.0f;
+
+    if (!data->valid.pressure_pa) {
+        /* No compensation possible; keep fused=raw */
         return;
     }
 
@@ -213,7 +222,6 @@ static void apply_co2_pressure_compensation(iaq_data_t *data)
     /* Sanity check pressure (95-106 kPa) */
     if (pressure_pa < 95000.0f || pressure_pa > 106000.0f) {
         ESP_LOGW(TAG, "Pressure out of range: %.0f Pa (skipping CO2 compensation)", pressure_pa);
-        data->fusion_diag.co2_pressure_offset_ppm = 0.0f;
         return;
     }
 
@@ -222,8 +230,6 @@ static void apply_co2_pressure_compensation(iaq_data_t *data)
     float co2_compensated = co2_raw * (p_ref / pressure_pa);
 
     data->fusion_diag.co2_pressure_offset_ppm = co2_compensated - co2_raw;
-
-    /* Update fused CO2 (will be further adjusted by ABC if enabled) */
     data->fused.co2_ppm = co2_compensated;
 
     ESP_LOGD(TAG, "CO2 pressure comp: %.0f -> %.0f ppm (offset: %.1f ppm)",

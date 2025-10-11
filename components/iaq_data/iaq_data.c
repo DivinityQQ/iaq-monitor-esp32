@@ -77,6 +77,14 @@ esp_err_t iaq_data_init(void)
     g_iaq_data.fusion_diag.pm25_quality = 100;
     g_iaq_data.fusion_diag.pm1_pm25_ratio = NAN;
 
+    /* Initialize HW diagnostics */
+    g_iaq_data.hw_diag.s8_diag_valid = false;
+    g_iaq_data.hw_diag.s8_addr = 0;
+    g_iaq_data.hw_diag.s8_meter_status = 0;
+    g_iaq_data.hw_diag.s8_serial = 0;
+    g_iaq_data.hw_diag.s8_abc_period_hours = 0;
+    g_iaq_data.hw_diag.s8_abc_enabled = false;
+
     /* Initialize all validity flags to false */
     g_iaq_data.valid.temp_c = false;
     g_iaq_data.valid.mcu_temp_c = false;

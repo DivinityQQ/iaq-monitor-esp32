@@ -17,6 +17,7 @@
 #include "wifi_manager.h"
 #include "mqtt_manager.h"
 #include "sensor_coordinator.h"
+#include "s8_driver.h"
 
 static const char *TAG = "CONSOLE_CMD";
 
@@ -573,12 +574,14 @@ static int cmd_sensor_cadence(int argc, char **argv)
 static int cmd_sensor(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: sensor <status|read|reset|calibrate|cadence>\n");
+        printf("Usage: sensor <status|read|reset|calibrate|cadence|s8>\n");
         printf("  status                 - Show sensor health status\n");
         printf("  read <sensor>          - Force read specific sensor (e.g., mcu)\n");
         printf("  reset <sensor>         - Reset specific sensor (e.g., mcu)\n");
         printf("  calibrate co2 <ppm>    - Calibrate CO2 sensor\n");
         printf("  cadence [set <sensor> <ms>] - Show or set cadences\n");
+        printf("  s8 status              - Show S8 diagnostics\n");
+        printf("  s8 abc <on|off> [hours]- Enable/disable S8 ABC (period in hours)\n");
         return 0;
     }
 
@@ -592,6 +595,55 @@ static int cmd_sensor(int argc, char **argv)
         return cmd_sensor_calibrate(argc - 1, &argv[1]);
     } else if (strcmp(argv[1], "cadence") == 0) {
         return cmd_sensor_cadence(argc - 1, &argv[1]);
+    } else if (strcmp(argv[1], "s8") == 0) {
+        if (argc < 3) {
+            printf("Usage: sensor s8 <status|abc> ...\n");
+            return 1;
+        }
+        if (strcmp(argv[2], "status") == 0) {
+            s8_diag_t d;
+            esp_err_t r = s8_driver_get_diag(&d);
+            if (r != ESP_OK) {
+                printf("S8 status failed: %s\n", esp_err_to_name(r));
+                return 1;
+            }
+            printf("S8 Diagnostics:\n");
+            printf("  Modbus addr: %u\n", d.modbus_addr);
+            printf("  Serial:      %u\n", (unsigned)d.serial_number);
+            printf("  CO2:         %u ppm\n", (unsigned)d.co2_ppm);
+            printf("  MeterStatus: 0x%04X\n", d.meter_status);
+            printf("  ABC:         %s (period=%u h)\n", d.abc_enabled ? "enabled" : "disabled", (unsigned)d.abc_period_hours);
+            return 0;
+        } else if (strcmp(argv[2], "abc") == 0) {
+            if (argc < 4) {
+                printf("Usage: sensor s8 abc <on|off> [hours]\n");
+                return 1;
+            }
+            bool enable = (strcmp(argv[3], "on") == 0);
+            if (!enable && strcmp(argv[3], "off") != 0) {
+                printf("Usage: sensor s8 abc <on|off> [hours]\n");
+                return 1;
+            }
+            uint16_t hours = 180;
+            if (argc >= 5) {
+                int h = atoi(argv[4]);
+                if (h < 0 || h > 10000) {
+                    printf("Invalid hours: %s\n", argv[4]);
+                    return 1;
+                }
+                hours = (uint16_t)h;
+            }
+            esp_err_t r = s8_driver_set_abc_enabled(enable, hours);
+            if (r == ESP_OK) {
+                printf("S8 ABC %s (period=%u h)\n", enable ? "enabled" : "disabled", (unsigned)(enable ? hours : 0));
+                return 0;
+            }
+            printf("Failed to set S8 ABC: %s\n", esp_err_to_name(r));
+            return 1;
+        } else {
+            printf("Unknown S8 subcommand: %s\n", argv[2]);
+            return 1;
+        }
     }
 
     printf("Unknown or unimplemented sensor command: %s\n", argv[1]);

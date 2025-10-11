@@ -727,11 +727,22 @@ esp_err_t mqtt_publish_diagnostics(const iaq_data_t *data)
     }
     cJSON_AddItemToObject(root, "fusion", fusion);
 
-    /* ABC diagnostics */
+    /* Fusion ABC diagnostics */
     cJSON *abc = cJSON_CreateObject();
     cJSON_AddNumberToObject(abc, "baseline_ppm", data->fusion_diag.co2_abc_baseline_ppm);
     cJSON_AddNumberToObject(abc, "confidence_pct", data->fusion_diag.co2_abc_confidence_pct);
     cJSON_AddItemToObject(root, "abc", abc);
+
+    /* Senseair S8 diagnostics (from iaq_data, not driver) */
+    if (data->hw_diag.s8_diag_valid) {
+        cJSON *s8j = cJSON_CreateObject();
+        cJSON_AddNumberToObject(s8j, "addr", data->hw_diag.s8_addr);
+        cJSON_AddNumberToObject(s8j, "serial", data->hw_diag.s8_serial);
+        cJSON_AddNumberToObject(s8j, "meter_status", data->hw_diag.s8_meter_status);
+        cJSON_AddBoolToObject(s8j, "abc_enabled", data->hw_diag.s8_abc_enabled);
+        cJSON_AddNumberToObject(s8j, "abc_period_hours", data->hw_diag.s8_abc_period_hours);
+        cJSON_AddItemToObject(root, "s8_diag", s8j);
+    }
 
     return publish_json(TOPIC_DIAGNOSTICS, root);
 }

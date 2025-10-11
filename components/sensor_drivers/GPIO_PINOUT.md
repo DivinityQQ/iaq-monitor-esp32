@@ -53,6 +53,8 @@ If RESET is enabled (`IAQ_PMS5003_RST_GPIO` ≥ 0):
 **Protocol:** Modbus RTU with CRC16
 **RX Buffer:** 256 bytes (default)
 
+Voltage levels: Senseair S8 exposes CMOS TTL UART. Many variants accept 3.3V on RX; some modules may output 5V on TX. Verify your module’s TX level; add a level shifter or resistor divider if necessary to protect ESP32 RX.
+
 ---
 
 ### UART Buffer Size Requirements

@@ -3,10 +3,20 @@
 #define S8_DRIVER_H
 
 #include "esp_err.h"
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
 #endif
+
+typedef struct {
+    uint8_t  modbus_addr;        /* Current Modbus address */
+    uint16_t meter_status;       /* IR1 meter status flags */
+    uint16_t co2_ppm;            /* IR4 current CO2 ppm */
+    uint32_t serial_number;      /* IR30+IR31 serial number */
+    uint16_t abc_period_hours;   /* HR32 ABC period (0=disabled) */
+    bool     abc_enabled;        /* Derived from period>0 */
+} s8_diag_t;
 
 /**
  * Initialize the Senseair S8 CO2 sensor driver.
@@ -45,6 +55,17 @@ esp_err_t s8_driver_reset(void);
  * @return ESP_OK on success, error code otherwise
  */
 esp_err_t s8_driver_deinit(void);
+
+/** Diagnostics and configuration **/
+
+/** Read diagnostic info, serial, and ABC configuration. */
+esp_err_t s8_driver_get_diag(s8_diag_t *out);
+
+/** Set ABC period in hours (0 disables ABC). */
+esp_err_t s8_driver_set_abc_period(uint16_t hours);
+
+/** Enable/disable ABC; when enabling, use provided period (default 180 if 0). */
+esp_err_t s8_driver_set_abc_enabled(bool enable, uint16_t period_hours);
 
 #ifdef __cplusplus
 }

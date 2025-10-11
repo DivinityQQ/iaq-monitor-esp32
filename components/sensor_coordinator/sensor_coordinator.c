@@ -767,6 +767,23 @@ esp_err_t sensor_coordinator_init(iaq_system_context_t *ctx)
     } else {
         ESP_LOGI(TAG, "S8 driver initialized");
         transition_to_state(SENSOR_ID_S8, SENSOR_STATE_INIT);
+        /* Query diagnostics once at init time for logs */
+        s8_diag_t diag;
+        if (s8_driver_get_diag(&diag) == ESP_OK) {
+            ESP_LOGI(TAG, "S8: addr=%u, serial=%u, ABC %s (period=%u h)",
+                     diag.modbus_addr, (unsigned)diag.serial_number,
+                     diag.abc_enabled ? "enabled" : "disabled",
+                     (unsigned)diag.abc_period_hours);
+            IAQ_DATA_WITH_LOCK() {
+                iaq_data_t *data = iaq_data_get();
+                data->hw_diag.s8_diag_valid = true;
+                data->hw_diag.s8_addr = diag.modbus_addr;
+                data->hw_diag.s8_meter_status = diag.meter_status;
+                data->hw_diag.s8_serial = diag.serial_number;
+                data->hw_diag.s8_abc_period_hours = diag.abc_period_hours;
+                data->hw_diag.s8_abc_enabled = diag.abc_enabled;
+            }
+        }
     }
 
     /* Initialize MCU temperature sensor */

@@ -162,6 +162,14 @@ menu "Sensor Hardware Configuration"
                     Must differ from PMS5003 port if both enabled.
                     Default: 2.
 
+            config IAQ_S8_ADDR
+                int "Modbus Address"
+                default 254
+                range 1 254
+                help
+                    Senseair S8 Modbus address (decimal). Default: 254 (0xFE).
+                    Change only if your module has been readdressed.
+
             config IAQ_S8_TX_GPIO
                 int "TX GPIO"
                 default 19
@@ -187,6 +195,30 @@ menu "Sensor Hardware Configuration"
                     MUST be > 128 bytes (ESP32-S3 UART FIFO size).
                     S8 Modbus responses are typically <32 bytes.
                     Default: 256 bytes.
+
+            config IAQ_S8_ENABLE_ABC
+                bool "Enable sensor-side ABC (Automatic Baseline Correction)"
+                default n
+                help
+                    When enabled, the driver will configure the S8 to manage ABC internally
+                    via its ABC period holding register. This disables fusion-side ABC.
+
+            config IAQ_S8_ABC_PERIOD_HOURS
+                int "ABC period (hours)"
+                default 180
+                range 0 10000
+                depends on IAQ_S8_ENABLE_ABC
+                help
+                    ABC period in hours (0 disables ABC). Typical: 180 hours (7.5 days).
+
+            config IAQ_S8_USE_SENSOR_PRESSURE_COMP
+                bool "Use sensor-side pressure compensation (if supported)"
+                default n
+                help
+                    If the S8 variant supports ambient pressure input via Modbus, enable this
+                    to write measured pressure to the sensor. This will disable fusion-side
+                    pressure compensation to avoid double-correction. If unsupported, this
+                    setting has no effect.
 
         endmenu
 

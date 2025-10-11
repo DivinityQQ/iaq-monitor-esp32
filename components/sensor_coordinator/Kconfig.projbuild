@@ -141,6 +141,7 @@ menu "Sensor Fusion"
 
     config FUSION_CO2_PRESSURE_ENABLE
         bool "Enable CO2 pressure compensation"
+        depends on !IAQ_S8_USE_SENSOR_PRESSURE_COMP
         default y
         help
             Compensate CO2 readings for barometric pressure changes.
@@ -168,6 +169,7 @@ menu "Sensor Fusion"
 
     config FUSION_CO2_ABC_ENABLE
         bool "Enable CO2 automatic baseline correction (ABC)"
+        depends on !IAQ_S8_ENABLE_ABC
         default y
         help
             Automatically track and correct CO2 sensor baseline drift.

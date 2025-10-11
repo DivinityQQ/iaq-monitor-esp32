@@ -98,6 +98,20 @@ typedef struct {
 } iaq_fusion_diagnostics_t;
 
 /**
+ * Hardware/driver diagnostics aggregated for publishing.
+ * Keep driver specifics minimal to avoid tight coupling at higher layers.
+ */
+typedef struct {
+    /* Senseair S8 */
+    bool     s8_diag_valid;        // true if fields below contain valid data
+    uint8_t  s8_addr;              // Modbus address
+    uint16_t s8_meter_status;      // IR1 meter status
+    uint32_t s8_serial;            // IR30+IR31 serial
+    uint16_t s8_abc_period_hours;  // HR32 ABC period (0=disabled)
+    bool     s8_abc_enabled;       // derived from period>0
+} iaq_hw_diagnostics_t;
+
+/**
  * Global data structure for all IAQ measurements and system state.
  * Access must be protected by mutex.
  */
@@ -115,6 +129,9 @@ typedef struct {
 
     /* FUSION diagnostics (for validation/tuning) */
     iaq_fusion_diagnostics_t fusion_diag;
+
+    /* Hardware/driver diagnostics */
+    iaq_hw_diagnostics_t hw_diag;
 
     /* Metadata */
     struct {
