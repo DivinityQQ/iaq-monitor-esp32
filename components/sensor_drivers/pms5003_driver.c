@@ -22,6 +22,8 @@ static bool s_initialized = false;
 static uart_port_t s_uart_port = (uart_port_t)CONFIG_IAQ_PMS5003_UART_PORT;
 static int s_set_gpio = CONFIG_IAQ_PMS5003_SET_GPIO;
 static bool s_use_set = false;
+static int s_rst_gpio = CONFIG_IAQ_PMS5003_RST_GPIO;
+static bool s_use_rst = false;
 
 #ifdef CONFIG_IAQ_PMS5003_BG_READER
 static TaskHandle_t s_rx_task = NULL;
@@ -221,9 +223,30 @@ esp_err_t pms5003_driver_init(void)
         }
     }
 
+    /* Optional RESET pin configuration (active LOW) */
+    if (s_rst_gpio >= 0) {
+        gpio_config_t io = {
+            .pin_bit_mask = 1ULL << s_rst_gpio,
+            .mode = GPIO_MODE_OUTPUT,
+            .pull_up_en = GPIO_PULLUP_DISABLE,
+            .pull_down_en = GPIO_PULLDOWN_DISABLE,
+            .intr_type = GPIO_INTR_DISABLE,
+        };
+        if (gpio_config(&io) == ESP_OK) {
+            s_use_rst = true;
+            /* Keep RESET inactive (HIGH) */
+            gpio_set_level(s_rst_gpio, 1);
+        } else {
+            s_use_rst = false;
+            ESP_LOGW(TAG, "Failed to configure RESET pin GPIO%d; continuing without RESET control", s_rst_gpio);
+        }
+    }
+
     /* Flush any stale data */
     (void)uart_bus_flush_rx(uart_port);
 
+    /* Mark initialized before creating background task so it doesn't exit early */
+    s_initialized = true;
 #ifdef CONFIG_IAQ_PMS5003_BG_READER
     if (!s_rx_task) {
         (void)uart_set_rx_full_threshold(s_uart_port, 32);
@@ -235,9 +258,8 @@ esp_err_t pms5003_driver_init(void)
         }
     }
 #endif
-
-    s_initialized = true;
-    ESP_LOGI(TAG, "PMS5003 driver initialized (UART%d, SET=%s)", uart_port, s_use_set ? "yes" : "no");
+    ESP_LOGI(TAG, "PMS5003 driver initialized (UART%d, SET=%s, RST=%s)",
+             uart_port, s_use_set ? "yes" : "no", s_use_rst ? "yes" : "no");
     return ESP_OK;
 }
 
@@ -312,13 +334,26 @@ esp_err_t pms5003_driver_reset(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    /* Flush RX buffer to clear any stale data */
-    (void)uart_bus_flush_rx(s_uart_port);
-
-    /* If SET pin available, ensure we are awake */
-    pms_set_work_mode(true);
-
-    ESP_LOGI(TAG, "PMS5003 driver reset (RX buffer flushed, sensor awake)");
+    /* Hardware reset if available; else soft flush/wake */
+    if (s_use_rst) {
+        /* Active LOW pulse on RESET pin */
+        gpio_set_level(s_rst_gpio, 0);
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_IAQ_PMS5003_RST_PULSE_MS));
+        gpio_set_level(s_rst_gpio, 1);
+        vTaskDelay(pdMS_TO_TICKS(CONFIG_IAQ_PMS5003_RST_SETTLE_MS));
+        /* After reset, ensure sensor is in work mode if SET available */
+        pms_set_work_mode(true);
+        /* Flush any reset noise */
+        (void)uart_bus_flush_rx(s_uart_port);
+        ESP_LOGI(TAG, "PMS5003 hardware reset pulsed (LOW %d ms, settle %d ms)",
+                 CONFIG_IAQ_PMS5003_RST_PULSE_MS, CONFIG_IAQ_PMS5003_RST_SETTLE_MS);
+    } else {
+        /* Flush RX buffer to clear any stale data */
+        (void)uart_bus_flush_rx(s_uart_port);
+        /* If SET pin available, ensure we are awake */
+        pms_set_work_mode(true);
+        ESP_LOGI(TAG, "PMS5003 driver reset (RX flushed, sensor awake)");
+    }
     return ESP_OK;
 }
 

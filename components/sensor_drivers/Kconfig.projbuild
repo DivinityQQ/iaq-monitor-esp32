@@ -87,6 +87,30 @@ menu "Sensor Hardware Configuration"
                     PMS5003 frame is 32 bytes; buffer should accommodate bursts.
                     Default: 256 bytes.
 
+            config IAQ_PMS5003_RST_GPIO
+                int "RESET Pin GPIO (active LOW)"
+                default -1
+                range -1 48
+                help
+                    Optional hardware RESET pin for PMS5003.
+                    -1 disables hardware reset control.
+                    Active LOW: driver pulses LOW then HIGH during reset.
+
+            config IAQ_PMS5003_RST_PULSE_MS
+                int "RESET pulse width (ms)"
+                default 50
+                range 10 500
+                help
+                    Duration to hold RESET pin LOW when performing a hard reset.
+
+            config IAQ_PMS5003_RST_SETTLE_MS
+                int "RESET settle delay (ms)"
+                default 200
+                range 50 2000
+                help
+                    Delay after releasing RESET (HIGH) before attempting to read.
+                    Note: overall warm-up is managed by the coordinator.
+
             menu "Filtering and Background Reader"
 
                 config IAQ_PMS5003_BG_READER

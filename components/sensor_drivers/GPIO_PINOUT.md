@@ -27,11 +27,17 @@ This document defines GPIO ownership for sensor hardware and buses.
 | TX     | 17   | `IAQ_PMS5003_TX_GPIO`    | ESP TX → PMS5003 RX            |
 | RX     | 18   | `IAQ_PMS5003_RX_GPIO`    | ESP RX ← PMS5003 TX            |
 | SET    | -1   | `IAQ_PMS5003_SET_GPIO`   | Optional: Sleep/Wake control   |
+| RESET  | -1   | `IAQ_PMS5003_RST_GPIO`   | Optional: Active LOW reset     |
 
 **UART Port:** UART1 (`IAQ_PMS5003_UART_PORT`)
 **Baud Rate:** 9600 bps (fixed)
 **Protocol:** 32-byte frames with 16-bit checksum
 **RX Buffer:** 256 bytes (default)
+
+If RESET is enabled (`IAQ_PMS5003_RST_GPIO` ≥ 0):
+- The driver pulses RESET LOW for `IAQ_PMS5003_RST_PULSE_MS` (default 50 ms), then HIGH
+- Waits `IAQ_PMS5003_RST_SETTLE_MS` (default 200 ms) before resuming reads
+- Coordinator warm-up timer still governs when values are considered READY
 
 ---
 
