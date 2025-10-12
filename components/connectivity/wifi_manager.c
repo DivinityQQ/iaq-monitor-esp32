@@ -46,12 +46,16 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                     iaq_data_get()->system.wifi_connected = false;
                 }
 
-                /* ESP-IDF handles automatic reconnection */
-                ESP_LOGI(TAG, "WiFi disconnected, will auto-retry");
+                /* Explicitly trigger reconnect to ensure robustness across IDF configs */
+                const wifi_event_sta_disconnected_t *disc = (const wifi_event_sta_disconnected_t *)event_data;
+                ESP_LOGI(TAG, "WiFi disconnected (reason=%d), reconnecting...", disc ? disc->reason : -1);
+                /* Clear connection bit and attempt reconnect */
                 xEventGroupClearBits(s_system_ctx->event_group, WIFI_CONNECTED_BIT);
+                /* Post WiFi disconnected event to default event loop (non-blocking) */
+                esp_event_post(IAQ_EVENT, IAQ_EVENT_WIFI_DISCONNECTED, NULL, 0, 0);
 
-                /* Post WiFi disconnected event to default event loop */
-                esp_event_post(IAQ_EVENT, IAQ_EVENT_WIFI_DISCONNECTED, NULL, 0, portMAX_DELAY);
+                /* Safe to call from event handler context */
+                esp_wifi_connect();
                 break;
                 
             case WIFI_EVENT_STA_CONNECTED:
@@ -75,8 +79,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 
                     xEventGroupSetBits(s_system_ctx->event_group, WIFI_CONNECTED_BIT);
 
-                    /* Post WiFi connected event to default event loop */
-                    esp_event_post(IAQ_EVENT, IAQ_EVENT_WIFI_CONNECTED, NULL, 0, portMAX_DELAY);
+                    /* Post WiFi connected event to default event loop (non-blocking) */
+                    esp_event_post(IAQ_EVENT, IAQ_EVENT_WIFI_CONNECTED, NULL, 0, 0);
                 }
                 break;
                 
@@ -85,6 +89,9 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                 IAQ_DATA_WITH_LOCK() {
                     iaq_data_get()->system.wifi_connected = false;
                 }
+                /* Keep event bit state consistent with IAQ data and notify */
+                xEventGroupClearBits(s_system_ctx->event_group, WIFI_CONNECTED_BIT);
+                esp_event_post(IAQ_EVENT, IAQ_EVENT_WIFI_DISCONNECTED, NULL, 0, 0);
                 break;
                 
             default:
