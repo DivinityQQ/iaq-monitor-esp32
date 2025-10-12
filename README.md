@@ -44,6 +44,10 @@ Tip: On Windows, use `\\.\COMx` or set `$env:ESPPORT='\\.\COM3'`.
 wifi set <ssid> <password>
 wifi restart
 ```
+ Tip: SSID or password with spaces must be quoted, e.g.,
+ ```
+ wifi set "My SSID" "My Password With Spaces"
+ ```
 - Set MQTT broker (supports mqtt:// or mqtts://). Invalid URLs are rejected and not saved.
 ```
 mqtt set mqtt://<host>:1883 [username] [password]

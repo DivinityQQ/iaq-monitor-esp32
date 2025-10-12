@@ -21,6 +21,70 @@
 
 static const char *TAG = "CONSOLE_CMD";
 
+/* Helper: parse one possibly-quoted argument from argv[idx].
+ * If argv[idx] begins with a double quote, concatenates subsequent tokens until
+ * a token ending with a double quote is found, inserting single spaces between tokens.
+ * Surrounding quotes are stripped. Otherwise, copies the single token as-is.
+ * On success, writes zero-terminated string to out, advances idx, and returns true. */
+static bool parse_one_quoted(int argc, char **argv, int *idx, char *out, size_t out_len)
+{
+    if (!out || out_len == 0 || !idx || *idx >= argc) {
+        return false;
+    }
+
+    const char *tok = argv[*idx];
+    size_t out_pos = 0;
+    int i = *idx;
+
+    if (tok && tok[0] == '"') {
+        /* Starts with quote: collect until closing quote */
+        const char *p = tok + 1; /* skip leading quote */
+        size_t len = strlen(p);
+        bool ends_here = false;
+        if (len > 0 && p[len - 1] == '"') {
+            ends_here = true;
+            len -= 1; /* drop trailing quote */
+        }
+        if (len > 0) {
+            size_t copy = len < (out_len - 1 - out_pos) ? len : (out_len - 1 - out_pos);
+            memcpy(out + out_pos, p, copy);
+            out_pos += copy;
+        }
+        i++;
+        if (!ends_here) {
+            for (; i < argc; ++i) {
+                const char *frag = argv[i];
+                size_t frag_len = strlen(frag);
+                bool last = (frag_len > 0 && frag[frag_len - 1] == '"');
+                if (out_pos < out_len - 1) out[out_pos++] = ' ';
+                if (last) frag_len -= 1; /* drop trailing quote */
+                size_t copy = frag_len < (out_len - 1 - out_pos) ? frag_len : (out_len - 1 - out_pos);
+                if (copy > 0) {
+                    memcpy(out + out_pos, frag, copy);
+                    out_pos += copy;
+                }
+                if (last) { i++; break; }
+            }
+            if (i > argc) {
+                /* Unterminated quotes */
+                out[out_pos] = '\0';
+                return false;
+            }
+        }
+        *idx = i;
+    } else {
+        /* Unquoted single token */
+        size_t len = strlen(tok);
+        size_t copy = len < (out_len - 1) ? len : (out_len - 1);
+        memcpy(out, tok, copy);
+        out_pos = copy;
+        *idx = i + 1;
+    }
+
+    out[out_pos] = '\0';
+    return true;
+}
+
 /* ==================== STATUS COMMAND ==================== */
 static int cmd_status(int argc, char **argv)
 {
@@ -188,13 +252,20 @@ static int cmd_wifi_scan(int argc, char **argv)
 
 static int cmd_wifi_set(int argc, char **argv)
 {
-    if (argc < 2) {
+    char ssid[33] = {0};
+    char password[65] = {0};
+
+    int idx = 0;
+    if (!parse_one_quoted(argc, argv, &idx, ssid, sizeof(ssid))) {
         printf("Usage: wifi set <ssid> <password>\n");
+        printf("Note: Use quotes for spaces, e.g., \"My SSID\" \"My Password\"\n");
         return 1;
     }
-
-    const char *ssid = argv[0];
-    const char *password = argv[1];
+    if (!parse_one_quoted(argc, argv, &idx, password, sizeof(password))) {
+        printf("Usage: wifi set <ssid> <password>\n");
+        printf("Note: Use quotes for spaces, e.g., \"My SSID\" \"My Password\"\n");
+        return 1;
+    }
 
     printf("Setting WiFi credentials...\n");
     printf("SSID: %s\n", ssid);
@@ -239,6 +310,7 @@ static int cmd_wifi(int argc, char **argv)
         printf("  status         - Show WiFi connection status\n");
         printf("  scan           - Scan for available networks\n");
         printf("  set <ssid> <password> - Set WiFi credentials\n");
+        printf("                         Use quotes for spaces, e.g., \"My SSID\" \"My Password\"\n");
         printf("  restart        - Restart WiFi connection\n");
         return 0; // printing usage is not an error
     }
