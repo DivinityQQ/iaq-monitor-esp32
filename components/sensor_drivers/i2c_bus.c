@@ -86,6 +86,23 @@ esp_err_t i2c_bus_probe(void)
     return ESP_OK;
 }
 
+esp_err_t i2c_bus_write_read(i2c_master_dev_handle_t dev,
+                             const uint8_t *tx, size_t txlen,
+                             uint8_t *rx, size_t rxlen,
+                             int timeout_ms)
+{
+    if (s_bus_handle == NULL) {
+        ESP_LOGE(TAG, "I2C bus not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (dev == NULL) {
+        return ESP_ERR_INVALID_ARG;
+    }
+
+    /* Use IDF v5 I2C master combined transfer API */
+    return i2c_master_transmit_receive(dev, tx, txlen, rx, rxlen, timeout_ms);
+}
+
 esp_err_t i2c_bus_deinit(void)
 {
     if (s_bus_handle == NULL) {

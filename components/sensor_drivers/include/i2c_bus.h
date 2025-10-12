@@ -37,6 +37,26 @@ esp_err_t i2c_bus_add_device(uint8_t device_addr, uint32_t scl_speed_hz,
 esp_err_t i2c_bus_probe(void);
 
 /**
+ * Combined write + read transaction using a repeated start.
+ * Useful for register reads that require setting an address pointer then reading data.
+ */
+esp_err_t i2c_bus_write_read(i2c_master_dev_handle_t dev,
+                             const uint8_t *tx, size_t txlen,
+                             uint8_t *rx, size_t rxlen,
+                             int timeout_ms);
+
+/**
+ * Convenience helper to read contiguous registers (single-byte register address).
+ */
+static inline esp_err_t i2c_bus_read_regs(i2c_master_dev_handle_t dev,
+                                          uint8_t reg,
+                                          uint8_t *buf, size_t len,
+                                          int timeout_ms)
+{
+    return i2c_bus_write_read(dev, &reg, 1, buf, len, timeout_ms);
+}
+
+/**
  * Deinitialize the I2C bus and release resources.
  *
  * @return ESP_OK on success, error code otherwise

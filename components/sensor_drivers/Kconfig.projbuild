@@ -39,6 +39,52 @@ menu "Sensor Hardware Configuration"
 
     endmenu
 
+    menu "BMP280 Barometer"
+
+        config IAQ_BMP280_ADDR
+            int "BMP280 I2C address (-1 = auto)"
+            default -1
+            range -1 119
+            help
+                I2C address for BMP280. Valid values are 0x76 (118) or 0x77 (119).
+                Set to -1 to auto-probe 0x76 then 0x77.
+
+        config IAQ_BMP280_OSRS_T
+            int "Temperature oversampling (osrs_t code)"
+            default 1
+            range 0 5
+            help
+                BMP280 temperature oversampling setting used in ctrl_meas.
+                Code mapping: 0=skip, 1=x1, 2=x2, 3=x4, 4=x8, 5=x16.
+                NOTE: Using 0 (skip) may degrade pressure compensation accuracy.
+
+        config IAQ_BMP280_OSRS_P
+            int "Pressure oversampling (osrs_p code)"
+            default 3
+            range 0 5
+            help
+                BMP280 pressure oversampling setting used in ctrl_meas.
+                Code mapping: 0=skip, 1=x1, 2=x2, 3=x4, 4=x8, 5=x16.
+
+        config IAQ_BMP280_FILTER
+            int "IIR filter coefficient (filter code)"
+            default 2
+            range 0 4
+            help
+                BMP280 IIR filter coefficient in config register.
+                Code mapping: 0=off, 1=2, 2=4, 3=8, 4=16.
+
+        config IAQ_BMP280_MEAS_DELAY_MARGIN_MS
+            int "Measurement delay margin (ms)"
+            default 3
+            range 0 50
+            help
+                Extra delay margin added to the computed forced-mode measurement time.
+                Datasheet formula: 1.25ms + 2.3ms*osrs_t + 2.3ms*osrs_p.
+                A small margin (2–5ms) is recommended.
+
+    endmenu
+
     menu "UART Configuration"
 
         menu "PMS5003 Particulate Matter Sensor"

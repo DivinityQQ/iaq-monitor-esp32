@@ -483,15 +483,6 @@ static void sensor_coordinator_task(void *arg)
 
         int64_t now_us = esp_timer_get_time();
 
-        /* During SGP41 warm-up, run execute_conditioning at ~1 Hz */
-        if (s_runtime[SENSOR_ID_SGP41].state == SENSOR_STATE_WARMING) {
-            const int64_t interval_us = 1000000; // 1 second
-            if (now_us - s_runtime[SENSOR_ID_SGP41].last_read_us >= interval_us) {
-                (void)sgp41_driver_read(NULL, NULL, 25.0f, 50.0f); // triggers bus init if needed; conditioning handled in driver if required
-                s_runtime[SENSOR_ID_SGP41].last_read_us = now_us;
-            }
-        }
-
         /* For SGP41, run 1 Hz conditioning ticks during WARMING (max 10s) */
         if (s_runtime[SENSOR_ID_SGP41].state == SENSOR_STATE_WARMING) {
             int64_t now_us = esp_timer_get_time();
