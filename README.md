@@ -1,14 +1,15 @@
 # IAQ Monitor (ESP32-S3, ESP-IDF)
 Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, robust defaults, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery.
-Current version: 0.5.1
+Current version: 0.6.3
 ## Features
 - Wi‑Fi station mode with NVS‑stored credentials (console configurable)
 - MQTT 5.0 client, retained LWT/status, HA auto‑discovery
 - Central data model with explicit "no data" until sensors report
-- **6 sensor drivers**: 1 real (MCU temp), 5 simulated (ready for hardware implementation)
+- **6 sensor drivers (real hardware)**: MCU temp, SHT45 (T/RH), BMP280 (pressure), SGP41 (VOC/NOx), PMS5003 (PM), Senseair S8 (CO₂)
 - **Sensor fusion**: Cross-sensor compensation (PM/RH, CO₂/pressure, temp self-heating, ABC baseline)
 - **Derived metrics**: EPA AQI, thermal comfort, CO₂ rate, PM spike detection, mold risk, pressure trends
 - **Simulation mode**: Complete MQTT/HA integration testing without physical sensors
+- **Time sync (SNTP)**: Local time via NTP with configurable TZ; event bit set when time is valid
 - Sensor coordinator with state machine (UNINIT → INIT → WARMING → READY → ERROR)
 - Per‑sensor cadences (configurable via Kconfig/console, persisted in NVS)
 - Per‑sensor warm‑up periods with observable countdown
@@ -21,15 +22,14 @@ Current version: 0.5.1
 - SDK: ESP‑IDF v5.5.1+
 - Tooling: idf.py (CMake + Ninja)
 ### Supported Sensors
-**Fully Supported** (real driver):
-- ESP32-S3 internal temperature sensor (MCU)
-**Simulated** (stub drivers, ready for hardware implementation):
-- SHT45 (I2C 0x44) - Temperature & Humidity
-- BMP280 (I2C 0x76) - Barometric Pressure
-- SGP41 (I2C 0x59) - VOC & NOx Indices
-- PMS5003 (UART) - PM1.0, PM2.5, PM10 Particulate Matter
-- Senseair S8 (UART Modbus) - CO₂ Concentration
-All sensors support simulation mode for testing without hardware (enable via menuconfig).
+**Fully Supported (real drivers):**
+- ESP32‑S3 internal temperature sensor (MCU)
+- SHT45 (I2C 0x44) — Temperature & Humidity
+- BMP280 (I2C 0x76/0x77) — Barometric Pressure
+- SGP41 (I2C 0x59) — VOC & NOx Indices (Sensirion Gas Index Algorithm)
+- PMS5003 (UART) — PM1.0, PM2.5, PM10 with background reader and smoothing
+- Senseair S8 (UART Modbus) — CO₂; diagnostics+ABC controls
+All sensors also support simulation mode for testing without hardware (enable via menuconfig).
 ## Quick Start
 ```
 idf.py build
@@ -61,6 +61,7 @@ mqtt set mqtt://<host>:1883 [user] [pass] | mqtt restart | mqtt status | mqtt pu
 sensor status | sensor read <sensor> | sensor reset <sensor>
 sensor calibrate co2 <ppm>
 sensor cadence | sensor cadence set <sensor> <ms>
+sensor s8 status | sensor s8 abc <on|off> [hours]
 free | version | restart
 ```
 Sensors: mcu (internal temp), sht45, bmp280, sgp41, pms5003, s8 (as drivers are wired).
@@ -154,6 +155,7 @@ sensor cadence set <sensor> <ms>
 - `components/sensor_coordinator`: Schedules sensor reads; state machine; owns driver lifecycle; runs fusion & metrics timers
 - `components/connectivity`: Wi-Fi and MQTT; non-blocking enqueue; HA discovery; queue-based worker with coalescing
 - `components/console_commands`: Shell-style commands; interact via coordinator APIs
+- `components/time_sync`: SNTP time sync and TZ; emits TIME_SYNCED_BIT on valid time
 ### Bus Ownership
 - **Shared buses** (I2C for SHT4x/BMP280/SGP41): Coordinator initializes once; ESP-IDF framework provides internal locking
 - **Dedicated buses** (UART for PMS5003/S8): Each driver owns its port lifecycle
@@ -166,22 +168,47 @@ sensor cadence set <sensor> <ms>
 - For new settings, consider Kconfig defaults and NVS persistence
 - Follow CONTRIBUTING.md for coding and component guidelines
 ## Development Status
-**Current Status (v0.5.1)**
-- ✅ Core infrastructure (WiFi, MQTT 5.0, Home Assistant auto-discovery)
-- ✅ 6 sensor drivers: MCU temp (real), 5 simulated (SHT45, BMP280, SGP41, PMS5003, S8)
+**Current Status (v0.6.3)**
+- ✅ Core infrastructure (Wi‑Fi, MQTT 5.0, Home Assistant auto‑discovery)
+- ✅ 6 sensor drivers with real hardware support (MCU, SHT45, BMP280, SGP41, PMS5003, S8)
 - ✅ Full simulation mode for testing without hardware
-- ✅ Sensor state machine with auto-recovery (exponential backoff for ERROR states)
-- ✅ Sensor fusion (PM humidity correction, CO₂ pressure/ABC compensation, temp self-heating)
+- ✅ Sensor state machine with auto‑recovery (exponential backoff for ERROR states)
+- ✅ Sensor fusion (PM humidity correction, CO₂ pressure/ABC compensation, temp self‑heating)
 - ✅ Derived metrics (EPA AQI, thermal comfort, pressure trends, CO₂ rate, PM spike detection, mold risk)
 - ✅ Unified MQTT topics (/state, /metrics, /health, /diagnostics)
-- ✅ Timer-based publishing with event coalescing and staggered starts
+- ✅ Timer‑based publishing with event coalescing and staggered starts
 - ✅ Task Watchdog integration for deadlock detection
-- ✅ Console commands for configuration, diagnostics, and sensor control
-- 🚧 Hardware sensor protocols (stub drivers ready for I2C/UART implementation)
-- 📋 Future: Display, LED status indicators, web configuration interface, real sensor hardware
+- ✅ Console commands for configuration, diagnostics, and sensor control (including S8 ABC)
+- ✅ SNTP time sync with TZ support
+- 📋 Future: Display, LED status indicators, web configuration interface
 ## Changelog
 
-### v0.5.1 (Current)
+### v0.6.3 (Current)
+**Improvements:**
+- Tightened Wi‑Fi reconnect behavior for robustness
+- Console `wifi set` now supports SSID/password with spaces (quoted)
+- Added SNTP time sync component with configurable TZ and events
+- Fixed CO₂ rate metric calculation
+
+### v0.6.0
+**Major Features:**
+- Implemented real hardware drivers: PMS5003 (PM) with background reader and smoothing, Senseair S8 (CO₂) with diagnostics/ABC controls, SHT45 (T/RH)
+- Implemented SGP41 (VOC/NOx) driver using Sensirion Gas Index Algorithm (vendor code)
+- Implemented BMP280 (pressure) driver with auto‑probe (0x76/0x77)
+- Fusion: recompute RH at corrected temperature; used in PM humidity correction
+
+### v0.5.5
+**Fixes & Tweaks:**
+- Always publish score metrics; improved simulated sensor data
+- Set telemetry QoS to 0 and added safeguards for full MQTT queue
+- Fixed absolute humidity calculation
+
+### v0.5.3
+**Reliability:**
+- Optimized MQTT publish queue; clarified event naming
+- Ensured metrics publishing always includes all JSON fields
+
+### v0.5.1
 **Refactoring:**
 - Restructured IAQ data model to separate raw and fused sensor readings
   - Added `iaq_data.raw` structure for uncompensated sensor values
@@ -233,3 +260,4 @@ sensor cadence set <sensor> <ms>
 - If MQTT does not start: set a valid broker URL via console
 - Empty SSID disables Wi‑Fi without failing init/start
 - For testing without sensors: enable simulation mode in menuconfig
+- For wiring and default pins, see `components/sensor_drivers/GPIO_PINOUT.md`

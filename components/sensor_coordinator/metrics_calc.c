@@ -47,6 +47,16 @@ static struct {
     uint8_t count;
 } s_co2_history = {0};
 static uint32_t s_co2_sample_elapsed_sec = CO2_SAMPLE_INTERVAL_SEC;
+
+/* Smoothed CO2 rate (EMA) to reduce jitter in published metric */
+static float s_co2_rate_ema = NAN;
+
+/* Minimum time span for rate calculation to avoid huge extrapolations (minutes) */
+#define CO2_RATE_MIN_SPAN_MIN 5U
+/* Clamp rate to plausible bounds (ppm/hr) to avoid outliers dominating */
+#define CO2_RATE_MAX_ABS 2500.0f
+/* Exponential Moving Average smoothing factor for rate [0..1] */
+#define CO2_RATE_EMA_ALPHA 0.25f
 #endif
 
 /* ===== PM2.5 Spike Detection ===== */
@@ -652,70 +662,86 @@ static void update_co2_rate(iaq_data_t *data)
     uint32_t window_minutes = CONFIG_METRICS_CO2_RATE_WINDOW_MIN;
     int64_t window_us = (int64_t)window_minutes * 60 * 1000000;
 
-    int oldest_in_window = -1;
+    /* Build list of indices within window in chronological order */
     int64_t now_us = esp_timer_get_time();
-    /* Iterate from most recent backwards until we exit the window;
-     * the last index still inside becomes the oldest_in_window. */
-    for (int i = 0; i < s_co2_history.count; i++) {
-        int idx = (s_co2_history.head + CO2_HISTORY_SIZE - 1 - i) % CO2_HISTORY_SIZE;
+    int oldest_idx_all = (s_co2_history.head + CO2_HISTORY_SIZE - s_co2_history.count) % CO2_HISTORY_SIZE;
+    uint8_t idx_list[CO2_HISTORY_SIZE];
+    int n = 0;
+    for (int i = 0; i < s_co2_history.count; ++i) {
+        int idx = (oldest_idx_all + i) % CO2_HISTORY_SIZE;
         if ((now_us - s_co2_history.timestamps_us[idx]) <= window_us) {
-            oldest_in_window = idx;
-        } else {
-            break;
+            idx_list[n++] = (uint8_t)idx;
         }
     }
 
-    if (oldest_in_window == -1) {
+    if (n < 3) {
         data->metrics.co2_rate_ppm_hr = NAN;
         return;
     }
 
-    uint8_t latest_idx = (s_co2_history.head + CO2_HISTORY_SIZE - 1) % CO2_HISTORY_SIZE;
-
-    /* Apply median filter to CO2 values to suppress sensor jitter while preserving real spikes.
-     * Use last 3 samples for both endpoints if available. */
-    float co2_latest, co2_oldest;
-
-    if (s_co2_history.count >= 3) {
-        uint8_t idx0 = (s_co2_history.head + CO2_HISTORY_SIZE - 1) % CO2_HISTORY_SIZE;
-        uint8_t idx1 = (s_co2_history.head + CO2_HISTORY_SIZE - 2) % CO2_HISTORY_SIZE;
-        uint8_t idx2 = (s_co2_history.head + CO2_HISTORY_SIZE - 3) % CO2_HISTORY_SIZE;
-        co2_latest = median3(s_co2_history.co2_ppm[idx0],
-                             s_co2_history.co2_ppm[idx1],
-                             s_co2_history.co2_ppm[idx2]);
-    } else {
-        co2_latest = s_co2_history.co2_ppm[latest_idx];
+    int64_t t_first = s_co2_history.timestamps_us[idx_list[0]];
+    int64_t t_last = s_co2_history.timestamps_us[idx_list[n - 1]];
+    float span_hr = (float)(t_last - t_first) / (3600.0f * 1000000.0f);
+    float min_span_hr = ((float)CO2_RATE_MIN_SPAN_MIN) / 60.0f;
+    if (span_hr < min_span_hr) {
+        data->metrics.co2_rate_ppm_hr = NAN;
+        return;
     }
 
-    /* For oldest, check if we have 3 samples around it */
-    int oldest_pos = 0;
-    for (int i = 0; i < s_co2_history.count; i++) {
-        int idx = (s_co2_history.head + CO2_HISTORY_SIZE - 1 - i) % CO2_HISTORY_SIZE;
-        if (idx == oldest_in_window) {
-            oldest_pos = i;
-            break;
+    /* Prepare arrays for regression (x in hours from first sample) */
+    float x[CO2_HISTORY_SIZE];
+    float y[CO2_HISTORY_SIZE];
+    float yf[CO2_HISTORY_SIZE];
+
+    for (int i = 0; i < n; ++i) {
+        int64_t ti = s_co2_history.timestamps_us[idx_list[i]];
+        x[i] = (float)(ti - t_first) / (3600.0f * 1000000.0f);
+        y[i] = s_co2_history.co2_ppm[idx_list[i]];
+    }
+
+    /* Apply simple 3-point median filter across the series */
+    for (int i = 0; i < n; ++i) {
+        if (i == 0 || i == n - 1) {
+            yf[i] = y[i];
+        } else {
+            yf[i] = median3(y[i - 1], y[i], y[i + 1]);
         }
     }
 
-    if (oldest_pos >= 2 && oldest_pos < s_co2_history.count - 1) {
-        /* We have samples on both sides */
-        uint8_t idx_p1 = (oldest_in_window + 1) % CO2_HISTORY_SIZE;
-        uint8_t idx_m1 = (oldest_in_window + CO2_HISTORY_SIZE - 1) % CO2_HISTORY_SIZE;
-        co2_oldest = median3(s_co2_history.co2_ppm[oldest_in_window],
-                             s_co2_history.co2_ppm[idx_p1],
-                             s_co2_history.co2_ppm[idx_m1]);
-    } else {
-        co2_oldest = s_co2_history.co2_ppm[oldest_in_window];
+    /* Linear regression slope (ppm per hour) using filtered series */
+    float Sx = 0.0f, Sy = 0.0f, Sxx = 0.0f, Sxy = 0.0f;
+    for (int i = 0; i < n; ++i) {
+        Sx += x[i];
+        Sy += yf[i];
+        Sxx += x[i] * x[i];
+        Sxy += x[i] * yf[i];
     }
 
-    float co2_delta = co2_latest - co2_oldest;
-    float time_delta_hr = (float)(s_co2_history.timestamps_us[latest_idx] - s_co2_history.timestamps_us[oldest_in_window]) / (3600.0f * 1000000.0f);
+    float N = (float)n;
+    float mx = Sx / N;
+    float my = Sy / N;
+    float varx = Sxx - N * mx * mx;
+    float covxy = Sxy - N * mx * my;
 
-    if (time_delta_hr > 0.0f) {
-        data->metrics.co2_rate_ppm_hr = co2_delta / time_delta_hr;
-    } else {
+    if (varx <= 0.0f) {
         data->metrics.co2_rate_ppm_hr = NAN;
+        return;
     }
+
+    float slope = covxy / varx;  /* ppm/hour */
+
+    /* Clamp to plausible bounds */
+    if (slope > CO2_RATE_MAX_ABS) slope = CO2_RATE_MAX_ABS;
+    if (slope < -CO2_RATE_MAX_ABS) slope = -CO2_RATE_MAX_ABS;
+
+    /* EMA smoothing */
+    if (isnan(s_co2_rate_ema)) {
+        s_co2_rate_ema = slope;
+    } else {
+        s_co2_rate_ema = CO2_RATE_EMA_ALPHA * slope + (1.0f - CO2_RATE_EMA_ALPHA) * s_co2_rate_ema;
+    }
+
+    data->metrics.co2_rate_ppm_hr = s_co2_rate_ema;
 }
 #endif /* CONFIG_METRICS_CO2_RATE_ENABLE */
 

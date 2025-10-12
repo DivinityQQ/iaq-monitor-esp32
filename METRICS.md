@@ -226,29 +226,22 @@ Where:
 **Sampling:** 1-minute intervals
 **Location:** `update_co2_rate()` in `metrics_calc.c`
 
-### Algorithm (with Median Filtering)
+### Algorithm (Robust + Smoothed)
 
-1. **Record CO₂ history:** Sample fused CO₂ every 60 seconds
-2. **Find window endpoints:**
-   - Latest sample: most recent
-   - Oldest sample: furthest back within configured window
-3. **Apply 3-sample median filter to both endpoints** (suppresses sensor jitter while preserving real spikes):
-   ```
-   co2_latest = median(sample[t], sample[t-1], sample[t-2])
-   co2_oldest = median(sample[t-window], sample[t-window±1])
-   ```
-4. **Compute rate:**
-   ```
-   rate (ppm/hr) = (co2_latest - co2_oldest) / time_delta_hours
-   ```
+1. Sample fused CO₂ every 60 seconds into a ring buffer.
+2. Select all samples within the configured window (chronological order).
+3. Apply a 3-point median filter across the series to suppress jitter while preserving real changes.
+4. Fit a simple linear regression of CO₂ vs time (in hours) across the filtered series to estimate the slope (ppm/hr).
+5. Require a minimum time span of 5 minutes within the window; otherwise report `null` (stabilizing).
+6. Clamp the slope to plausible bounds (±2500 ppm/hr) to prevent outliers.
+7. Apply an exponential moving average (EMA, α = 0.25) to stabilize the reported rate.
 
 **Interpretation:**
-- **Positive rate:** CO₂ rising → room occupancy increasing, poor ventilation
-- **Negative rate:** CO₂ falling → ventilation active, occupants left
-- **Near zero:** Steady state
+- Positive → CO₂ rising (occupancy increase / poor ventilation)
+- Negative → CO₂ falling (effective ventilation / occupants leaving)
+- Near zero → Steady state
 
-**Example:**
-Rate of +120 ppm/hr means if trend continues, CO₂ will rise 120 ppm in next hour (useful for predicting when ventilation is needed).
+This approach avoids extreme values during startup or brief spikes and stabilizes within a few minutes once enough samples are available.
 
 ---
 
