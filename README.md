@@ -53,6 +53,15 @@ wifi restart
 mqtt set mqtt://<host>:1883 [username] [password]
 mqtt restart
 ```
+
+### MQTT over TLS (MQTTS)
+- Use `mqtts://<host>:8883` (or port 443 for AWS IoT with ALPN) in `mqtt set`.
+- Choose trust mode in menuconfig (Component config → IAQ Monitor Configuration → MQTT TLS):
+  - Certificate bundle (recommended): works with public CAs (Let's Encrypt, etc.).
+  - Custom Root CA PEM: place `components/connectivity/certs/ca.pem`.
+  - Insecure: disable verification (testing only).
+- Mutual TLS (client certs) is supported: place `client.crt.pem` and `client.key.pem` in `components/connectivity/certs/` and enable mTLS in menuconfig.
+- For AWS IoT over 443, enable AWS IoT ALPN option and use endpoint `mqtts://<your-endpoint>:443`.
 ## Console Commands (Cheat Sheet)
 ```
 status

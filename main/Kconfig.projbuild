@@ -119,6 +119,58 @@ menu "IAQ Monitor Configuration"
 
 endmenu
 
+menu "MQTT TLS"
+    config IAQ_MQTT_TLS_SKIP_COMMON_NAME_CHECK
+        bool "Skip TLS common name (CN) check"
+        default n
+        help
+            When using MQTTS with an IP address or when the certificate CN/SAN
+            does not match the hostname, enable this to skip the CN check.
+            Not recommended for production; prefer matching hostnames.
+
+    choice IAQ_MQTT_TLS_TRUST_MODE
+        prompt "TLS trust source"
+        default IAQ_MQTT_TLS_TRUST_BUNDLE
+        help
+            Select how the device verifies the broker's server certificate when
+            connecting to mqtts:// URLs.
+
+        config IAQ_MQTT_TLS_TRUST_BUNDLE
+            bool "Certificate bundle (recommended)"
+            help
+                Use ESP-IDF's built-in certificate bundle to validate public CAs
+                (e.g., Let's Encrypt). Enable CONFIG_MBEDTLS_CERTIFICATE_BUNDLE.
+
+        config IAQ_MQTT_TLS_TRUST_CA_PEM
+            bool "Embed custom Root CA PEM"
+            help
+                Embed a custom Root CA PEM at build time. Place the file at
+                components/connectivity/certs/ca.pem.
+
+        config IAQ_MQTT_TLS_TRUST_INSECURE
+            bool "Insecure (no server verification)"
+            help
+                Do not verify the broker's certificate. This is insecure and
+                should only be used for local testing with self-signed certs.
+                Consider using a proper Root CA instead.
+    endchoice
+
+    config IAQ_MQTT_MTLS_ENABLE
+        bool "Enable mutual TLS (client certificate)"
+        default n
+        help
+            Enable client certificate authentication. Place client cert and key
+            files at components/connectivity/certs/client.crt.pem and
+            components/connectivity/certs/client.key.pem.
+
+    config IAQ_MQTT_TLS_AWS_IOT_ALPN
+        bool "Use AWS IoT ALPN (port 443)"
+        default n
+        help
+            Attach ALPN protocol x-amzn-mqtt-ca for AWS IoT Core over port 443.
+            Use with mqtts://<endpoint>:443. Leave disabled for port 8883.
+endmenu
+
 menu "Time Synchronization"
     config IAQ_TZ_STRING
         string "Time zone (POSIX TZ string)"

@@ -12,6 +12,10 @@
 #include "esp_log.h"
 #include "esp_system.h"
 #include "mqtt_client.h"
+#include "esp_tls.h"
+#ifdef CONFIG_IAQ_MQTT_TLS_TRUST_BUNDLE
+#include "esp_crt_bundle.h"
+#endif
 #include "cJSON.h"
 #include "nvs_flash.h"
 #include "nvs.h"
@@ -88,6 +92,20 @@ static esp_err_t start_periodic_timer(esp_timer_handle_t *handle, const esp_time
 static bool parse_co2_calibration_payload(const char *payload, int *ppm_out);
 static esp_err_t publish_json(const char *topic, cJSON *obj);
 /* Public publish functions declared in mqtt_manager.h */
+
+/* Embedded TLS assets (conditionally defined from CMake if files exist) */
+#ifdef IAQ_HAS_CA_PEM
+extern const uint8_t _binary_components_connectivity_certs_ca_pem_start[];
+extern const uint8_t _binary_components_connectivity_certs_ca_pem_end[];
+#endif
+#ifdef IAQ_HAS_CLIENT_CERT
+extern const uint8_t _binary_components_connectivity_certs_client_crt_pem_start[];
+extern const uint8_t _binary_components_connectivity_certs_client_crt_pem_end[];
+#endif
+#ifdef IAQ_HAS_CLIENT_KEY
+extern const uint8_t _binary_components_connectivity_certs_client_key_pem_start[];
+extern const uint8_t _binary_components_connectivity_certs_client_key_pem_end[];
+#endif
 
 /* Helper: publish a single HA sensor discovery config */
 static void ha_publish_sensor_config(cJSON *device, const char *unique_suffix, const char *name,
@@ -178,6 +196,45 @@ static esp_err_t create_mqtt_client(void)
         .network = { .reconnect_timeout_ms = 10000, .timeout_ms = 10000 },
         .buffer = { .size = 2048, .out_size = 2048 },
     };
+
+    /* Apply TLS settings if using mqtts:// */
+    const bool using_tls = (strncmp(s_broker_url, "mqtts://", 8) == 0);
+    if (using_tls) {
+#if CONFIG_IAQ_MQTT_TLS_TRUST_INSECURE
+        ESP_LOGW(TAG, "MQTTS configured without server verification (INSECURE)");
+        mqtt_cfg.broker.verification.certificate = NULL;
+        mqtt_cfg.broker.verification.skip_cert_common_name_check = true;
+#elif CONFIG_IAQ_MQTT_TLS_TRUST_BUNDLE
+        ESP_LOGI(TAG, "MQTTS using certificate bundle for server verification");
+        mqtt_cfg.broker.verification.crt_bundle_attach = esp_crt_bundle_attach;
+#elif CONFIG_IAQ_MQTT_TLS_TRUST_CA_PEM
+#ifdef IAQ_HAS_CA_PEM
+        ESP_LOGI(TAG, "MQTTS using embedded Root CA PEM");
+        mqtt_cfg.broker.verification.certificate = (const char *)_binary_components_connectivity_certs_ca_pem_start;
+#else
+        ESP_LOGW(TAG, "IAQ_MQTT_TLS_TRUST_CA_PEM enabled but no ca.pem embedded; TLS verify may fail");
+#endif
+#endif
+
+#if CONFIG_IAQ_MQTT_TLS_SKIP_COMMON_NAME_CHECK
+        mqtt_cfg.broker.verification.skip_cert_common_name_check = true;
+#endif
+
+#if CONFIG_IAQ_MQTT_TLS_AWS_IOT_ALPN
+        static const char *aws_alpn[] = { "x-amzn-mqtt-ca", NULL };
+        mqtt_cfg.broker.verification.alpn_protos = aws_alpn;
+#endif
+
+#if CONFIG_IAQ_MQTT_MTLS_ENABLE
+#if defined(IAQ_HAS_CLIENT_CERT) && defined(IAQ_HAS_CLIENT_KEY)
+        ESP_LOGI(TAG, "Mutual TLS enabled (client cert + key)");
+        mqtt_cfg.credentials.authentication.certificate = (const char *)_binary_components_connectivity_certs_client_crt_pem_start;
+        mqtt_cfg.credentials.authentication.key = (const char *)_binary_components_connectivity_certs_client_key_pem_start;
+#else
+        ESP_LOGW(TAG, "IAQ_MQTT_MTLS_ENABLE set but client cert/key not embedded");
+#endif
+#endif
+    }
 
     s_mqtt_client = esp_mqtt_client_init(&mqtt_cfg);
     if (!s_mqtt_client) {
