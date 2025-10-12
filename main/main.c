@@ -19,6 +19,7 @@
 #include "mqtt_manager.h"
 #include "sensor_coordinator.h"
 #include "console_commands.h"
+#include "time_sync.h"
 
 static const char *TAG = "IAQ_MAIN";
 
@@ -135,6 +136,9 @@ static esp_err_t init_core_system(void)
         ESP_LOGE(TAG, "Failed to initialize system context");
         return ret;
     }
+
+    /* Initialize time sync (SNTP/TZ) */
+    ESP_ERROR_CHECK(time_sync_init(&g_system_ctx));
 
     ESP_LOGI(TAG, "Core system initialized");
     return ESP_OK;

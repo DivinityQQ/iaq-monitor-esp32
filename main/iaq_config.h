@@ -48,6 +48,8 @@
 #define MQTT_CONNECTED_BIT                  BIT1
 #define SENSOR_COORDINATOR_STARTED_BIT      BIT2  /* Set when coordinator task starts (not when all sensors ready) */
 #define DISPLAY_UPDATE_BIT                  BIT4
+/* Set when system time is synchronized (SNTP) */
+#define TIME_SYNCED_BIT                     BIT3
 
 /**
  * Status publishing interval (milliseconds)

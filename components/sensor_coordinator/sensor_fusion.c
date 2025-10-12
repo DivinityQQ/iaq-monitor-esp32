@@ -1,5 +1,6 @@
 /* components/sensor_coordinator/sensor_fusion.c */
 #include "sensor_fusion.h"
+#include "time_sync.h"
 #include <math.h>
 #include <string.h>
 #include <time.h>
@@ -330,11 +331,16 @@ static void apply_pressure_passthrough(iaq_data_t *data)
 void fusion_update_abc(float co2_ppm, int64_t timestamp_us)
 {
 #ifdef CONFIG_FUSION_CO2_ABC_ENABLE
-    /* TODO: Replace uptime-based hour calculation with real RTC/NTP time when available.
-     * Current implementation: Uses (uptime_hours % 24) for ABC night window detection.
-     * This works for testing but won't match actual day/night cycles without time sync. */
-    uint32_t uptime_hours = (uint32_t)(timestamp_us / (3600LL * 1000000LL));
-    uint8_t hour_of_day = uptime_hours % 24;
+    /* Use real local hour when SNTP is available, otherwise fallback to uptime-derived hour */
+    uint8_t hour_of_day = 0;
+    if (time_sync_is_set()) {
+        time_t now = 0; time(&now);
+        struct tm t; localtime_r(&now, &t);
+        hour_of_day = (uint8_t)t.tm_hour;
+    } else {
+        uint32_t uptime_hours = (uint32_t)(timestamp_us / (3600LL * 1000000LL));
+        hour_of_day = uptime_hours % 24;
+    }
 
     bool in_night_window = (hour_of_day >= CONFIG_FUSION_CO2_ABC_NIGHT_START_HOUR &&
                             hour_of_day < CONFIG_FUSION_CO2_ABC_NIGHT_END_HOUR);

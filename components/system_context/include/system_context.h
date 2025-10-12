@@ -19,6 +19,7 @@ ESP_EVENT_DECLARE_BASE(IAQ_EVENT);
 enum {
     IAQ_EVENT_WIFI_CONNECTED,      /**< WiFi connected and IP acquired */
     IAQ_EVENT_WIFI_DISCONNECTED,   /**< WiFi disconnected */
+    IAQ_EVENT_TIME_SYNCED,         /**< System time synchronized (SNTP) */
 };
 
 /**

@@ -117,6 +117,30 @@ menu "IAQ Monitor Configuration"
                 PM1.0 is still collected and included in diagnostics.
                 Enable for advanced monitoring or sensor validation.
 
-    endmenu
+endmenu
+
+menu "Time Synchronization"
+    config IAQ_TZ_STRING
+        string "Time zone (POSIX TZ string)"
+        default "CET-1CEST,M3.5.0/2,M10.5.0/3"
+        help
+            POSIX TZ string for local time. Default is Central European Time
+            with daylight saving for Czech Republic: CET (UTC+1) and CEST
+            from last Sunday in March 02:00 to last Sunday in October 03:00.
+            Example alternatives: "UTC" or other POSIX TZ strings.
+            Used to format localtime and determine day/night windows.
+
+    config IAQ_NTP_SERVER0
+        string "Primary NTP server"
+        default "pool.ntp.org"
+        help
+            Hostname of the primary NTP server.
+
+    config IAQ_NTP_SERVER1
+        string "Secondary NTP server"
+        default "time.google.com"
+        help
+            Hostname of a secondary NTP server (optional).
+endmenu
 
 endmenu

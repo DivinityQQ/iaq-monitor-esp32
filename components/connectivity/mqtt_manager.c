@@ -4,6 +4,7 @@
 #include <math.h>
 #include <ctype.h>
 #include <stdlib.h>
+#include <time.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
@@ -22,6 +23,7 @@
 #include "sensor_coordinator.h"
 #include "esp_timer.h"
 #include "esp_task_wdt.h"
+#include "time_sync.h"
 
 static const char *TAG = "MQTT_MGR";
 
@@ -437,6 +439,14 @@ esp_err_t mqtt_publish_status(const iaq_data_t *data)
     cJSON_AddNumberToObject(root, "uptime", data->system.uptime_seconds);
     cJSON_AddNumberToObject(root, "wifi_rssi", data->system.wifi_rssi);
     cJSON_AddNumberToObject(root, "free_heap", data->system.free_heap);
+
+    /* Time sync status */
+    bool ts_ok = time_sync_is_set();
+    cJSON_AddBoolToObject(root, "time_synced", ts_ok);
+    if (ts_ok) {
+        time_t now = 0; time(&now);
+        cJSON_AddNumberToObject(root, "epoch", (double)now);
+    }
 
     /* Per-sensor state details (query coordinator API) */
     cJSON *sensors = cJSON_CreateObject();
