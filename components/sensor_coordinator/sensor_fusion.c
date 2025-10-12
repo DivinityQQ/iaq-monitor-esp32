@@ -132,7 +132,8 @@ static void apply_pm_rh_correction(iaq_data_t *data)
         return;
     }
 
-    float rh = data->raw.rh_pct;
+    /* Prefer humidity adjusted to ambient temperature if available */
+    float rh = (!isnan(data->fused.rh_pct) ? data->fused.rh_pct : data->raw.rh_pct);
 
     /* If RH too high, don't apply correction (sensor unreliable) */
     if (rh >= CONFIG_FUSION_PM_RH_MAX_PERCENT) {
@@ -264,13 +265,56 @@ static void apply_temp_self_heat_correction(iaq_data_t *data)
 }
 
 /**
- * Apply humidity passthrough (no correction needed).
+ * Adjust RH for temperature self-heating correction while conserving absolute humidity.
+ *
+ * Rationale:
+ * - SHT45 reports RH relative to its (possibly self-heated) local temperature.
+ * - We correct temperature (self-heating offset) to estimate ambient temperature.
+ * - To keep moisture content consistent, recompute RH at the corrected temperature
+ *   using the same absolute humidity (AH) implied by the raw T/RH pair.
+ *
+ * AH formula (g/m^3): AH = (e * 216.7) / (273.15 + T)
+ *   where e = es(T) * RH/100, es(T) = 6.112 * exp((17.67*T)/(T+243.5)) [hPa]
  */
-static void apply_humidity_passthrough(iaq_data_t *data)
+static void apply_humidity_temp_consistency(iaq_data_t *data)
 {
-    if (data->valid.rh_pct) {
-        data->fused.rh_pct = data->raw.rh_pct;
+    if (!data->valid.rh_pct) {
+        return;
     }
+
+    /* If temperature wasn't corrected or isn't valid, pass through RH. */
+    if (!data->valid.temp_c || isnan(data->fused.temp_c)) {
+        data->fused.rh_pct = data->raw.rh_pct;
+        return;
+    }
+
+    float t_raw = data->raw.temp_c;
+    float rh_raw = data->raw.rh_pct;
+    float t_amb = data->fused.temp_c;  /* corrected ambient temperature */
+
+    /* If temperatures are effectively the same, passthrough. */
+    if (fabsf(t_raw - t_amb) < 0.01f) {
+        data->fused.rh_pct = rh_raw;
+        return;
+    }
+
+    /* Compute saturation vapor pressure at raw T [hPa] */
+    float es_raw = 6.112f * expf((17.67f * t_raw) / (t_raw + 243.5f));
+    /* Actual vapor pressure [hPa] */
+    float e_raw = es_raw * (rh_raw / 100.0f);
+    /* Absolute humidity [g/m^3] */
+    float ah = (e_raw * 216.7f) / (273.15f + t_raw);
+
+    /* Recompute RH at ambient temperature keeping AH constant */
+    float es_amb = 6.112f * expf((17.67f * t_amb) / (t_amb + 243.5f));
+    float e_amb = ah * (273.15f + t_amb) / 216.7f;
+    float rh_amb = 100.0f * (e_amb / es_amb);
+
+    /* Clamp RH to physical range */
+    if (rh_amb < 0.0f) rh_amb = 0.0f;
+    if (rh_amb > 100.0f) rh_amb = 100.0f;
+
+    data->fused.rh_pct = rh_amb;
 }
 
 /**
@@ -397,8 +441,8 @@ void fusion_apply(iaq_data_t *data)
     /* 1. Temperature self-heating correction */
     apply_temp_self_heat_correction(data);
 
-    /* 2. Humidity passthrough (no correction) */
-    apply_humidity_passthrough(data);
+    /* 2. Humidity adjusted for corrected temperature (conserve absolute humidity) */
+    apply_humidity_temp_consistency(data);
 
     /* 3. Pressure passthrough (used as reference) */
     apply_pressure_passthrough(data);
