@@ -11,7 +11,7 @@
  */
 #define IAQ_VERSION_MAJOR  0
 #define IAQ_VERSION_MINOR  6
-#define IAQ_VERSION_PATCH  0
+#define IAQ_VERSION_PATCH  3
 
 /**
  * Task priorities (higher number = higher priority)
