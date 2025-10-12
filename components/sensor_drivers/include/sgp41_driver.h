@@ -3,6 +3,7 @@
 #define SGP41_DRIVER_H
 
 #include "esp_err.h"
+#include <stdbool.h>
 #include <stdint.h>
 
 #ifdef __cplusplus
@@ -44,6 +45,21 @@ esp_err_t sgp41_driver_reset(void);
  * @return ESP_OK on success, error code otherwise
  */
 esp_err_t sgp41_driver_deinit(void);
+
+/**
+ * Perform a conditioning tick during warm-up (max 10s), using compensation.
+ * Safe to call at ~1 Hz while sensor is in WARMING state.
+ * After 10s from driver init/reset this becomes a no-op.
+ */
+esp_err_t sgp41_driver_conditioning_tick(float temp_c, float humidity_rh);
+
+/**
+ * Returns true once SGP41 is ready to report non-zero Gas Index values.
+ * This accounts for both the 10s conditioning and the algorithm's initial
+ * blackout (about 45s). Before that, the driver will return ESP_ERR_NOT_SUPPORTED
+ * on reads and the coordinator should keep the sensor in WARMING.
+ */
+bool sgp41_driver_is_reporting_ready(void);
 
 #ifdef __cplusplus
 }

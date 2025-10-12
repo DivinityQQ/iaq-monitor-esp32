@@ -6,42 +6,53 @@ config IAQ_CADENCE_MCU_MS
     range 0 600000
     help
         Period between MCU internal temperature sensor reads.
-        0 disables periodic reads.
+        Recommended: 10s. MCU temperature changes slowly; shorter cadences
+        mostly add noise. Set 0 to disable.
 
 config IAQ_CADENCE_SHT45_MS
     int "SHT45 cadence (ms)"
-    default 30000
+    default 2000
     range 0 600000
     help
-        Period between SHT45 reads. 0 disables.
+        Period between SHT45 reads. Recommended: 2s.
+        Faster than ~2s offers little benefit and can increase self-heating.
+        Set 0 to disable.
 
 config IAQ_CADENCE_BMP280_MS
     int "BMP280 cadence (ms)"
-    default 30000
+    default 10000
     range 0 600000
     help
-        Period between BMP280 reads. 0 disables.
+        Period between BMP280 reads. Recommended: 10s.
+        Pressure changes slowly; shorter cadences add noise without value.
+        Set 0 to disable.
 
 config IAQ_CADENCE_SGP41_MS
     int "SGP41 cadence (ms)"
-    default 60000
+    default 1000
     range 0 600000
     help
-        Period between SGP41 reads. 0 disables.
+        Period between SGP41 reads. Recommended: 1s (or 10s).
+        Sensirion's Gas Index Algorithm is validated at 1s and 10s sampling.
+        The driver initializes the algorithm using this cadence. Set 0 to disable.
 
 config IAQ_CADENCE_PMS5003_MS
     int "PMS5003 cadence (ms)"
-    default 60000
+    default 10000
     range 0 600000
     help
-        Period between PMS5003 reads. 0 disables.
+        Period between PMS5003 reads. Recommended: 10–30s.
+        Continuous fast sampling increases fan wear and dust accumulation;
+        10s is a good balance for responsiveness. Set 0 to disable.
 
 config IAQ_CADENCE_S8_MS
     int "Senseair S8 cadence (ms)"
-    default 30000
+    default 10000
     range 0 600000
     help
-        Period between S8 CO2 reads. 0 disables.
+        Period between S8 CO2 reads. Recommended: 10s.
+        CO2 dynamics are slow (T90 ~30s); faster sampling rarely adds value.
+        Set 0 to disable.
 
 menu "Sensor Warm-up Durations"
 
@@ -72,10 +83,11 @@ config IAQ_WARMUP_SHT45_MS
     config IAQ_WARMUP_SGP41_MS
         int "SGP41 warm-up (ms)"
         default 10000
-        range 0 60000
+        range 0 10000
         help
             SGP41 VOC/NOx sensor requires ~10s warm-up for stable readings.
-            Default: 10000 (10 seconds).
+            Conditioning must not exceed 10 seconds. The driver enforces a
+            maximum of 10s regardless of this setting.
 
     config IAQ_WARMUP_PMS5003_MS
         int "PMS5003 warm-up (ms)"

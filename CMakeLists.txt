@@ -3,6 +3,9 @@
 
 cmake_minimum_required(VERSION 3.16)
 
+# Add nested vendor components to the search path
+set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/components/thirdparty/sensirion")
+
 # Include ESP-IDF project.cmake before project()
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 

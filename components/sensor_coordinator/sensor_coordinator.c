@@ -483,12 +483,43 @@ static void sensor_coordinator_task(void *arg)
 
         int64_t now_us = esp_timer_get_time();
 
+        /* During SGP41 warm-up, run execute_conditioning at ~1 Hz */
+        if (s_runtime[SENSOR_ID_SGP41].state == SENSOR_STATE_WARMING) {
+            const int64_t interval_us = 1000000; // 1 second
+            if (now_us - s_runtime[SENSOR_ID_SGP41].last_read_us >= interval_us) {
+                (void)sgp41_driver_read(NULL, NULL, 25.0f, 50.0f); // triggers bus init if needed; conditioning handled in driver if required
+                s_runtime[SENSOR_ID_SGP41].last_read_us = now_us;
+            }
+        }
+
+        /* For SGP41, run 1 Hz conditioning ticks during WARMING (max 10s) */
+        if (s_runtime[SENSOR_ID_SGP41].state == SENSOR_STATE_WARMING) {
+            int64_t now_us = esp_timer_get_time();
+            if (now_us - s_runtime[SENSOR_ID_SGP41].last_read_us >= 1000000) {
+                /* Use last known temp/RH for compensation; fallback defaults */
+                float temp_c = 25.0f, humidity_rh = 50.0f;
+                IAQ_DATA_WITH_LOCK() {
+                    iaq_data_t *data = iaq_data_get();
+                    if (data->valid.temp_c) temp_c = data->raw.temp_c;
+                    if (data->valid.rh_pct) humidity_rh = data->raw.rh_pct;
+                }
+                (void)sgp41_driver_conditioning_tick(temp_c, humidity_rh);
+                s_runtime[SENSOR_ID_SGP41].last_read_us = now_us;
+            }
+        }
+
         /* Check warm-up deadlines, promote WARMING -> READY */
         for (int i = 0; i < SENSOR_ID_MAX; ++i) {
             if (s_runtime[i].state == SENSOR_STATE_WARMING) {
                 if (now_us >= s_runtime[i].warmup_deadline_us) {
-                    ESP_LOGI(TAG, "%s warm-up complete", sensor_id_to_string(i));
-                    transition_to_state(i, SENSOR_STATE_READY);
+                    bool ready = true;
+                    if (i == SENSOR_ID_SGP41) {
+                        ready = sgp41_driver_is_reporting_ready();
+                    }
+                    if (ready) {
+                        ESP_LOGI(TAG, "%s warm-up complete", sensor_id_to_string(i));
+                        transition_to_state(i, SENSOR_STATE_READY);
+                    }
                 }
             }
         }
@@ -1011,6 +1042,7 @@ esp_err_t sensor_coordinator_set_cadence(sensor_id_t id, uint32_t interval_ms)
 {
     if (id < 0 || id >= SENSOR_ID_MAX) return ESP_ERR_INVALID_ARG;
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
+    uint32_t prev_ms = s_cadence_ms[id];
     s_schedule[id].enabled = (interval_ms > 0);
     s_schedule[id].period_ticks = pdMS_TO_TICKS(interval_ms);
     s_schedule[id].next_due = xTaskGetTickCount() + s_schedule[id].period_ticks;
@@ -1024,6 +1056,10 @@ esp_err_t sensor_coordinator_set_cadence(sensor_id_t id, uint32_t interval_ms)
         case SENSOR_ID_PMS5003:  save_cadence_ms("cad_pms5003", interval_ms); break;
         case SENSOR_ID_S8:       save_cadence_ms("cad_s8", interval_ms); break;
         default: break;
+    }
+    /* If SGP41 cadence changed, reinitialize algorithm sampling interval */
+    if (id == SENSOR_ID_SGP41 && prev_ms != interval_ms) {
+        (void)sgp41_driver_reset();
     }
     return ESP_OK;
 }
