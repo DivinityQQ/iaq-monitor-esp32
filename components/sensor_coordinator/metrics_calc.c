@@ -654,7 +654,9 @@ static void update_co2_rate(iaq_data_t *data)
 
     int oldest_in_window = -1;
     int64_t now_us = esp_timer_get_time();
-    for (int i = s_co2_history.count - 1; i >= 0; i--) {
+    /* Iterate from most recent backwards until we exit the window;
+     * the last index still inside becomes the oldest_in_window. */
+    for (int i = 0; i < s_co2_history.count; i++) {
         int idx = (s_co2_history.head + CO2_HISTORY_SIZE - 1 - i) % CO2_HISTORY_SIZE;
         if ((now_us - s_co2_history.timestamps_us[idx]) <= window_us) {
             oldest_in_window = idx;

@@ -222,7 +222,7 @@ Where:
 
 ## CO₂ Rate of Change
 
-**Window:** Configurable (default 10 minutes via `CONFIG_METRICS_CO2_RATE_WINDOW_MIN`)
+**Window:** Configurable (default 15 minutes via `CONFIG_METRICS_CO2_RATE_WINDOW_MIN`)
 **Sampling:** 1-minute intervals
 **Location:** `update_co2_rate()` in `metrics_calc.c`
 
