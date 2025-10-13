@@ -633,8 +633,8 @@ CONFIG_IAQ_MQTT_TLS_TRUST_BUNDLE=y
 # Time Synchronization
 #
 CONFIG_IAQ_TZ_STRING="CET-1CEST,M3.5.0/2,M10.5.0/3"
-CONFIG_IAQ_NTP_SERVER0="pool.ntp.org"
-CONFIG_IAQ_NTP_SERVER1="time.google.com"
+CONFIG_IAQ_NTP_SERVER0="time.google.com"
+CONFIG_IAQ_NTP_SERVER1="pool.ntp.org"
 # end of Time Synchronization
 # end of IAQ Monitor Configuration
 

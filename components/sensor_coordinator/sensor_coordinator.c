@@ -483,7 +483,7 @@ static void sensor_coordinator_task(void *arg)
 
         int64_t now_us = esp_timer_get_time();
 
-        /* For SGP41, run 1 Hz conditioning ticks during WARMING (max 10s) */
+        /* For SGP41, run 1 Hz conditioning ticks during WARMING (first 10s only) */
         if (s_runtime[SENSOR_ID_SGP41].state == SENSOR_STATE_WARMING) {
             int64_t now_us = esp_timer_get_time();
             if (now_us - s_runtime[SENSOR_ID_SGP41].last_read_us >= 1000000) {

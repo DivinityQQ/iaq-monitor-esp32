@@ -7,11 +7,12 @@
 #if CONFIG_IAQ_OLED_ENABLE && (CONFIG_IAQ_OLED_BUTTON_GPIO >= 0)
 
 #include "driver/gpio.h"
-#include "esp_timer.h"
+#include "freertos/FreeRTOS.h"
+#include "freertos/task.h"
 
 static const char *TAG = "OLED_IN";
 
-static int64_t s_last_edge_us = 0;
+static volatile TickType_t s_last_edge_ticks = 0;
 static volatile display_button_event_t s_pending = DISPLAY_BTN_EVENT_NONE;
 
 static void IRAM_ATTR gpio_isr(void *arg)
@@ -23,11 +24,12 @@ static void IRAM_ATTR gpio_isr(void *arg)
 #else
     bool pressed = (level != 0);
 #endif
-    int64_t now = esp_timer_get_time();
+    TickType_t now_ticks = xTaskGetTickCountFromISR();
     if (pressed) {
-        s_last_edge_us = now;
+        s_last_edge_ticks = now_ticks;
     } else {
-        int64_t dt_ms = (now - s_last_edge_us) / 1000;
+        TickType_t dt_ticks = now_ticks - s_last_edge_ticks;
+        int32_t dt_ms = (int32_t)(dt_ticks * portTICK_PERIOD_MS);
         if (dt_ms >= CONFIG_IAQ_OLED_BUTTON_DEBOUNCE_MS) {
             s_pending = (dt_ms >= CONFIG_IAQ_OLED_BUTTON_LONG_MS) ? DISPLAY_BTN_EVENT_LONG : DISPLAY_BTN_EVENT_SHORT;
         }

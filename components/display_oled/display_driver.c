@@ -85,12 +85,14 @@ esp_err_t display_driver_init(void)
     s_rot_180 = 1;
 #endif
 
-    ESP_RETURN_ON_ERROR(i2c_bus_init(), TAG, "I2C bus init failed");
-
     uint8_t addr = (uint8_t)CONFIG_IAQ_OLED_I2C_ADDR;
     /* Use a dedicated OLED I2C frequency to allow faster refresh without
-       changing the global sensor bus setting. */
+       changing the global sensor bus setting. Try add first, init bus on demand. */
     esp_err_t ret = i2c_bus_add_device(addr, CONFIG_IAQ_OLED_I2C_FREQ_HZ, &s_dev);
+    if (ret == ESP_ERR_INVALID_STATE) {
+        ESP_RETURN_ON_ERROR(i2c_bus_init(), TAG, "I2C bus init failed");
+        ret = i2c_bus_add_device(addr, CONFIG_IAQ_OLED_I2C_FREQ_HZ, &s_dev);
+    }
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to add SH1106 at 0x%02X: %s", addr, esp_err_to_name(ret));
         return ret;

@@ -143,19 +143,23 @@ esp_err_t sgp41_driver_init(void)
 bool sgp41_driver_is_reporting_ready(void)
 {
     if (!s_initialized || s_dev == NULL) return false;
-    const int32_t cond_ms = (CONFIG_IAQ_WARMUP_SGP41_MS > 10000) ? 10000 : CONFIG_IAQ_WARMUP_SGP41_MS;
-    const int32_t blackout_ms = (int32_t)(GasIndexAlgorithm_INITIAL_BLACKOUT * 1000.0f + 0.5f); // ~45000ms
+    /* CONFIG_IAQ_WARMUP_SGP41_MS represents total warmup time.
+     * Kconfig enforces minimum 10s (mandatory conditioning period).
+     * Recommended default is 55s (10s conditioning + 45s algorithm stabilization). */
     const int64_t elapsed_us = esp_timer_get_time() - s_init_time_us;
-    return elapsed_us >= ((int64_t)cond_ms + blackout_ms) * 1000LL;
+    return elapsed_us >= ((int64_t)CONFIG_IAQ_WARMUP_SGP41_MS * 1000LL);
 }
 
 esp_err_t sgp41_driver_conditioning_tick(float temp_c, float humidity_rh)
 {
     if (!s_initialized || s_dev == NULL) return ESP_ERR_INVALID_STATE;
 
-    const int32_t clamp_ms = (CONFIG_IAQ_WARMUP_SGP41_MS > 10000) ? 10000 : CONFIG_IAQ_WARMUP_SGP41_MS;
+    /* Hardware conditioning must run for exactly 10 seconds.
+     * Even if CONFIG_IAQ_WARMUP_SGP41_MS is longer (e.g., 55s for algorithm stabilization),
+     * we only condition for the first 10s, then switch to normal measurement mode. */
+    const int32_t conditioning_period_ms = 10000;  // Fixed 10s hardware requirement
     int64_t since_init_us = esp_timer_get_time() - s_init_time_us;
-    if (since_init_us >= (int64_t)clamp_ms * 1000LL) {
+    if (since_init_us >= (int64_t)conditioning_period_ms * 1000LL) {
         return ESP_OK; // conditioning window elapsed
     }
 
@@ -200,12 +204,12 @@ esp_err_t sgp41_driver_read(uint16_t *out_voc_index, uint16_t *out_nox_index,
         return ESP_ERR_INVALID_STATE;
     }
 
-    // During the first <=10 seconds after init, run execute_conditioning to prime NOx baseline.
-    const int32_t clamp_ms = (CONFIG_IAQ_WARMUP_SGP41_MS > 10000) ? 10000 : CONFIG_IAQ_WARMUP_SGP41_MS;
+    // During the first 10 seconds after init, run execute_conditioning to prime NOx baseline.
+    const int32_t conditioning_period_ms = 10000;  // Fixed 10s hardware requirement
     int64_t since_init_us = esp_timer_get_time() - s_init_time_us;
     uint16_t rh_ticks = sgp41_rh_to_ticks(humidity_rh);
     uint16_t t_ticks  = sgp41_t_to_ticks(temp_c);
-    if (since_init_us < (int64_t)clamp_ms * 1000LL) {
+    if (since_init_us < (int64_t)conditioning_period_ms * 1000LL) {
         // Run conditioning using the helper and signal skip
         (void)sgp41_driver_conditioning_tick(temp_c, humidity_rh);
         return ESP_ERR_NOT_SUPPORTED;

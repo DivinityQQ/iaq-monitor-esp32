@@ -59,6 +59,7 @@ typedef struct {
 static iaq_system_context_t *s_ctx = NULL;
 static TaskHandle_t s_task = NULL;
 static esp_timer_handle_t s_wake_timer = NULL;
+static volatile bool s_wake_active = false;
 static volatile bool s_enabled = true;
 static volatile int s_screen_idx = 0;
 static volatile int64_t s_last_activity_us = 0;
@@ -123,12 +124,16 @@ static void wake_timer_callback(void *arg)
     display_ui_set_enabled(false);
     s_invert = false;
     (void)display_driver_set_invert(false);
+    s_wake_active = false;
 }
 
 void display_ui_wake_for_seconds(uint32_t seconds)
 {
     display_ui_set_enabled(true);
+    s_wake_active = true;
     if (s_wake_timer) {
+        /* Restart the one-shot timer */
+        esp_timer_stop(s_wake_timer);
         esp_timer_start_once(s_wake_timer, (uint64_t)seconds * 1000000ULL);
     }
 }
@@ -254,8 +259,8 @@ static void display_task(void *arg)
         /* Handle input events */
         display_button_event_t ev = display_input_poll_event();
 
-        /* Night mode button handling */
-        if (is_night_now()) {
+        /* Night mode handling: allow rendering only if woken */
+        if (is_night_now() && !s_wake_active) {
             if (ev == DISPLAY_BTN_EVENT_SHORT) {
                 display_ui_wake_for_seconds(CONFIG_IAQ_OLED_WAKE_SECS);
             }

@@ -82,12 +82,17 @@ config IAQ_WARMUP_SHT45_MS
 
     config IAQ_WARMUP_SGP41_MS
         int "SGP41 warm-up (ms)"
-        default 10000
-        range 0 10000
+        default 55000
+        range 10000 60000
         help
-            SGP41 VOC/NOx sensor requires ~10s warm-up for stable readings.
-            Conditioning must not exceed 10 seconds. The driver enforces a
-            maximum of 10s regardless of this setting.
+            SGP41 VOC/NOx sensor warm-up duration. The sensor requires:
+            - Minimum 10s: Mandatory conditioning period (hardware requirement)
+            - Recommended 55s: Full stabilization (10s conditioning + 45s algorithm blackout)
+
+            After 10s conditioning, the sensor outputs readings, but the gas index
+            algorithm needs ~45s more to report accurate values. Setting this to 10s
+            will make the sensor available faster, but initial readings may be unstable.
+            Default: 55000ms (55 seconds) for accurate readings from the start.
 
     config IAQ_WARMUP_PMS5003_MS
         int "PMS5003 warm-up (ms)"
