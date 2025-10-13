@@ -1,6 +1,6 @@
 # IAQ Monitor (ESP32-S3, ESP-IDF)
 Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, robust defaults, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery.
-Current version: 0.6.3
+Current version: 0.7.2
 ## Features
 - Wi‑Fi station mode with NVS‑stored credentials (console configurable)
 - MQTT 5.0 client, retained LWT/status, HA auto‑discovery
@@ -10,6 +10,7 @@ Current version: 0.6.3
 - **Derived metrics**: EPA AQI, thermal comfort, CO₂ rate, PM spike detection, mold risk, pressure trends
 - **Simulation mode**: Complete MQTT/HA integration testing without physical sensors
 - **Time sync (SNTP)**: Local time via NTP with configurable TZ; event bit set when time is valid
+- **OLED display (SH1106)**: 6 screens (Overview, Environment, Air Quality, CO₂ Detail, Particulate, System) with button navigation, night mode, and idle auto-off
 - Sensor coordinator with state machine (UNINIT → INIT → WARMING → READY → ERROR)
 - Per‑sensor cadences (configurable via Kconfig/console, persisted in NVS)
 - Per‑sensor warm‑up periods with observable countdown
@@ -71,9 +72,43 @@ sensor status | sensor read <sensor> | sensor reset <sensor>
 sensor calibrate co2 <ppm>
 sensor cadence | sensor cadence set <sensor> <ms>
 sensor s8 status | sensor s8 abc <on|off> [hours]
+display status | display on | display off | display next | display prev
+display screen <0-5> | display invert <on|off> | display contrast <0-255>
 free | version | restart
 ```
 Sensors: mcu (internal temp), sht45, bmp280, sgp41, pms5003, s8 (as drivers are wired).
+## OLED Display
+The firmware includes an optional SH1106-based OLED display (128x64) with 6 information screens:
+- **Overview**: Key metrics at a glance (CO₂, AQI, temp, humidity, pressure)
+- **Environment**: Temperature, humidity, pressure with comfort indicators
+- **Air Quality**: AQI breakdown, VOC/NOx indices, categories
+- **CO₂ Detail**: CO₂ level, rate of change, trend
+- **Particulate**: PM1.0, PM2.5, PM10, spike detection
+- **System**: WiFi, MQTT status, uptime, memory, sensor states
+
+### Configuration
+Enable and configure via menuconfig:
+```bash
+idf.py menuconfig
+# Navigate to: OLED Display (SH1106)
+```
+Options include:
+- I2C address (default 0x3C), column offset, rotation (0°/180°)
+- Contrast (0-255), refresh interval
+- Idle timeout (auto-off after inactivity)
+- Night schedule (start/end hours, wake duration on button press)
+- Button GPIO, debounce, long-press threshold
+
+### Button Navigation
+- **Short press**: Cycle through screens (or wake from night mode)
+- **Long press**: Toggle display on/off
+- Console commands also available for remote control
+
+### Features
+- Dirty tracking: only redraws changed content
+- Night mode: auto-dim during configured hours, wake on button press
+- Idle timeout: turns off display after inactivity
+- Real-time updates: sensor data, connectivity status, system info
 ## Simulation Mode
 Enable simulation to test the full MQTT/HA integration without physical sensors:
 ```bash
@@ -177,7 +212,7 @@ sensor cadence set <sensor> <ms>
 - For new settings, consider Kconfig defaults and NVS persistence
 - Follow CONTRIBUTING.md for coding and component guidelines
 ## Development Status
-**Current Status (v0.6.3)**
+**Current Status (v0.7.2)**
 - ✅ Core infrastructure (Wi‑Fi, MQTT 5.0, Home Assistant auto‑discovery)
 - ✅ 6 sensor drivers with real hardware support (MCU, SHT45, BMP280, SGP41, PMS5003, S8)
 - ✅ Full simulation mode for testing without hardware
@@ -189,10 +224,46 @@ sensor cadence set <sensor> <ms>
 - ✅ Task Watchdog integration for deadlock detection
 - ✅ Console commands for configuration, diagnostics, and sensor control (including S8 ABC)
 - ✅ SNTP time sync with TZ support
-- 📋 Future: Display, LED status indicators, web configuration interface
+- ✅ OLED display (SH1106) with 6 screens, button navigation, night mode
+- ✅ Enhanced MQTT TLS (custom CA, mutual TLS, AWS IoT support)
+- 📋 Future: LED status indicators, web configuration interface
 ## Changelog
 
-### v0.6.3 (Current)
+### v0.7.2 (Current)
+**Improvements:**
+- Display driver improvements and code refinements
+- SGP41 warmup logic made more intuitive
+- Reworked OLED overview screen for better readability
+
+### v0.7.1
+**Features:**
+- Improved time sync robustness with better error handling
+- Completed display driver with all 6 screens implemented
+- Added button input handling with debounce and long-press detection
+- Fixed compilation warnings when button is disabled
+
+### v0.7.0
+**Major Features:**
+- Implemented SH1106 OLED display driver (128x64 resolution)
+  - 6 information screens: Overview, Environment, Air Quality, CO₂ Detail, Particulate, System
+  - Button navigation support (short press = next screen, long press = toggle on/off)
+  - Night mode with configurable schedule (auto-dim during specified hours)
+  - Wake-on-button during night mode with configurable duration
+  - Idle auto-off with configurable timeout
+  - Dirty tracking for efficient screen updates
+  - Console commands for display control (on/off/next/prev/screen/invert/contrast)
+- Enhanced MQTT TLS support:
+  - Custom Root CA PEM embedding
+  - Mutual TLS (mTLS) with client certificates
+  - AWS IoT Core support with ALPN for port 443
+  - Flexible trust modes (certificate bundle, custom CA, or insecure for testing)
+- CO₂ rate calculation improvements:
+  - Switched from simple endpoint comparison to linear regression
+  - Added Exponential Moving Average (EMA) smoothing to reduce jitter
+  - Implemented minimum time span requirement (5 minutes) to avoid extrapolation errors
+  - Added outlier clamping (±2500 ppm/hr) for more stable metrics
+
+### v0.6.3
 **Improvements:**
 - Tightened Wi‑Fi reconnect behavior for robustness
 - Console `wifi set` now supports SSID/password with spaces (quoted)
