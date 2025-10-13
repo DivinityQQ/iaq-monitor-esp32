@@ -163,3 +163,65 @@ uint16_t display_gfx_page_hash(const uint8_t *page_buf)
     return hash;
 }
 
+void display_gfx_draw_progress_bar(uint8_t *page_buf, int x_px, int width,
+                                     uint8_t percentage, const char *text,
+                                     const display_font_t *font)
+{
+    if (!page_buf || width <= 0 || percentage > 100) return;
+
+    /* Calculate filled width based on percentage */
+    int filled_width = (width * percentage) / 100;
+    if (filled_width < 0) filled_width = 0;
+    if (filled_width > width) filled_width = width;
+
+    /* Fill the progress bar (filled portion only, no borders) */
+    for (int i = 0; i < filled_width && (x_px + i) < 128; i++) {
+        int x = x_px + i;
+        if (x >= 0) {
+            page_buf[x] |= 0xFF;  /* Fill entire 8-pixel height */
+        }
+    }
+
+    /* Draw text overlay with XOR blending for inversion */
+    if (text && font && font->u8x8_font) {
+        uint8_t first = font->u8x8_font[0];
+        uint8_t last  = font->u8x8_font[1];
+        uint8_t th    = font->u8x8_font[2];
+        uint8_t tv    = font->u8x8_font[3];
+        (void)th; (void)tv; /* only support th=1,tv=1 */
+
+        /* Calculate text width and center it */
+        int text_len = 0;
+        for (const char *p = text; *p; ++p) text_len++;
+        int text_width = text_len * 8;  /* 8 pixels per character */
+        int text_x = x_px + (width - text_width) / 2;
+
+        uint8_t tile[8];
+
+        for (const char *p = text; *p; ++p) {
+            unsigned char ch = (unsigned char)*p;
+            if (ch < first || ch > last) {
+                memset(tile, 0, 8);
+            } else {
+                uint16_t tiles = (uint16_t)th * (uint16_t)tv;
+                uint16_t idx = (uint16_t)(ch - first) * tiles;
+                uint16_t offset = 4 + (idx * 8);
+                for (int i = 0; i < 8; ++i) {
+                    tile[i] = font->u8x8_font[offset + i];
+                }
+            }
+
+            /* XOR blit for text inversion over filled area */
+            for (int col = 0; col < 8; ++col) {
+                int x = text_x + col;
+                if (x >= 0 && x < 128) {
+                    page_buf[x] ^= tile[col];
+                }
+            }
+
+            text_x += 8;
+            if (text_x >= 128) break;
+        }
+    }
+}
+

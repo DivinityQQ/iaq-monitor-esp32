@@ -122,3 +122,107 @@ bool any_sensor_warming(void)
 
     return false;
 }
+
+uint8_t get_warming_progress(void)
+{
+    /* Warmup durations from Kconfig (milliseconds) - must match sensor_coordinator.c */
+    static const uint32_t warmup_ms[SENSOR_ID_MAX] = {
+        [SENSOR_ID_MCU]     = CONFIG_IAQ_WARMUP_MCU_MS,
+        [SENSOR_ID_SHT45]   = CONFIG_IAQ_WARMUP_SHT45_MS,
+        [SENSOR_ID_BMP280]  = CONFIG_IAQ_WARMUP_BMP280_MS,
+        [SENSOR_ID_SGP41]   = CONFIG_IAQ_WARMUP_SGP41_MS,
+        [SENSOR_ID_PMS5003] = CONFIG_IAQ_WARMUP_PMS5003_MS,
+        [SENSOR_ID_S8]      = CONFIG_IAQ_WARMUP_S8_MS,
+    };
+
+    int64_t now = esp_timer_get_time();
+    int64_t max_remaining_us = 0;
+    int64_t max_total_us = 1;  /* Avoid divide by zero */
+    bool any_warming = false;
+
+    for (sensor_id_t id = 0; id < SENSOR_ID_MAX; id++) {
+        sensor_runtime_info_t info;
+        if (sensor_coordinator_get_runtime_info(id, &info) == ESP_OK) {
+            if (info.state == SENSOR_STATE_WARMING) {
+                any_warming = true;
+                int64_t remaining = info.warmup_deadline_us - now;
+                if (remaining < 0) remaining = 0;
+
+                /* Get total warmup time from config */
+                int64_t total = (int64_t)warmup_ms[id] * 1000LL;
+
+                /* Track sensor with longest remaining time */
+                if (remaining > max_remaining_us) {
+                    max_remaining_us = remaining;
+                    max_total_us = total;
+                }
+            }
+        }
+    }
+
+    if (!any_warming) {
+        return 100;  /* Complete */
+    }
+
+    /* Calculate percentage: 100 * elapsed / total */
+    int64_t elapsed = max_total_us - max_remaining_us;
+    if (elapsed < 0) elapsed = 0;
+    if (max_total_us <= 0) return 0;
+
+    uint8_t pct = (uint8_t)((elapsed * 100) / max_total_us);
+    if (pct > 100) pct = 100;
+
+    return pct;
+}
+
+const char* get_sensor_status_text(void)
+{
+    static int64_t last_check_us = 0;
+    static const char* cached_result = "INIT";
+
+    int64_t now = esp_timer_get_time();
+    if (now - last_check_us < 1000000) {
+        return cached_result;
+    }
+
+    last_check_us = now;
+
+    /* Priority: ERROR > WARMING > INIT > UNINIT, default to READY if all ready */
+    bool has_error = false;
+    bool has_warming = false;
+    bool has_init = false;
+    bool has_uninit = false;
+    bool all_ready = true;
+
+    for (sensor_id_t id = 0; id < SENSOR_ID_MAX; id++) {
+        sensor_runtime_info_t info;
+        if (sensor_coordinator_get_runtime_info(id, &info) == ESP_OK) {
+            if (info.state != SENSOR_STATE_READY) {
+                all_ready = false;
+            }
+            if (info.state == SENSOR_STATE_ERROR) {
+                has_error = true;
+            } else if (info.state == SENSOR_STATE_WARMING) {
+                has_warming = true;
+            } else if (info.state == SENSOR_STATE_INIT) {
+                has_init = true;
+            } else if (info.state == SENSOR_STATE_UNINIT) {
+                has_uninit = true;
+            }
+        }
+    }
+
+    if (has_error) {
+        cached_result = "ERROR";
+    } else if (has_warming) {
+        cached_result = "WARMING";
+    } else if (has_init) {
+        cached_result = "INIT";
+    } else if (has_uninit) {
+        cached_result = "UNINIT";
+    } else if (all_ready) {
+        cached_result = "READY";
+    }
+
+    return cached_result;
+}

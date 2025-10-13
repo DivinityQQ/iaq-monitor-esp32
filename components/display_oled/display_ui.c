@@ -326,9 +326,9 @@ static void render_overview(uint8_t page, uint8_t *buf, bool full)
     (void)full;
 
     char str[32];
-    float co2 = NAN, pm25 = NAN, temp = NAN;
+    float co2 = NAN, pm25 = NAN, temp = NAN, rh = NAN, pressure_pa = NAN;
     uint16_t aqi = 0;
-    bool wifi = false, mqtt = false, time_synced = false, warming = false;
+    bool wifi = false, mqtt = false, time_synced = false;
     int hour = 0, min = 0, sec = 0;
 
     /* Copy data under lock */
@@ -337,6 +337,8 @@ static void render_overview(uint8_t page, uint8_t *buf, bool full)
         if (d->valid.co2_ppm) co2 = d->fused.co2_ppm;
         if (d->valid.pm25_ugm3) pm25 = d->fused.pm25_ugm3;
         if (d->valid.temp_c) temp = d->fused.temp_c;
+        if (d->valid.rh_pct) rh = d->fused.rh_pct;
+        if (d->valid.pressure_pa) pressure_pa = d->fused.pressure_pa;
         aqi = d->metrics.aqi_value;
         wifi = d->system.wifi_connected;
         mqtt = d->system.mqtt_connected;
@@ -346,7 +348,6 @@ static void render_overview(uint8_t page, uint8_t *buf, bool full)
         EventBits_t bits = xEventGroupGetBits(s_ctx->event_group);
         time_synced = (bits & TIME_SYNCED_BIT) != 0;
     }
-    warming = any_sensor_warming();
 
     if (time_synced) {
         time_t now; time(&now);
@@ -356,47 +357,78 @@ static void render_overview(uint8_t page, uint8_t *buf, bool full)
         sec = t.tm_sec;
     }
 
-    /* Page 0-1: Large CO2 (8×16) */
-    if (page <= 1) {
-        fmt_float(str, sizeof(str), co2, 0, "---");
-        strcat(str, " ppm");
-        display_gfx_draw_text_8x16_page(page, buf, 0, 0, str, &s_font_large);
+    /* Page 0: Time (8×8, left) + WiFi/MQTT icons (right) */
+    if (page == 0) {
+        if (time_synced) {
+            snprintf(str, sizeof(str), "%02d:%02d:%02d", hour, min, sec);
+        } else {
+            snprintf(str, sizeof(str), "--:--:--");
+        }
+        display_gfx_draw_text_8x8_page(page, buf, 0, 0, str, &s_font_label);
 
         /* Status icons on right */
-        if (page == 0) {
-            display_draw_icon_at(page, buf, 96, 0, wifi ? ICON_WIFI : ICON_WIFI_OFF, false);
-            display_draw_icon_at(page, buf, 112, 0, mqtt ? ICON_MQTT : ICON_MQTT_OFF, false);
-        }
+        display_draw_icon_at(page, buf, 96, 0, wifi ? ICON_WIFI : ICON_WIFI_OFF, false);
+        display_draw_icon_at(page, buf, 112, 0, mqtt ? ICON_MQTT : ICON_MQTT_OFF, false);
     }
 
-    /* Page 2: PM2.5 + Temp */
+    /* Page 1: CO2 (8×8): "CO2: 1234 ppm" */
+    if (page == 1) {
+        char co2_str[12];
+        fmt_float(co2_str, sizeof(co2_str), co2, 0, "---");
+        snprintf(str, sizeof(str), "CO2:%s ppm", co2_str);
+        display_gfx_draw_text_8x8_page(page, buf, 0, 8, str, &s_font_label);
+    }
+
+    /* Page 2: AQI (show "--" if UINT16_MAX or 0) */
     if (page == 2) {
-        char pm_str[12], temp_str[12];
-        fmt_float(pm_str, sizeof(pm_str), pm25, 0, "---");
-        fmt_float(temp_str, sizeof(temp_str), temp, 1, "--");
-        snprintf(str, sizeof(str), "PM:%s T:%s", pm_str, temp_str);
+        if (aqi == UINT16_MAX || aqi == 0) {
+            snprintf(str, sizeof(str), "AQI: --");
+        } else {
+            snprintf(str, sizeof(str), "AQI:%u %s", aqi, get_aqi_short(aqi));
+        }
         display_gfx_draw_text_8x8_page(page, buf, 0, 16, str, &s_font_label);
     }
 
-    /* Page 3: AQI + RH */
+    /* Page 3: PM2.5 with 1 decimal */
     if (page == 3) {
-        snprintf(str, sizeof(str), "AQI:%u %s", aqi, get_aqi_short(aqi));
+        char pm_str[12];
+        fmt_float(pm_str, sizeof(pm_str), pm25, 1, "---");
+        snprintf(str, sizeof(str), "PM2.5:%s ug/m3", pm_str);
         display_gfx_draw_text_8x8_page(page, buf, 0, 24, str, &s_font_label);
     }
 
-    /* Page 4-5: Time (8×16) or "No sync" */
-    if (page >= 4 && page <= 5) {
-        if (time_synced) {
-            snprintf(str, sizeof(str), "%02d:%02d:%02d", hour, min, sec);
-            display_gfx_draw_text_8x16_page(page, buf, 16, 32, str, &s_font_large);
-        } else {
-            display_gfx_draw_text_8x8_page(page, buf, 32, page == 4 ? 32 : 40, "No sync", &s_font_label);
-        }
+    /* Page 4: Temperature with C */
+    if (page == 4) {
+        char temp_str[12];
+        fmt_float(temp_str, sizeof(temp_str), temp, 1, "--");
+        snprintf(str, sizeof(str), "Temp:%s C", temp_str);
+        display_gfx_draw_text_8x8_page(page, buf, 0, 32, str, &s_font_label);
     }
 
-    /* Page 6-7: Warming indicator */
-    if (page >= 6 && warming) {
-        display_gfx_draw_text_8x8_page(page, buf, 24, 48, "Warming...", &s_font_label);
+    /* Page 5: Humidity with % */
+    if (page == 5) {
+        char rh_str[12];
+        fmt_float(rh_str, sizeof(rh_str), rh, 1, "--");
+        snprintf(str, sizeof(str), "RH:%s %%", rh_str);
+        display_gfx_draw_text_8x8_page(page, buf, 0, 40, str, &s_font_label);
+    }
+
+    /* Page 6: Pressure with hPa and 1 decimal */
+    if (page == 6) {
+        char press_str[12];
+        float pressure_hpa = pressure_pa / 100.0f;  /* Convert Pa to hPa */
+        fmt_float(press_str, sizeof(press_str), pressure_hpa, 1, "----");
+        snprintf(str, sizeof(str), "P:%s hPa", press_str);
+        display_gfx_draw_text_8x8_page(page, buf, 0, 48, str, &s_font_label);
+    }
+
+    /* Page 7: Sensor status with progress bar during warming */
+    if (page == 7) {
+        const char *status = get_sensor_status_text();
+        uint8_t progress = get_warming_progress();
+
+        /* Draw progress bar with status text overlay */
+        display_gfx_draw_progress_bar(buf, 0, 128, progress, status, &s_font_label);
     }
 }
 

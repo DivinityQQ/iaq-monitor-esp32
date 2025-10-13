@@ -70,6 +70,23 @@ const uint8_t* get_pressure_trend_icon(int trend);
  */
 bool any_sensor_warming(void);
 
+/**
+ * Get warming progress for the sensor with the longest remaining warmup time.
+ * Calculates percentage based on elapsed vs. total warmup time.
+ *
+ * @return Progress percentage (0-100), 100 if no sensors warming
+ */
+uint8_t get_warming_progress(void);
+
+/**
+ * Get overall sensor system status text.
+ * Uses cached result (updates every 1000ms).
+ * Priority: ERROR > WARMING > INIT > UNINIT, defaults to READY if all ready.
+ *
+ * @return Status string: "ERROR", "WARMING", "INIT", "UNINIT", or "READY"
+ */
+const char* get_sensor_status_text(void);
+
 #ifdef __cplusplus
 }
 #endif

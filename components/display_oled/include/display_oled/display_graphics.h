@@ -54,6 +54,13 @@ void display_gfx_draw_hline(uint8_t *page_buf, int x_px, int width, bool top);
 /* Compute 16-bit rolling hash of page buffer for change detection. */
 uint16_t display_gfx_page_hash(const uint8_t *page_buf);
 
+/* Draw progress bar with optional text overlay (XOR blended for inversion).
+ * percentage: 0-100, width: total bar width in pixels
+ * Text is centered and inverted where it overlaps the filled portion. */
+void display_gfx_draw_progress_bar(uint8_t *page_buf, int x_px, int width,
+                                     uint8_t percentage, const char *text,
+                                     const display_font_t *font);
+
 #ifdef __cplusplus
 }
 #endif
