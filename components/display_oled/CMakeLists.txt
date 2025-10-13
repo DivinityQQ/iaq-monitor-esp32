@@ -1,0 +1,19 @@
+idf_component_register(
+    SRCS
+        "display_driver.c"
+        "display_graphics.c"
+        "display_ui.c"
+        "display_input.c"
+    INCLUDE_DIRS
+        "include"
+        "fonts"
+    PRIV_INCLUDE_DIRS "../../main"
+    REQUIRES
+        freertos
+        driver
+        esp_timer
+        system_context
+        time_sync
+        iaq_data
+        sensor_drivers
+)

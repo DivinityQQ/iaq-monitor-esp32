@@ -6,6 +6,7 @@ idf_component_register(
     INCLUDE_DIRS
         "."
     REQUIRES
+        display_oled
         driver
         nvs_flash
         esp_wifi

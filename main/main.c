@@ -20,6 +20,7 @@
 #include "sensor_coordinator.h"
 #include "console_commands.h"
 #include "time_sync.h"
+#include "display_oled/display_ui.h"
 
 static const char *TAG = "IAQ_MAIN";
 
@@ -190,6 +191,11 @@ void app_main(void)
     ESP_LOGI(TAG, "Registering IAQ event handler");
     ESP_ERROR_CHECK(esp_event_handler_register(IAQ_EVENT, ESP_EVENT_ANY_ID,
                                                 &iaq_event_handler, NULL));
+
+    /* Initialize and start OLED UI (if enabled) */
+    ESP_LOGI(TAG, "Initializing display UI");
+    ESP_ERROR_CHECK(display_ui_init(&g_system_ctx));
+    ESP_ERROR_CHECK(display_ui_start());
 
     /* Start sensor coordinator task (begin warm-up immediately) */
     ESP_LOGD(TAG, "Starting sensor coordinator");
