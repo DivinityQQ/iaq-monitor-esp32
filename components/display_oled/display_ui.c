@@ -114,7 +114,6 @@ static void display_task(void *arg)
 {
     (void)arg;
     uint8_t page_buf[128];
-    int64_t next_wake = 0;
 
     for (;;) {
         if (!s_enabled) {

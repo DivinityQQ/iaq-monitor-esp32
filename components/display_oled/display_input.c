@@ -3,7 +3,8 @@
 #include "sdkconfig.h"
 #include "esp_log.h"
 
-#if CONFIG_IAQ_OLED_ENABLE
+/* Only compile real button support if OLED is enabled and a valid GPIO is set */
+#if CONFIG_IAQ_OLED_ENABLE && (CONFIG_IAQ_OLED_BUTTON_GPIO >= 0)
 
 #include "driver/gpio.h"
 #include "esp_timer.h"
@@ -35,9 +36,6 @@ static void IRAM_ATTR gpio_isr(void *arg)
 
 esp_err_t display_input_init(void)
 {
-#if (CONFIG_IAQ_OLED_BUTTON_GPIO < 0)
-    return ESP_OK;
-#else
     gpio_config_t io = {
         .pin_bit_mask = (1ULL << CONFIG_IAQ_OLED_BUTTON_GPIO),
         .mode = GPIO_MODE_INPUT,
@@ -50,7 +48,6 @@ esp_err_t display_input_init(void)
     err = gpio_install_isr_service(0);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
     return gpio_isr_handler_add(CONFIG_IAQ_OLED_BUTTON_GPIO, gpio_isr, NULL);
-#endif
 }
 
 display_button_event_t display_input_poll_event(void)
@@ -60,10 +57,9 @@ display_button_event_t display_input_poll_event(void)
     return ev;
 }
 
-#else /* CONFIG_IAQ_OLED_ENABLE */
+#else /* stubs if OLED disabled or button GPIO < 0 */
 
 esp_err_t display_input_init(void) { return ESP_OK; }
 display_button_event_t display_input_poll_event(void) { return DISPLAY_BTN_EVENT_NONE; }
 
-#endif /* CONFIG_IAQ_OLED_ENABLE */
-
+#endif /* CONFIG_IAQ_OLED_ENABLE && (CONFIG_IAQ_OLED_BUTTON_GPIO >= 0) */
