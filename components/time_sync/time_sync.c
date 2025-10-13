@@ -9,6 +9,7 @@
 #include "esp_log.h"
 #include "esp_event.h"
 #include "esp_sntp.h"
+#include "sdkconfig.h"
 
 #include "iaq_config.h"
 #include "system_context.h"
@@ -31,6 +32,7 @@ static volatile bool s_sntp_started = false;
 #define CONFIG_IAQ_NTP_SERVER1 "time.google.com"
 #endif
 
+/* Handle SNTP sync notifications (called from SNTP task context) */
 static void time_sync_notification_cb(struct timeval *tv)
 {
     (void)tv;
@@ -41,9 +43,12 @@ static void time_sync_notification_cb(struct timeval *tv)
     /* Post app-level event for interested components */
     esp_event_post(IAQ_EVENT, IAQ_EVENT_TIME_SYNCED, NULL, 0, 0);
 
-    /* Log smooth mode status once (no periodic polling) */
-    if (esp_sntp_get_sync_status() == SNTP_SYNC_STATUS_IN_PROGRESS) {
-        ESP_LOGI(TAG, "SNTP smooth sync in progress");
+    /* Log sync status (compat with IDF 4.x/5.x enum names) */
+#ifndef ESP_SNTP_SYNC_STATUS_IN_PROGRESS
+#define ESP_SNTP_SYNC_STATUS_IN_PROGRESS SNTP_SYNC_STATUS_IN_PROGRESS
+#endif
+    if (esp_sntp_get_sync_status() == ESP_SNTP_SYNC_STATUS_IN_PROGRESS) {
+        ESP_LOGI(TAG, "SNTP sync in progress (slewing)");
     }
 
     time_t now = 0; time(&now);
@@ -65,7 +70,11 @@ static void init_sntp_if_needed(void)
 
     ESP_LOGI(TAG, "Initializing SNTP");
     esp_sntp_setoperatingmode(ESP_SNTP_OPMODE_POLL);
-    esp_sntp_set_sync_mode(SNTP_SYNC_MODE_SMOOTH);
+    /* Use immediate sync to avoid long waits/inconsistency on restart. */
+#ifndef ESP_SNTP_SYNC_MODE_IMMED
+#define ESP_SNTP_SYNC_MODE_IMMED SNTP_SYNC_MODE_IMMED
+#endif
+    esp_sntp_set_sync_mode(ESP_SNTP_SYNC_MODE_IMMED);
     esp_sntp_set_time_sync_notification_cb(time_sync_notification_cb);
 
     /* Configure servers */
@@ -74,9 +83,12 @@ static void init_sntp_if_needed(void)
     esp_sntp_servermode_dhcp(true);
 #endif
     /* Optional second server */
+    /* Respect SDK config for max servers to avoid out-of-range index */
+#if defined(CONFIG_LWIP_SNTP_MAX_SERVERS) && (CONFIG_LWIP_SNTP_MAX_SERVERS > 1)
     if (strlen(CONFIG_IAQ_NTP_SERVER1) > 0) {
         esp_sntp_setservername(1, CONFIG_IAQ_NTP_SERVER1);
     }
+#endif
 
     esp_sntp_init();
     s_sntp_started = true;
@@ -103,6 +115,17 @@ esp_err_t time_sync_init(iaq_system_context_t *ctx)
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) {
         return err;
     }
+
+    /* If clock already looks sane (e.g., preserved across reboot), mark as synced. */
+    time_t now = 0; time(&now);
+    if (now >= 1577836800L) {
+        s_time_set = true;
+        if (s_ctx && s_ctx->event_group) {
+            xEventGroupSetBits(s_ctx->event_group, TIME_SYNCED_BIT);
+        }
+        esp_event_post(IAQ_EVENT, IAQ_EVENT_TIME_SYNCED, NULL, 0, 0);
+        ESP_LOGI(TAG, "Initial clock is sane; marking time as synced");
+    }
     ESP_LOGI(TAG, "Time sync initialized (TZ=%s)", CONFIG_IAQ_TZ_STRING);
     return ESP_OK;
 }
@@ -115,8 +138,13 @@ esp_err_t time_sync_start(void)
 
 bool time_sync_is_set(void)
 {
+    /* Prefer explicit sync signal if available for consistency */
+    if (s_ctx && s_ctx->event_group) {
+        EventBits_t bits = xEventGroupGetBits(s_ctx->event_group);
+        if ((bits & TIME_SYNCED_BIT) != 0) return true;
+    }
+    /* Fallback: consider time valid if beyond Jan 1, 2020 (1577836800) */
     time_t now = 0; time(&now);
-    /* Consider time valid if beyond Jan 1, 2020 (1577836800) */
     return now >= 1577836800L;
 }
 
