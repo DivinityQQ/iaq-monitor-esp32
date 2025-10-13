@@ -10,7 +10,7 @@ set(EXTRA_COMPONENT_DIRS "${CMAKE_CURRENT_LIST_DIR}/components/thirdparty/sensir
 include($ENV{IDF_PATH}/tools/cmake/project.cmake)
 
 # Set project name and version
-project(iaq-monitor VERSION 0.6.3)
+project(iaq-monitor VERSION 0.7.2)
 
 # Project-wide compile options
 idf_build_set_property(COMPILE_OPTIONS "-Wall" APPEND)
