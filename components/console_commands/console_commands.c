@@ -761,6 +761,125 @@ static int cmd_version(int argc, char **argv)
     return 0;
 }
 
+/* ==================== DISPLAY COMMAND ==================== */
+#if CONFIG_IAQ_OLED_ENABLE
+#include "display_oled/display_ui.h"
+#include "display_oled/display_driver.h"
+
+static int cmd_display(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: display <subcommand>\n");
+        printf("Subcommands:\n");
+        printf("  status                - Show display status\n");
+        printf("  on                    - Turn display on\n");
+        printf("  off                   - Turn display off\n");
+        printf("  next                  - Next screen\n");
+        printf("  prev                  - Previous screen\n");
+        printf("  screen <0-5>          - Jump to screen by index\n");
+        printf("  invert on|off|toggle  - Set or toggle display invert\n");
+        printf("  contrast <0-255>      - Set contrast level\n");
+        return 1;
+    }
+
+    const char *subcmd = argv[1];
+
+    if (strcmp(subcmd, "status") == 0) {
+        bool enabled = display_ui_is_enabled();
+        printf("Display: %s\n", enabled ? "on" : "off");
+        return 0;
+    }
+
+    if (strcmp(subcmd, "on") == 0) {
+        display_ui_set_enabled(true);
+        printf("Display turned on\n");
+        return 0;
+    }
+
+    if (strcmp(subcmd, "off") == 0) {
+        display_ui_set_enabled(false);
+        printf("Display turned off\n");
+        return 0;
+    }
+
+    if (strcmp(subcmd, "next") == 0) {
+        display_ui_next_screen();
+        printf("Advanced to next screen\n");
+        return 0;
+    }
+
+    if (strcmp(subcmd, "prev") == 0) {
+        display_ui_prev_screen();
+        printf("Advanced to previous screen\n");
+        return 0;
+    }
+
+    if (strcmp(subcmd, "screen") == 0) {
+        if (argc < 3) {
+            printf("Error: screen index required (0-5)\n");
+            return 1;
+        }
+        int idx = atoi(argv[2]);
+        if (idx < 0 || idx > 5) {
+            printf("Error: screen index must be 0-5\n");
+            return 1;
+        }
+        /* Navigate to desired screen */
+        for (int i = 0; i < idx; i++) {
+            display_ui_next_screen();
+        }
+        printf("Jumped to screen %d\n", idx);
+        return 0;
+    }
+
+    if (strcmp(subcmd, "invert") == 0) {
+        if (argc < 3) {
+            printf("Error: specify on, off, or toggle\n");
+            return 1;
+        }
+        const char *mode = argv[2];
+        if (strcmp(mode, "on") == 0) {
+            (void)display_driver_set_invert(true);
+            printf("Display invert: on\n");
+        } else if (strcmp(mode, "off") == 0) {
+            (void)display_driver_set_invert(false);
+            printf("Display invert: off\n");
+        } else if (strcmp(mode, "toggle") == 0) {
+            /* We don't have a getter, so just toggle by setting on then off in rapid succession won't work.
+             * For now, just inform user to use on/off explicitly */
+            printf("Note: Use 'on' or 'off' explicitly\n");
+        } else {
+            printf("Error: specify on, off, or toggle\n");
+            return 1;
+        }
+        return 0;
+    }
+
+    if (strcmp(subcmd, "contrast") == 0) {
+        if (argc < 3) {
+            printf("Error: contrast value required (0-255)\n");
+            return 1;
+        }
+        int contrast = atoi(argv[2]);
+        if (contrast < 0 || contrast > 255) {
+            printf("Error: contrast must be 0-255\n");
+            return 1;
+        }
+        esp_err_t err = display_driver_set_contrast((uint8_t)contrast);
+        if (err == ESP_OK) {
+            printf("Display contrast set to %d\n", contrast);
+        } else {
+            printf("Error setting contrast: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+        return 0;
+    }
+
+    printf("Error: unknown display subcommand: %s\n", subcmd);
+    return 1;
+}
+#endif /* CONFIG_IAQ_OLED_ENABLE */
+
 /* ==================== INITIALIZATION ==================== */
 esp_err_t console_commands_init(void)
 {
@@ -838,6 +957,17 @@ esp_err_t console_commands_init(void)
         .func = &cmd_version,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&version_cmd));
+
+#if CONFIG_IAQ_OLED_ENABLE
+    /* Register display command */
+    const esp_console_cmd_t display_cmd = {
+        .command = "display",
+        .help = "Display control commands",
+        .hint = NULL,
+        .func = &cmd_display,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&display_cmd));
+#endif
 
     /* Start console REPL */
     esp_console_dev_uart_config_t hw_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();

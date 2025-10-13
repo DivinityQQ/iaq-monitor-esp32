@@ -47,6 +47,15 @@ menu "OLED Display (SH1106)"
         help
             SH1106 contrast (0x81 command). Typical: 96–160.
 
+    config IAQ_OLED_I2C_FREQ_HZ
+        int "OLED I2C Clock Frequency (Hz)"
+        default 400000
+        range 10000 400000
+        depends on IAQ_OLED_ENABLE
+        help
+            I2C clock for the OLED device. Many SH1106/SSD1306 modules support
+            400 kHz (Fast mode). If you see bus issues, reduce to 100000.
+
     config IAQ_OLED_REFRESH_MS
         int "Refresh interval (ms)"
         default 500
@@ -103,4 +112,3 @@ menu "OLED Display (SH1106)"
     endmenu
 
 endmenu
-

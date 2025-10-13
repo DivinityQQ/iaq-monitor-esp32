@@ -25,6 +25,9 @@ bool display_ui_is_enabled(void);
 void display_ui_next_screen(void);
 void display_ui_prev_screen(void);
 
+/* Wake display for specified seconds (used during night mode). */
+void display_ui_wake_for_seconds(uint32_t seconds);
+
 #ifdef __cplusplus
 }
 #endif

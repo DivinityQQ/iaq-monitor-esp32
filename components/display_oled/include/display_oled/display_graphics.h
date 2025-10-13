@@ -3,6 +3,7 @@
 #define DISPLAY_GRAPHICS_H
 
 #include <stdint.h>
+#include <stdbool.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -37,6 +38,21 @@ void display_gfx_draw_text_8x16_page(uint8_t page, uint8_t *page_buf,
                                      int x_px, int y_px,
                                      const char *text,
                                      const display_font_t *font);
+
+/* Draw horizontal bar using byte-mask fill (optimized for page-aligned bars).
+ * mask: 0xFF = full 8px height, 0x0F = bottom 4px, 0xF0 = top 4px, etc.
+ * Adds tick marks every 16 pixels for scale reference. */
+void display_gfx_draw_hbar(uint8_t *page_buf, int x_px, int width, uint8_t mask);
+
+/* Draw 8x8 icon at x position with optional invert (reuse bitmaps for dark/light). */
+void display_gfx_draw_icon(uint8_t *page_buf, int x_px, const uint8_t icon[8], bool invert);
+
+/* Draw horizontal line (page-aligned top or bottom edge).
+ * top=true: draw at top of page (bit 0), top=false: draw at bottom (bit 7) */
+void display_gfx_draw_hline(uint8_t *page_buf, int x_px, int width, bool top);
+
+/* Compute 16-bit rolling hash of page buffer for change detection. */
+uint16_t display_gfx_page_hash(const uint8_t *page_buf);
 
 #ifdef __cplusplus
 }

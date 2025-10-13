@@ -4,9 +4,11 @@ idf_component_register(
         "display_graphics.c"
         "display_ui.c"
         "display_input.c"
+        "display_util.c"
     INCLUDE_DIRS
         "include"
         "fonts"
+        "."
     PRIV_INCLUDE_DIRS "../../main"
     REQUIRES
         freertos
@@ -16,4 +18,5 @@ idf_component_register(
         time_sync
         iaq_data
         sensor_drivers
+        sensor_coordinator
 )

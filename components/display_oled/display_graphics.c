@@ -1,6 +1,7 @@
 /* components/display_oled/display_graphics.c */
 #include "display_oled/display_graphics.h"
 #include <string.h>
+#include <stdbool.h>
 
 /* Blit an 8x8 tile (u8x8 format: 8 bytes, one per column, LSB at top) at x_px */
 void display_gfx_blit_tile(uint8_t *page_buf, int x_px, const uint8_t tile[8])
@@ -95,5 +96,70 @@ void display_gfx_draw_text_8x16_page(uint8_t page, uint8_t *page_buf,
         x += 8;
         if (x >= 128) break;
     }
+}
+
+void display_gfx_draw_hbar(uint8_t *page_buf, int x_px, int width, uint8_t mask)
+{
+    if (!page_buf || width <= 0) return;
+
+    for (int i = 0; i < width && (x_px + i) < 128; i++) {
+        int x = x_px + i;
+        if (x >= 0) {
+            page_buf[x] |= mask;
+        }
+    }
+
+    /* Add tick marks every 16 pixels for scale reference (clear bit 3) */
+    for (int tick = 0; tick * 16 < width; tick++) {
+        int tx = x_px + tick * 16;
+        if (tx >= 0 && tx < 128) {
+            page_buf[tx] &= ~(1 << 3);
+        }
+    }
+}
+
+void display_gfx_draw_icon(uint8_t *page_buf, int x_px, const uint8_t icon[8], bool invert)
+{
+    if (!page_buf || !icon) return;
+    if (x_px < 0 || x_px > 120) return;
+
+    for (int col = 0; col < 8; ++col) {
+        int x = x_px + col;
+        if ((unsigned)x < 128U) {
+            uint8_t byte = icon[col];
+            if (invert) byte = ~byte;
+            page_buf[x] |= byte;
+        }
+    }
+}
+
+void display_gfx_draw_hline(uint8_t *page_buf, int x_px, int width, bool top)
+{
+    if (!page_buf || width <= 0) return;
+
+    uint8_t mask = top ? 0x01 : 0x80;
+
+    for (int i = 0; i < width && (x_px + i) < 128; i++) {
+        int x = x_px + i;
+        if (x >= 0) {
+            page_buf[x] |= mask;
+        }
+    }
+}
+
+uint16_t display_gfx_page_hash(const uint8_t *page_buf)
+{
+    if (!page_buf) return 0;
+
+    /* Simple 16-bit rolling hash (FNV-1a style) */
+    uint16_t hash = 0x811C;
+
+    for (int i = 0; i < 128; i++) {
+        hash ^= page_buf[i];
+        hash *= 0x0101;
+        hash ^= (hash >> 8);
+    }
+
+    return hash;
 }
 
