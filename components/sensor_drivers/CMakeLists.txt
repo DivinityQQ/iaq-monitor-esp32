@@ -17,5 +17,5 @@ endif()
 idf_component_register(
     SRCS ${SRCS}
     INCLUDE_DIRS "include"
-    REQUIRES driver esp_timer sensirion nvs_flash
+    REQUIRES driver esp_timer sensirion
 )

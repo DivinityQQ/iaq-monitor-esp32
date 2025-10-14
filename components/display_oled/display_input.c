@@ -46,10 +46,21 @@ esp_err_t display_input_init(void)
         .intr_type = GPIO_INTR_ANYEDGE,
     };
     esp_err_t err = gpio_config(&io);
-    if (err != ESP_OK) return err;
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to configure button GPIO%d: %s", CONFIG_IAQ_OLED_BUTTON_GPIO, esp_err_to_name(err));
+        return err;
+    }
     err = gpio_install_isr_service(0);
     if (err != ESP_OK && err != ESP_ERR_INVALID_STATE) return err;
-    return gpio_isr_handler_add(CONFIG_IAQ_OLED_BUTTON_GPIO, gpio_isr, NULL);
+    err = gpio_isr_handler_add(CONFIG_IAQ_OLED_BUTTON_GPIO, gpio_isr, NULL);
+    if (err != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to add ISR handler for GPIO%d: %s", CONFIG_IAQ_OLED_BUTTON_GPIO, esp_err_to_name(err));
+        return err;
+    }
+    ESP_LOGI(TAG, "Button input initialized (GPIO%d, %s)",
+             CONFIG_IAQ_OLED_BUTTON_GPIO,
+             CONFIG_IAQ_OLED_BUTTON_ACTIVE_LOW ? "active-low" : "active-high");
+    return ESP_OK;
 }
 
 display_button_event_t display_input_poll_event(void)

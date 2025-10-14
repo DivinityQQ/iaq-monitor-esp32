@@ -18,6 +18,7 @@
 #include "mqtt_manager.h"
 #include "sensor_coordinator.h"
 #include "s8_driver.h"
+/* SGP41 baseline ops removed; no direct console hooks needed */
 
 static const char *TAG = "CONSOLE_CMD";
 
@@ -654,6 +655,7 @@ static int cmd_sensor(int argc, char **argv)
         printf("  cadence [set <sensor> <ms>] - Show or set cadences\n");
         printf("  s8 status              - Show S8 diagnostics\n");
         printf("  s8 abc <on|off> [hours]- Enable/disable S8 ABC (period in hours)\n");
+        /* SGP41 baseline ops removed */
         return 0;
     }
 
