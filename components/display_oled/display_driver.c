@@ -20,6 +20,18 @@ static uint8_t s_column_offset = 0;
 static uint8_t s_contrast = 96;
 static uint8_t s_rot_180 = 0; /* 0 or 1 */
 
+static void drop_device(void)
+{
+    if (s_dev) {
+        esp_err_t err = i2c_master_bus_rm_device(s_dev);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to remove SH1106 device: %s", esp_err_to_name(err));
+        }
+        s_dev = NULL;
+    }
+    s_inited = false;
+}
+
 static esp_err_t sh1106_tx(const uint8_t *bytes, size_t len)
 {
     if (!s_dev) return ESP_ERR_INVALID_STATE;
@@ -142,7 +154,7 @@ esp_err_t display_driver_init(void)
 
 esp_err_t display_driver_power(bool on)
 {
-    if (!s_dev) return ESP_ERR_INVALID_STATE;
+    if (!s_dev) return on ? ESP_ERR_INVALID_STATE : ESP_OK;
     return sh1106_cmd1(on ? 0xAF : 0xAE);
 }
 
@@ -176,6 +188,12 @@ esp_err_t display_driver_write_page(uint8_t page, const uint8_t *data128)
     return sh1106_data(data128, 128);
 }
 
+esp_err_t display_driver_reset(void)
+{
+    drop_device();
+    return display_driver_init();
+}
+
 #else /* CONFIG_IAQ_OLED_ENABLE */
 
 /* No-op stubs when OLED is disabled */
@@ -185,5 +203,6 @@ esp_err_t display_driver_set_contrast(uint8_t c) { (void)c; return ESP_OK; }
 esp_err_t display_driver_set_invert(bool inv) { (void)inv; return ESP_OK; }
 esp_err_t display_driver_set_rotation(int deg) { (void)deg; return ESP_OK; }
 esp_err_t display_driver_write_page(uint8_t page, const uint8_t *data128) { (void)page; (void)data128; return ESP_OK; }
+esp_err_t display_driver_reset(void) { return ESP_OK; }
 
 #endif /* CONFIG_IAQ_OLED_ENABLE */

@@ -841,11 +841,21 @@ static int cmd_display(int argc, char **argv)
         }
         const char *mode = argv[2];
         if (strcmp(mode, "on") == 0) {
-            (void)display_driver_set_invert(true);
-            printf("Display invert: on\n");
+            esp_err_t err = display_driver_set_invert(true);
+            if (err == ESP_OK) {
+                printf("Display invert: on\n");
+            } else {
+                printf("Error setting invert: %s\n", esp_err_to_name(err));
+                return 1;
+            }
         } else if (strcmp(mode, "off") == 0) {
-            (void)display_driver_set_invert(false);
-            printf("Display invert: off\n");
+            esp_err_t err = display_driver_set_invert(false);
+            if (err == ESP_OK) {
+                printf("Display invert: off\n");
+            } else {
+                printf("Error setting invert: %s\n", esp_err_to_name(err));
+                return 1;
+            }
         } else if (strcmp(mode, "toggle") == 0) {
             /* We don't have a getter, so just toggle by setting on then off in rapid succession won't work.
              * For now, just inform user to use on/off explicitly */

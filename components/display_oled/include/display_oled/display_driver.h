@@ -30,9 +30,11 @@ esp_err_t display_driver_set_rotation(int degrees);
 /** Write one 128-byte page to the display at the given page index (0..7). */
 esp_err_t display_driver_write_page(uint8_t page, const uint8_t *data128);
 
+/** Attempt to reset and reinitialize the display driver (drop + re-add device). */
+esp_err_t display_driver_reset(void);
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif /* DISPLAY_DRIVER_H */
-

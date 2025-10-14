@@ -56,6 +56,23 @@ typedef struct {
     uint16_t page_hash[8];  // Rolling hash per page
 } screen_cache_t;
 
+#define DISPLAY_ERROR_THRESHOLD      3
+#define DISPLAY_RETRY_INITIAL_MS  30000
+#define DISPLAY_RETRY_MAX_MS     300000
+
+typedef enum {
+    DISPLAY_DRV_STATE_UNINIT = 0,
+    DISPLAY_DRV_STATE_READY,
+    DISPLAY_DRV_STATE_ERROR,
+} display_driver_state_t;
+
+typedef struct {
+    display_driver_state_t state;
+    uint32_t error_count;
+    uint32_t retry_delay_ms;
+    int64_t next_retry_us;
+} display_driver_health_t;
+
 static iaq_system_context_t *s_ctx = NULL;
 static TaskHandle_t s_task = NULL;
 static esp_timer_handle_t s_wake_timer = NULL;
@@ -68,6 +85,16 @@ static display_font_t s_font_label = { .u8x8_font = u8x8_font_amstrad_cpc_extend
 static bool s_invert = false;
 static screen_cache_t s_cache[6];
 static volatile bool s_force_redraw = false;
+static display_driver_health_t s_driver_health = {
+    .state = DISPLAY_DRV_STATE_UNINIT,
+    .error_count = 0,
+    .retry_delay_ms = DISPLAY_RETRY_INITIAL_MS,
+    .next_retry_us = 0,
+};
+
+static void display_health_record_success(void);
+static void display_health_report_failure(const char *scope, esp_err_t err);
+static void display_health_try_recover(void);
 
 /* Forward renders */
 static void render_overview(uint8_t page, uint8_t *buf, bool full);
@@ -123,8 +150,75 @@ static void wake_timer_callback(void *arg)
     (void)arg;
     display_ui_set_enabled(false);
     s_invert = false;
-    (void)display_driver_set_invert(false);
+    if (s_driver_health.state == DISPLAY_DRV_STATE_READY) {
+        esp_err_t err = display_driver_set_invert(false);
+        if (err != ESP_OK) {
+            display_health_report_failure("set_invert", err);
+        }
+    }
     s_wake_active = false;
+}
+
+static void display_health_record_success(void)
+{
+    bool was_ready = (s_driver_health.state == DISPLAY_DRV_STATE_READY);
+    s_driver_health.state = DISPLAY_DRV_STATE_READY;
+    s_driver_health.error_count = 0;
+    s_driver_health.retry_delay_ms = DISPLAY_RETRY_INITIAL_MS;
+    s_driver_health.next_retry_us = 0;
+    if (!was_ready) {
+        ESP_LOGI(TAG, "Display driver ready");
+    }
+}
+
+static void display_health_report_failure(const char *scope, esp_err_t err)
+{
+    int64_t now = esp_timer_get_time();
+    if (s_driver_health.error_count < DISPLAY_ERROR_THRESHOLD) {
+        s_driver_health.error_count++;
+    }
+    ESP_LOGW(TAG, "Display %s failed: %s (%u/%u)", scope, esp_err_to_name(err),
+             (unsigned)s_driver_health.error_count, DISPLAY_ERROR_THRESHOLD);
+
+    if (s_driver_health.error_count >= DISPLAY_ERROR_THRESHOLD) {
+        if (s_driver_health.state != DISPLAY_DRV_STATE_ERROR) {
+            s_driver_health.state = DISPLAY_DRV_STATE_ERROR;
+            s_driver_health.next_retry_us = now + (int64_t)s_driver_health.retry_delay_ms * 1000;
+            ESP_LOGW(TAG, "Display entered ERROR state; retry in %u ms", s_driver_health.retry_delay_ms);
+        }
+        s_driver_health.error_count = DISPLAY_ERROR_THRESHOLD;
+    }
+}
+
+static void display_health_try_recover(void)
+{
+    if (s_driver_health.state != DISPLAY_DRV_STATE_ERROR) {
+        return;
+    }
+
+    int64_t now = esp_timer_get_time();
+    if (s_driver_health.next_retry_us != 0 && now < s_driver_health.next_retry_us) {
+        return;
+    }
+
+    esp_err_t err = display_driver_reset();
+    if (err == ESP_OK) {
+        display_health_record_success();
+        s_force_redraw = true;
+        if (!s_enabled) {
+            (void)display_driver_power(false);
+        }
+        return;
+    }
+
+    if (s_driver_health.retry_delay_ms < DISPLAY_RETRY_MAX_MS) {
+        uint32_t next = s_driver_health.retry_delay_ms * 2;
+        if (next > DISPLAY_RETRY_MAX_MS) next = DISPLAY_RETRY_MAX_MS;
+        s_driver_health.retry_delay_ms = next;
+    }
+    s_driver_health.next_retry_us = now + (int64_t)s_driver_health.retry_delay_ms * 1000;
+    ESP_LOGW(TAG, "Display recovery failed: %s (retry in %u ms)",
+             esp_err_to_name(err), s_driver_health.retry_delay_ms);
 }
 
 void display_ui_wake_for_seconds(uint32_t seconds)
@@ -141,10 +235,24 @@ void display_ui_wake_for_seconds(uint32_t seconds)
 void display_ui_set_enabled(bool on)
 {
     s_enabled = on;
-    (void)display_driver_power(on);
     if (on) {
         mark_activity();
         s_force_redraw = true;
+    }
+
+    if (on && s_driver_health.state == DISPLAY_DRV_STATE_ERROR) {
+        ESP_LOGW(TAG, "Display enable requested while driver recovering; deferring power-on");
+        return;
+    }
+
+    esp_err_t err = display_driver_power(on);
+    if (err != ESP_OK) {
+        display_health_report_failure("power", err);
+        return;
+    }
+
+    if (on) {
+        display_health_record_success();
     }
 }
 
@@ -251,6 +359,8 @@ static void display_task(void *arg)
     static int last_drawn_screen = -1;
 
     for (;;) {
+        display_health_try_recover();
+
         if (!s_enabled) {
             vTaskDelay(pdMS_TO_TICKS(200));
             continue;
@@ -273,8 +383,19 @@ static void display_task(void *arg)
         if (ev == DISPLAY_BTN_EVENT_SHORT) {
             display_ui_next_screen();
         } else if (ev == DISPLAY_BTN_EVENT_LONG) {
-            s_invert = !s_invert;
-            (void)display_driver_set_invert(s_invert);
+            if (s_driver_health.state == DISPLAY_DRV_STATE_READY) {
+                bool desired_invert = !s_invert;
+                esp_err_t err = display_driver_set_invert(desired_invert);
+                if (err == ESP_OK) {
+                    s_invert = desired_invert;
+                    display_health_record_success();
+                } else {
+                    display_health_report_failure("set_invert", err);
+                    s_force_redraw = true;
+                }
+            } else {
+                ESP_LOGW(TAG, "Invert toggle ignored: display driver not ready");
+            }
             mark_activity();
         }
 
@@ -286,6 +407,11 @@ static void display_task(void *arg)
                 display_ui_set_enabled(false);
                 continue;
             }
+        }
+
+        if (s_driver_health.state == DISPLAY_DRV_STATE_ERROR) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
         }
 
         /* Check if screen needs redraw */
@@ -301,6 +427,7 @@ static void display_task(void *arg)
 
         /* Clear force flag after use */
         bool force_page_write = screen_changed;
+        bool frame_failed = false;
         s_force_redraw = false;
 
         /* Render all pages with hash skip */
@@ -311,10 +438,24 @@ static void display_task(void *arg)
             /* Check page hash - skip I2C write if unchanged */
             uint16_t hash = display_gfx_page_hash(page_buf);
             if (force_page_write || hash != s_cache[idx].page_hash[page]) {
-                s_cache[idx].page_hash[page] = hash;
-                (void)display_driver_write_page(page, page_buf);
+                esp_err_t err = display_driver_write_page(page, page_buf);
+                if (err == ESP_OK) {
+                    s_cache[idx].page_hash[page] = hash;
+                } else {
+                    frame_failed = true;
+                    display_health_report_failure("write_page", err);
+                    s_force_redraw = true;
+                    break;
+                }
             }
         }
+
+        if (frame_failed) {
+            vTaskDelay(pdMS_TO_TICKS(200));
+            continue;
+        }
+
+        display_health_record_success();
 
         /* Sleep until next refresh check */
         vTaskDelay(pdMS_TO_TICKS(get_refresh_ms()));
@@ -859,7 +1000,14 @@ esp_err_t display_ui_init(iaq_system_context_t *ctx)
         return ESP_OK;
     }
 
-    ESP_RETURN_ON_ERROR(display_driver_init(), TAG, "driver init failed");
+    esp_err_t init_err = display_driver_init();
+    if (init_err != ESP_OK) {
+        ESP_LOGW(TAG, "Display driver init failed: %s", esp_err_to_name(init_err));
+        display_health_report_failure("init", init_err);
+    } else {
+        display_health_record_success();
+    }
+
     ESP_RETURN_ON_ERROR(display_input_init(), TAG, "input init failed");
 
     /* Create wake timer */
