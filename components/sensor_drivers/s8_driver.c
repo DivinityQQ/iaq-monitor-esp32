@@ -6,7 +6,6 @@
 #include "esp_timer.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
-#include "freertos/queue.h"
 #include <math.h>
 #include <string.h>
 
@@ -19,7 +18,6 @@ static const char *TAG = "S8_DRIVER";
 static bool s_initialized = false;
 static uart_port_t s_uart_port = (uart_port_t)CONFIG_IAQ_S8_UART_PORT;
 static uint8_t s_slave_addr = (uint8_t)CONFIG_IAQ_S8_ADDR;
-static QueueHandle_t s_uart_queue = NULL;
 
 /* ===== Modbus helpers (Senseair S8) ===== */
 /* Input registers (IR) numbers and addresses (addr = reg-1) */
@@ -157,7 +155,7 @@ esp_err_t s8_driver_init(void)
     int rx_gpio = CONFIG_IAQ_S8_RX_GPIO;
     int rx_buf_size = CONFIG_IAQ_S8_RX_BUF_SIZE;
 
-    esp_err_t ret = uart_bus_init_with_queue(uart_port, tx_gpio, rx_gpio, 9600, rx_buf_size, 8, &s_uart_queue);
+    esp_err_t ret = uart_bus_init(uart_port, tx_gpio, rx_gpio, 9600, rx_buf_size);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to initialize UART for S8: %s", esp_err_to_name(ret));
         return ret;

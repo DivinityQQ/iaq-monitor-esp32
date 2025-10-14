@@ -6,8 +6,6 @@ idf_component_register(
        
     INCLUDE_DIRS
         "include"
-    PRIV_INCLUDE_DIRS
-        "../../main"
     REQUIRES
         esp_wifi
         esp_netif
@@ -18,6 +16,7 @@ idf_component_register(
         system_context
         sensor_coordinator
         time_sync
+        app_config
     PRIV_REQUIRES
         esp_timer
         driver

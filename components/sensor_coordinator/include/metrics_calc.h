@@ -1,4 +1,4 @@
-/* components/sensor_coordinator/metrics_calc.h */
+/* components/sensor_coordinator/include/metrics_calc.h */
 #ifndef METRICS_CALC_H
 #define METRICS_CALC_H
 

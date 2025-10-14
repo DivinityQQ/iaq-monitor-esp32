@@ -18,4 +18,5 @@ idf_component_register(
         connectivity
         sensor_coordinator
         console_commands
+        app_config
 )

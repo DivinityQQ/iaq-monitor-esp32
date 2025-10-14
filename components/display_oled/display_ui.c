@@ -608,8 +608,9 @@ static void render_environment(uint8_t page, uint8_t *buf, bool full)
 
     /* Page 1-2: Temperature (8×16) */
     if (page >= 1 && page <= 2) {
-        fmt_float(str, sizeof(str), temp, 1, "---");
-        strcat(str, " C");
+        char tmp[16];
+        fmt_float(tmp, sizeof(tmp), temp, 1, "---");
+        snprintf(str, sizeof(str), "%s C", tmp);
         display_gfx_draw_text_8x16_page(page, buf, 0, 8, str, &s_font_large);
     }
 
@@ -762,8 +763,9 @@ static void render_co2_detail(uint8_t page, uint8_t *buf, bool full)
 
     /* Page 1-3: Large CO2 (8×16, spans 2 pages) */
     if (page >= 1 && page <= 3) {
-        fmt_float(str, sizeof(str), co2, 0, "---");
-        strcat(str, " ppm");
+        char tmp[16];
+        fmt_float(tmp, sizeof(tmp), co2, 0, "---");
+        snprintf(str, sizeof(str), "%s ppm", tmp);
         display_gfx_draw_text_8x16_page(page, buf, 0, 8, str, &s_font_large);
     }
 

@@ -1,4 +1,4 @@
-/* components/sensor_coordinator/sensor_fusion.h */
+/* components/sensor_coordinator/include/sensor_fusion.h */
 #ifndef SENSOR_FUSION_H
 #define SENSOR_FUSION_H
 

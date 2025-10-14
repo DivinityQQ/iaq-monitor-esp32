@@ -9,14 +9,15 @@ idf_component_register(
         "include"
         "fonts"
         "."
-    PRIV_INCLUDE_DIRS "../../main"
     REQUIRES
         freertos
         driver
+        esp_event
         esp_timer
         system_context
         time_sync
         iaq_data
         sensor_drivers
         sensor_coordinator
+        app_config
 )

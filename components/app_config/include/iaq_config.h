@@ -1,4 +1,4 @@
-/* main/iaq_config.h */
+/* components/app_config/include/iaq_config.h */
 #ifndef IAQ_CONFIG_H
 #define IAQ_CONFIG_H
 
