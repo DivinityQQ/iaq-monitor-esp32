@@ -155,7 +155,17 @@ esp_err_t display_driver_init(void)
 esp_err_t display_driver_power(bool on)
 {
     if (!s_dev) return on ? ESP_ERR_INVALID_STATE : ESP_OK;
-    return sh1106_cmd1(on ? 0xAF : 0xAE);
+    if (on) {
+        /* Enable DC-DC, then display ON */
+        const uint8_t dcdc_on[2] = { 0xAD, 0x8B };
+        ESP_RETURN_ON_ERROR(sh1106_cmds(dcdc_on, sizeof(dcdc_on)), TAG, "dcdc on");
+        return sh1106_cmd1(0xAF);
+    } else {
+        /* Display OFF, then disable DC-DC to save power */
+        ESP_RETURN_ON_ERROR(sh1106_cmd1(0xAE), TAG, "display off");
+        const uint8_t dcdc_off[2] = { 0xAD, 0x8A };
+        return sh1106_cmds(dcdc_off, sizeof(dcdc_off));
+    }
 }
 
 esp_err_t display_driver_set_contrast(uint8_t contrast)

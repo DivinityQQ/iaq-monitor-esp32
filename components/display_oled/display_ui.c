@@ -78,6 +78,9 @@ static TaskHandle_t s_task = NULL;
 static esp_timer_handle_t s_wake_timer = NULL;
 static volatile bool s_wake_active = false;
 static volatile bool s_enabled = true;
+/* Track night mode and whether we powered off due to night */
+static bool s_prev_night = false;
+static bool s_night_forced_off = false;
 static volatile int s_screen_idx = 0;
 static volatile int64_t s_last_activity_us = 0;
 static display_font_t s_font_large = { .u8x8_font = u8x8_font_chroma48medium8_r };
@@ -91,6 +94,12 @@ static display_driver_health_t s_driver_health = {
     .retry_delay_ms = DISPLAY_RETRY_INITIAL_MS,
     .next_retry_us = 0,
 };
+
+/* Task notification bit masks */
+#define DISP_NOTIFY_BTN_SHORT      (1u << 0)
+#define DISP_NOTIFY_BTN_LONG       (1u << 1)
+#define DISP_NOTIFY_WAKE_TIMER     (1u << 2)
+#define DISP_NOTIFY_STATE_CHANGE   (1u << 3)
 
 static void display_health_record_success(void);
 static void display_health_report_failure(const char *scope, esp_err_t err);
@@ -145,18 +154,56 @@ static void mark_activity(void)
     s_last_activity_us = esp_timer_get_time();
 }
 
+/* Compute ticks until next night boundary (start or end hour).
+ * Returns a conservative timeout (60s) if time is not synced or schedule disabled. */
+static TickType_t ticks_until_next_night_boundary(void)
+{
+    /* Require time synced */
+    if (!s_ctx || !s_ctx->event_group) return pdMS_TO_TICKS(60000);
+    EventBits_t bits = xEventGroupGetBits(s_ctx->event_group);
+    if ((bits & TIME_SYNCED_BIT) == 0) return pdMS_TO_TICKS(60000);
+
+    int start = CONFIG_IAQ_OLED_NIGHT_START_H;
+    int end   = CONFIG_IAQ_OLED_NIGHT_END_H;
+    if (start == end) {
+        /* Disabled schedule: no boundary matters */
+        return pdMS_TO_TICKS(3600000); /* 1 hour fallback */
+    }
+
+    time_t now; time(&now);
+    struct tm t; localtime_r(&now, &t);
+    int now_s = t.tm_hour * 3600 + t.tm_min * 60 + t.tm_sec;
+    int start_s = start * 3600;
+    int end_s   = end   * 3600;
+
+    bool in_night;
+    if (start < end) {
+        in_night = (now_s >= start_s && now_s < end_s);
+    } else {
+        in_night = (now_s >= start_s || now_s < end_s);
+    }
+
+    int target_s = in_night ? end_s : start_s;
+    int delta_s;
+    if (target_s <= now_s) {
+        delta_s = (24 * 3600 - now_s) + target_s; /* wrap to next day */
+    } else {
+        delta_s = target_s - now_s;
+    }
+    if (delta_s < 1) delta_s = 1; /* avoid immediate wake */
+
+    uint32_t ms = (uint32_t)delta_s * 1000U;
+    return pdMS_TO_TICKS(ms);
+}
+
 static void wake_timer_callback(void *arg)
 {
     (void)arg;
-    display_ui_set_enabled(false);
-    s_invert = false;
-    if (s_driver_health.state == DISPLAY_DRV_STATE_READY) {
-        esp_err_t err = display_driver_set_invert(false);
-        if (err != ESP_OK) {
-            display_health_report_failure("set_invert", err);
-        }
-    }
+    /* Mark wake window expired and notify display task to handle power-off if still night. */
     s_wake_active = false;
+    if (s_task) {
+        (void)xTaskNotify(s_task, DISP_NOTIFY_WAKE_TIMER, eSetBits);
+    }
 }
 
 static void display_health_record_success(void)
@@ -226,18 +273,28 @@ void display_ui_wake_for_seconds(uint32_t seconds)
     display_ui_set_enabled(true);
     s_wake_active = true;
     if (s_wake_timer) {
-        /* Restart the one-shot timer */
+        /* Restart the one-shot timer; 0 seconds means indefinite wake (timer stopped). */
         esp_timer_stop(s_wake_timer);
-        esp_timer_start_once(s_wake_timer, (uint64_t)seconds * 1000000ULL);
+        if (seconds > 0) {
+            esp_timer_start_once(s_wake_timer, (uint64_t)seconds * 1000000ULL);
+        }
     }
 }
 
 void display_ui_set_enabled(bool on)
 {
+    bool prev_enabled = s_enabled;
     s_enabled = on;
     if (on) {
         mark_activity();
         s_force_redraw = true;
+        /* Manual enable clears night-forced flag so we do not auto-toggle at sunrise. */
+        s_night_forced_off = false;
+    } else {
+        s_wake_active = false;
+        if (s_wake_timer) {
+            esp_timer_stop(s_wake_timer);
+        }
     }
 
     if (on && s_driver_health.state == DISPLAY_DRV_STATE_ERROR) {
@@ -253,6 +310,10 @@ void display_ui_set_enabled(bool on)
 
     if (on) {
         display_health_record_success();
+    }
+
+    if (s_task && (on != prev_enabled)) {
+        (void)xTaskNotify(s_task, DISP_NOTIFY_STATE_CHANGE, eSetBits);
     }
 }
 
@@ -271,6 +332,27 @@ void display_ui_prev_screen(void)
     if (s_screen_idx < 0) s_screen_idx = (int)NUM_SCREENS - 1;
     mark_activity();
     s_force_redraw = true;
+}
+
+esp_err_t display_ui_set_screen(int idx)
+{
+    if (idx < 0 || idx >= (int)NUM_SCREENS) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    s_screen_idx = idx;
+    mark_activity();
+    s_force_redraw = true;
+    return ESP_OK;
+}
+
+int display_ui_get_screen(void)
+{
+    return s_screen_idx;
+}
+
+bool display_ui_is_wake_active(void)
+{
+    return s_wake_active;
 }
 
 /* Check if screen data has changed enough to require redraw */
@@ -361,13 +443,75 @@ static void display_task(void *arg)
     for (;;) {
         display_health_try_recover();
 
-        if (!s_enabled) {
-            vTaskDelay(pdMS_TO_TICKS(200));
-            continue;
+        /* Detect night window transitions and manage display power accordingly */
+        bool now_night = is_night_now();
+        if (now_night != s_prev_night) {
+            if (now_night) {
+                /* Entering night: ensure display is off unless explicitly woken */
+                s_wake_active = false;
+                if (s_enabled) {
+                    display_ui_set_enabled(false);
+                    s_night_forced_off = true;
+                }
+            } else {
+                /* Exiting night: if we powered off due to night, bring it back */
+                s_wake_active = false;
+                if (s_night_forced_off) {
+                    display_ui_set_enabled(true);
+                    s_night_forced_off = false;
+                }
+            }
+            s_prev_night = now_night;
         }
 
-        /* Handle input events */
-        display_button_event_t ev = display_input_poll_event();
+        /* Choose wait time based on state to minimize polling */
+        TickType_t wait_ticks;
+        if (!s_enabled) {
+            /* If we turned off due to night, sleep until the next boundary; otherwise wait indefinitely. */
+            wait_ticks = s_night_forced_off ? ticks_until_next_night_boundary() : portMAX_DELAY;
+        } else if (now_night && !s_wake_active) {
+            /* During night gating (not woken), wait until next boundary. */
+            wait_ticks = ticks_until_next_night_boundary();
+        } else {
+            /* Active rendering: wait up to next refresh, but notifications wake immediately. */
+            wait_ticks = pdMS_TO_TICKS(get_refresh_ms());
+        }
+
+        /* Wait for button/timer notifications or timeout for periodic work */
+        uint32_t notif = 0;
+        (void)xTaskNotifyWait(0, UINT32_MAX, &notif, wait_ticks);
+
+        /* Handle wake timer expiration */
+        if (notif & DISP_NOTIFY_WAKE_TIMER) {
+            if (is_night_now()) {
+                display_ui_set_enabled(false);
+                s_invert = false;
+                if (s_driver_health.state == DISPLAY_DRV_STATE_READY) {
+                    (void)display_driver_set_invert(false);
+                }
+            }
+        }
+
+        /* Drain pending button state and merge with notification bits */
+        display_button_event_t pending = display_input_poll_event();
+        display_button_event_t ev = DISPLAY_BTN_EVENT_NONE;
+        if ((notif & DISP_NOTIFY_BTN_LONG) || pending == DISPLAY_BTN_EVENT_LONG) {
+            ev = DISPLAY_BTN_EVENT_LONG;
+        } else if ((notif & DISP_NOTIFY_BTN_SHORT) || pending == DISPLAY_BTN_EVENT_SHORT) {
+            ev = DISPLAY_BTN_EVENT_SHORT;
+        }
+
+        /* If display is currently disabled, allow button to wake/re-enable */
+        if (!s_enabled) {
+            if (ev == DISPLAY_BTN_EVENT_SHORT) {
+                if (is_night_now()) {
+                    display_ui_wake_for_seconds(CONFIG_IAQ_OLED_WAKE_SECS);
+                } else {
+                    display_ui_set_enabled(true);
+                }
+            }
+            continue;
+        }
 
         /* Night mode handling: allow rendering only if woken */
         if (is_night_now() && !s_wake_active) {
@@ -375,7 +519,6 @@ static void display_task(void *arg)
                 display_ui_wake_for_seconds(CONFIG_IAQ_OLED_WAKE_SECS);
             }
             /* Ignore long press at night */
-            vTaskDelay(pdMS_TO_TICKS(200));
             continue;
         }
 
@@ -401,7 +544,7 @@ static void display_task(void *arg)
 
         /* Auto-off if idle */
         int idle_ms = CONFIG_IAQ_OLED_IDLE_TIMEOUT_MS;
-        if (idle_ms > 0) {
+        if (idle_ms > 0 && !s_wake_active) {
             int64_t now = esp_timer_get_time();
             if (now - s_last_activity_us > (int64_t)idle_ms * 1000) {
                 display_ui_set_enabled(false);
@@ -420,8 +563,6 @@ static void display_task(void *arg)
         bool needs_redraw = check_screen_dirty(idx) || screen_changed;
 
         if (!needs_redraw) {
-            /* Fast poll without redraw */
-            vTaskDelay(pdMS_TO_TICKS(100));
             continue;
         }
 
@@ -456,9 +597,6 @@ static void display_task(void *arg)
         }
 
         display_health_record_success();
-
-        /* Sleep until next refresh check */
-        vTaskDelay(pdMS_TO_TICKS(get_refresh_ms()));
 
         /* Update last drawn screen after a render pass */
         last_drawn_screen = idx;
@@ -1042,6 +1180,9 @@ esp_err_t display_ui_start(void)
                                             NULL, TASK_PRIORITY_DISPLAY, &s_task, TASK_CORE_DISPLAY);
     if (ok != pdPASS) return ESP_ERR_NO_MEM;
 
+    /* Route button ISR events directly to display task via notifications */
+    display_input_set_notify_task(s_task, DISP_NOTIFY_BTN_SHORT, DISP_NOTIFY_BTN_LONG);
+
     ESP_LOGI(TAG, "Display task started (core %d, priority %d)", TASK_CORE_DISPLAY, TASK_PRIORITY_DISPLAY);
     return ESP_OK;
 }
@@ -1055,5 +1196,8 @@ bool display_ui_is_enabled(void) { return false; }
 void display_ui_next_screen(void) {}
 void display_ui_prev_screen(void) {}
 void display_ui_wake_for_seconds(uint32_t seconds) { (void)seconds; }
+esp_err_t display_ui_set_screen(int idx) { (void)idx; return ESP_ERR_NOT_SUPPORTED; }
+int display_ui_get_screen(void) { return 0; }
+bool display_ui_is_wake_active(void) { return false; }
 
 #endif /* CONFIG_IAQ_OLED_ENABLE */

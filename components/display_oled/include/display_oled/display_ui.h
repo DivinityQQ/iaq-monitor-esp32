@@ -28,9 +28,17 @@ void display_ui_prev_screen(void);
 /* Wake display for specified seconds (used during night mode). */
 void display_ui_wake_for_seconds(uint32_t seconds);
 
+/* Jump directly to a screen index (0-based). */
+esp_err_t display_ui_set_screen(int idx);
+
+/* Get current screen index. */
+int display_ui_get_screen(void);
+
+/* Whether a wake override (button/command) is active. */
+bool display_ui_is_wake_active(void);
+
 #ifdef __cplusplus
 }
 #endif
 
 #endif /* DISPLAY_UI_H */
-

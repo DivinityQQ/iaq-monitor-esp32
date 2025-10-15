@@ -774,7 +774,8 @@ static int cmd_display(int argc, char **argv)
         printf("Usage: display <subcommand>\n");
         printf("Subcommands:\n");
         printf("  status                - Show display status\n");
-        printf("  on                    - Turn display on\n");
+        printf("  on                    - Wake display indefinitely\n");
+        printf("  wake <seconds>        - Wake display for specified seconds (0 = indefinite)\n");
         printf("  off                   - Turn display off\n");
         printf("  next                  - Next screen\n");
         printf("  prev                  - Previous screen\n");
@@ -788,13 +789,35 @@ static int cmd_display(int argc, char **argv)
 
     if (strcmp(subcmd, "status") == 0) {
         bool enabled = display_ui_is_enabled();
-        printf("Display: %s\n", enabled ? "on" : "off");
+        printf("Display: %s (screen %d, override=%s)\n",
+               enabled ? "on" : "off",
+               display_ui_get_screen(),
+               display_ui_is_wake_active() ? "yes" : "no");
         return 0;
     }
 
     if (strcmp(subcmd, "on") == 0) {
-        display_ui_set_enabled(true);
-        printf("Display turned on\n");
+        display_ui_wake_for_seconds(0);
+        printf("Display woken (indefinite)\n");
+        return 0;
+    }
+
+    if (strcmp(subcmd, "wake") == 0) {
+        if (argc < 3) {
+            printf("Error: wake duration required (seconds, 0 = indefinite)\n");
+            return 1;
+        }
+        int seconds = atoi(argv[2]);
+        if (seconds < 0) {
+            printf("Error: wake duration must be >= 0\n");
+            return 1;
+        }
+        display_ui_wake_for_seconds((uint32_t)seconds);
+        if (seconds == 0) {
+            printf("Display woken (indefinite)\n");
+        } else {
+            printf("Display woken for %d second%s\n", seconds, seconds == 1 ? "" : "s");
+        }
         return 0;
     }
 
@@ -826,9 +849,10 @@ static int cmd_display(int argc, char **argv)
             printf("Error: screen index must be 0-5\n");
             return 1;
         }
-        /* Navigate to desired screen */
-        for (int i = 0; i < idx; i++) {
-            display_ui_next_screen();
+        esp_err_t err = display_ui_set_screen(idx);
+        if (err != ESP_OK) {
+            printf("Error: failed to set screen (%s)\n", esp_err_to_name(err));
+            return 1;
         }
         printf("Jumped to screen %d\n", idx);
         return 0;

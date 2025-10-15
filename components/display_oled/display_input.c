@@ -14,6 +14,9 @@ static const char *TAG = "OLED_IN";
 
 static volatile TickType_t s_last_edge_ticks = 0;
 static volatile display_button_event_t s_pending = DISPLAY_BTN_EVENT_NONE;
+static TaskHandle_t s_notify_task = NULL;
+static uint32_t s_notify_bit_short = 0;
+static uint32_t s_notify_bit_long = 0;
 
 static void IRAM_ATTR gpio_isr(void *arg)
 {
@@ -31,7 +34,19 @@ static void IRAM_ATTR gpio_isr(void *arg)
         TickType_t dt_ticks = now_ticks - s_last_edge_ticks;
         int32_t dt_ms = (int32_t)(dt_ticks * portTICK_PERIOD_MS);
         if (dt_ms >= CONFIG_IAQ_OLED_BUTTON_DEBOUNCE_MS) {
-            s_pending = (dt_ms >= CONFIG_IAQ_OLED_BUTTON_LONG_MS) ? DISPLAY_BTN_EVENT_LONG : DISPLAY_BTN_EVENT_SHORT;
+            display_button_event_t ev = (dt_ms >= CONFIG_IAQ_OLED_BUTTON_LONG_MS) ? DISPLAY_BTN_EVENT_LONG : DISPLAY_BTN_EVENT_SHORT;
+            s_pending = ev;
+            /* Notify target task if registered */
+            if (s_notify_task) {
+                BaseType_t hpwoken = pdFALSE;
+                uint32_t bits = (ev == DISPLAY_BTN_EVENT_SHORT) ? s_notify_bit_short : s_notify_bit_long;
+                if (bits) {
+                    (void)xTaskNotifyFromISR(s_notify_task, bits, eSetBits, &hpwoken);
+                    if (hpwoken == pdTRUE) {
+                        portYIELD_FROM_ISR();
+                    }
+                }
+            }
         }
     }
 }
@@ -70,9 +85,18 @@ display_button_event_t display_input_poll_event(void)
     return ev;
 }
 
+void display_input_set_notify_task(TaskHandle_t task, uint32_t short_press_bit, uint32_t long_press_bit)
+{
+    s_notify_task = task;
+    s_notify_bit_short = short_press_bit;
+    s_notify_bit_long = long_press_bit;
+}
+
 #else /* stubs if OLED disabled or button GPIO < 0 */
 
 esp_err_t display_input_init(void) { return ESP_OK; }
 display_button_event_t display_input_poll_event(void) { return DISPLAY_BTN_EVENT_NONE; }
+void display_input_set_notify_task(TaskHandle_t task, uint32_t short_press_bit, uint32_t long_press_bit)
+{ (void)task; (void)short_press_bit; (void)long_press_bit; }
 
 #endif /* CONFIG_IAQ_OLED_ENABLE && (CONFIG_IAQ_OLED_BUTTON_GPIO >= 0) */
