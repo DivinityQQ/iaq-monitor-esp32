@@ -37,6 +37,16 @@ menu "Sensor Hardware Configuration"
                 I2C transaction timeout in milliseconds.
                 Default: 1000ms.
 
+        config IAQ_I2C_INTERNAL_PULLUPS
+            bool "Enable internal pull-ups (SDA/SCL)"
+            default y
+            help
+                Enable ESP32 internal pull-ups on the I2C SDA and SCL pins.
+                Internal pulls are weak (~20–50 kΩ typ) and are not sufficient
+                alone for fast edges at higher speeds or with higher bus
+                capacitance. Keep enabled for dev bring-up; disable in production
+                when relying on proper external pull-ups on your I2C modules/PCB.
+
     endmenu
 
     menu "BMP280 Barometer"

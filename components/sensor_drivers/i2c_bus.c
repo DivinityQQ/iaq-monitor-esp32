@@ -20,7 +20,7 @@ esp_err_t i2c_bus_init(void)
         .scl_io_num = CONFIG_IAQ_I2C_SCL_GPIO,
         .sda_io_num = CONFIG_IAQ_I2C_SDA_GPIO,
         .glitch_ignore_cnt = 7,
-        .flags.enable_internal_pullup = true,
+        .flags.enable_internal_pullup = CONFIG_IAQ_I2C_INTERNAL_PULLUPS,
     };
 
     esp_err_t ret = i2c_new_master_bus(&bus_config, &s_bus_handle);
