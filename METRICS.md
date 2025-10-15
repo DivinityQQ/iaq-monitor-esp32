@@ -201,22 +201,27 @@ Where:
 
 ## Pressure Trend
 
-**Window:** 3 hours (last 3 hours of samples at 2.5-min intervals)
+**Window:** Configurable via `CONFIG_METRICS_PRESSURE_TREND_WINDOW_HR` (default 3 h, sampled ~150 s)  
 **Location:** `update_pressure_trend()` in `metrics_calc.c`
 
 ### Algorithm
 
-1. Find oldest sample within 3-hour window
-2. Compute delta: `Δp = p_latest - p_oldest`
-3. Classify trend:
+1. Buffer fused pressure readings in a 6-hour ring.
+2. Collect samples within the configured window; require at least 50% of the window (≥ 0.5 h) and ≥ 3 points.
+3. Convert to hPa, apply a 3-point median filter, and run linear regression (pressure vs time) to get slope in hPa/hr; clamp to ±6 hPa/hr.
+4. Project the slope across the configured window, smooth with an EMA (α = 0.2), and publish as `pressure_delta_hpa`.
+5. Record the actual sample span as `pressure_window_hours` for diagnostics.
+6. Classify trend with configurable threshold/hysteresis (defaults: threshold 1.5 hPa, hysteresis 0.3 hPa):
+   - `delta >= threshold` → Rising
+   - `delta <= -threshold` → Falling
+   - Otherwise remain Rising/Falling until delta crosses the hysteresis exit band, else Stable (or Unknown if data insufficient).
 
-| Δp (hPa/3hr) | Trend |
-|--------------|-------|
-| < -1.5       | Falling |
-| -1.5 to +1.5 | Stable |
-| > +1.5       | Rising |
+**Outputs:**
+- `pressure.trend` (`rising`, `stable`, `falling`, `unknown`)
+- `pressure.delta_hpa` (smoothed delta over configured window)
+- `pressure.window_hours` (actual data span used)
 
-**Use case:** Weather prediction (falling pressure → approaching storm, rising → clearing skies).
+**Use case:** Weather context; sustained falling pressure indicates approaching low systems, rising pressure suggests improving conditions.
 
 ---
 

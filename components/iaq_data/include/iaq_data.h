@@ -78,7 +78,8 @@ typedef struct {
 
     /* Trends & rates (Tier 1: added CO2 rate, PM spike) */
     pressure_trend_t pressure_trend;
-    float pressure_delta_3hr_hpa; // Actual change over 3 hours
+    float pressure_delta_hpa;     // Pressure change over configured window (hPa)
+    float pressure_window_hours;  // Actual sample span used for delta (hours)
     float co2_rate_ppm_hr;      // Rate of change (ppm/hour) - for occupancy/ventilation detection
     bool pm25_spike_detected;   // Sudden PM2.5 increase (cooking, smoking, outdoor pollution)
 } iaq_metrics_t;

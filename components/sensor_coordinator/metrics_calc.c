@@ -17,6 +17,20 @@ static int compare_float(const void *a, const void *b)
     return (fa > fb) - (fa < fb);
 }
 
+/* Helper: median-of-three filter for simple noise rejection */
+static float median3(float a, float b, float c)
+{
+    if (a > b) {
+        if (b > c) return b;       // a > b > c
+        else if (a > c) return c;  // a > c >= b
+        else return a;             // c >= a > b
+    } else {
+        if (a > c) return a;       // b >= a > c
+        else if (b > c) return c;  // b > c >= a
+        else return b;             // c >= b >= a
+    }
+}
+
 /* Metrics timer fires every 5 s; downsample certain histories to control memory use. */
 #define METRICS_SAMPLE_PERIOD_SEC 5U
 #define PRESSURE_SAMPLE_INTERVAL_SEC 150U
@@ -26,6 +40,10 @@ static int compare_float(const void *a, const void *b)
 /* ===== Pressure Trend Tracking ===== */
 #ifdef CONFIG_METRICS_PRESSURE_TREND_ENABLE
 #define PRESSURE_HISTORY_SIZE 144  /* 6 hours @ 2.5-minute intervals */
+#define PRESSURE_TREND_MIN_SPAN_FRAC 0.5f   /* Require at least 50% of window */
+#define PRESSURE_TREND_EMA_ALPHA 0.2f       /* Smoothing factor for delta (0..1) */
+#define PRESSURE_TREND_MIN_SPAN_ABS 0.5f     /* Require at least 30 minutes of data */
+#define PRESSURE_TREND_SLOPE_MAX_ABS 6.0f    /* Guard-rail for slope (hPa/hr) */
 
 static struct {
     float pressure_pa[PRESSURE_HISTORY_SIZE];
@@ -34,6 +52,7 @@ static struct {
     uint8_t count;
 } s_pressure_history = {0};
 static uint32_t s_pressure_sample_elapsed_sec = PRESSURE_SAMPLE_INTERVAL_SEC;
+static float s_pressure_delta_ema_hpa = NAN;
 #endif
 
 /* ===== CO2 Rate of Change Tracking ===== */
@@ -78,6 +97,8 @@ esp_err_t metrics_init(void)
 
 #ifdef CONFIG_METRICS_PRESSURE_TREND_ENABLE
     memset(&s_pressure_history, 0, sizeof(s_pressure_history));
+    s_pressure_sample_elapsed_sec = PRESSURE_SAMPLE_INTERVAL_SEC;
+    s_pressure_delta_ema_hpa = NAN;
 #endif
 
 #ifdef CONFIG_METRICS_CO2_RATE_ENABLE
@@ -542,15 +563,25 @@ static void calculate_mold_risk(iaq_data_t *data)
 
 #ifdef CONFIG_METRICS_PRESSURE_TREND_ENABLE
 
+static void reset_pressure_metrics(iaq_data_t *data)
+{
+    if (!data) {
+        return;
+    }
+    data->metrics.pressure_trend = PRESSURE_TREND_UNKNOWN;
+    data->metrics.pressure_delta_hpa = NAN;
+    data->metrics.pressure_window_hours = NAN;
+    s_pressure_delta_ema_hpa = NAN;
+}
+
 static void update_pressure_trend(iaq_data_t *data)
 {
     if (!data->valid.pressure_pa) {
-        data->metrics.pressure_trend = PRESSURE_TREND_UNKNOWN;
-        data->metrics.pressure_delta_3hr_hpa = NAN;
+        reset_pressure_metrics(data);
         return;
     }
 
-    /* Only record to the 3-hour pressure buffer at ~150 s cadence. */
+    /* Sample pressure history at ~150 s cadence for trend tracking. */
     s_pressure_sample_elapsed_sec += METRICS_SAMPLE_PERIOD_SEC;
     if (s_pressure_sample_elapsed_sec >= PRESSURE_SAMPLE_INTERVAL_SEC) {
         s_pressure_sample_elapsed_sec = 0;
@@ -566,70 +597,146 @@ static void update_pressure_trend(iaq_data_t *data)
         }
     }
 
-    /* Need at least 2 samples */
-    if (s_pressure_history.count < 2) {
-        data->metrics.pressure_trend = PRESSURE_TREND_UNKNOWN;
-        data->metrics.pressure_delta_3hr_hpa = NAN;
+    /* Need at least 3 samples to run regression */
+    if (s_pressure_history.count < 3) {
+        reset_pressure_metrics(data);
         return;
     }
 
-    /* Get oldest and latest */
-    uint8_t oldest_idx = (s_pressure_history.head + PRESSURE_HISTORY_SIZE - s_pressure_history.count) % PRESSURE_HISTORY_SIZE;
-    uint8_t latest_idx = (s_pressure_history.head + PRESSURE_HISTORY_SIZE - 1) % PRESSURE_HISTORY_SIZE;
+    int window_hours_cfg = CONFIG_METRICS_PRESSURE_TREND_WINDOW_HR;
+    if (window_hours_cfg <= 0) {
+        window_hours_cfg = 3;
+    }
+    float window_hours = (float)window_hours_cfg;
+    int64_t window_us = (int64_t)window_hours_cfg * 3600LL * 1000000LL;
 
-    float p_oldest = s_pressure_history.pressure_pa[oldest_idx];
-    float p_latest = s_pressure_history.pressure_pa[latest_idx];
-    int64_t t_oldest = s_pressure_history.timestamps_us[oldest_idx];
-    int64_t t_latest = s_pressure_history.timestamps_us[latest_idx];
+    int64_t now_us = esp_timer_get_time();
+    int oldest_idx_all = (s_pressure_history.head + PRESSURE_HISTORY_SIZE - s_pressure_history.count) % PRESSURE_HISTORY_SIZE;
+    uint8_t idx_list[PRESSURE_HISTORY_SIZE];
+    int n = 0;
+    for (int i = 0; i < s_pressure_history.count; ++i) {
+        int idx = (oldest_idx_all + i) % PRESSURE_HISTORY_SIZE;
+        if ((now_us - s_pressure_history.timestamps_us[idx]) <= window_us) {
+            idx_list[n++] = (uint8_t)idx;
+        }
+    }
 
-    /* Calculate time span in hours */
-    float span_hours = (float)(t_latest - t_oldest) / (3600.0f * 1000000.0f);
-
-    /* Require at least 1 hour */
-    if (span_hours < 1.0f) {
-        data->metrics.pressure_trend = PRESSURE_TREND_UNKNOWN;
-        data->metrics.pressure_delta_3hr_hpa = NAN;
+    if (n < 3) {
+        reset_pressure_metrics(data);
         return;
     }
 
-    /* Calculate change (Pa -> hPa) */
-    float delta_hpa = (p_latest - p_oldest) / 100.0f;
+    int64_t t_first = s_pressure_history.timestamps_us[idx_list[0]];
+    int64_t t_last = s_pressure_history.timestamps_us[idx_list[n - 1]];
+    if (t_last <= t_first) {
+        reset_pressure_metrics(data);
+        return;
+    }
 
-    /* Normalize to window */
-    float window_hours = (float)CONFIG_METRICS_PRESSURE_TREND_WINDOW_HR;
-    float delta_normalized = delta_hpa * (window_hours / span_hours);
+    float span_hours = (float)(t_last - t_first) / (3600.0f * 1000000.0f);
+    float min_span_hours = window_hours * PRESSURE_TREND_MIN_SPAN_FRAC;
+    if (min_span_hours < PRESSURE_TREND_MIN_SPAN_ABS) {
+        min_span_hours = PRESSURE_TREND_MIN_SPAN_ABS;
+    }
+    if (span_hours < min_span_hours) {
+        reset_pressure_metrics(data);
+        return;
+    }
 
-    data->metrics.pressure_delta_3hr_hpa = delta_normalized;
+    float x[PRESSURE_HISTORY_SIZE];
+    float y[PRESSURE_HISTORY_SIZE];
+    float yf[PRESSURE_HISTORY_SIZE];
 
-    /* Apply threshold */
-    float threshold = atof(CONFIG_METRICS_PRESSURE_TREND_THRESHOLD_HPA);
-    if (delta_normalized > threshold) {
-        data->metrics.pressure_trend = PRESSURE_TREND_RISING;
-    } else if (delta_normalized < -threshold) {
-        data->metrics.pressure_trend = PRESSURE_TREND_FALLING;
+    for (int i = 0; i < n; ++i) {
+        int idx = idx_list[i];
+        int64_t ti = s_pressure_history.timestamps_us[idx];
+        x[i] = (float)(ti - t_first) / (3600.0f * 1000000.0f);  /* hours */
+        y[i] = s_pressure_history.pressure_pa[idx] / 100.0f;    /* convert Pa -> hPa */
+    }
+
+    for (int i = 0; i < n; ++i) {
+        if (i == 0 || i == n - 1) {
+            yf[i] = y[i];
+        } else {
+            yf[i] = median3(y[i - 1], y[i], y[i + 1]);
+        }
+    }
+
+    float Sx = 0.0f, Sy = 0.0f, Sxx = 0.0f, Sxy = 0.0f;
+    for (int i = 0; i < n; ++i) {
+        Sx += x[i];
+        Sy += yf[i];
+        Sxx += x[i] * x[i];
+        Sxy += x[i] * yf[i];
+    }
+
+    float N = (float)n;
+    float mx = Sx / N;
+    float my = Sy / N;
+    float varx = Sxx - N * mx * mx;
+    float covxy = Sxy - N * mx * my;
+    if (varx <= 0.0f) {
+        reset_pressure_metrics(data);
+        return;
+    }
+
+    float slope_hpa_per_hr = covxy / varx;
+    if (slope_hpa_per_hr > PRESSURE_TREND_SLOPE_MAX_ABS) {
+        slope_hpa_per_hr = PRESSURE_TREND_SLOPE_MAX_ABS;
+    } else if (slope_hpa_per_hr < -PRESSURE_TREND_SLOPE_MAX_ABS) {
+        slope_hpa_per_hr = -PRESSURE_TREND_SLOPE_MAX_ABS;
+    }
+
+    float delta_projected_hpa = slope_hpa_per_hr * window_hours;
+
+    if (isnan(s_pressure_delta_ema_hpa)) {
+        s_pressure_delta_ema_hpa = delta_projected_hpa;
     } else {
-        data->metrics.pressure_trend = PRESSURE_TREND_STABLE;
+        s_pressure_delta_ema_hpa = PRESSURE_TREND_EMA_ALPHA * delta_projected_hpa +
+                                   (1.0f - PRESSURE_TREND_EMA_ALPHA) * s_pressure_delta_ema_hpa;
     }
+
+    float delta_smoothed_hpa = s_pressure_delta_ema_hpa;
+
+    data->metrics.pressure_delta_hpa = delta_smoothed_hpa;
+    data->metrics.pressure_window_hours = span_hours;
+
+    float threshold = fabsf(strtof(CONFIG_METRICS_PRESSURE_TREND_THRESHOLD_HPA, NULL));
+    if (threshold < 0.01f) {
+        threshold = 0.01f;
+    }
+    float hysteresis = fabsf(strtof(CONFIG_METRICS_PRESSURE_TREND_HYSTERESIS_HPA, NULL));
+    if (hysteresis > threshold) {
+        hysteresis = threshold;
+    }
+
+    float rising_on = threshold;
+    float rising_off = fmaxf(0.0f, threshold - hysteresis);
+    float falling_on = -threshold;
+    float falling_off = -rising_off;
+
+    pressure_trend_t prev = data->metrics.pressure_trend;
+    pressure_trend_t trend = PRESSURE_TREND_STABLE;
+
+    if (delta_smoothed_hpa >= rising_on) {
+        trend = PRESSURE_TREND_RISING;
+    } else if (delta_smoothed_hpa <= falling_on) {
+        trend = PRESSURE_TREND_FALLING;
+    } else if (prev == PRESSURE_TREND_RISING && delta_smoothed_hpa > rising_off) {
+        trend = PRESSURE_TREND_RISING;
+    } else if (prev == PRESSURE_TREND_FALLING && delta_smoothed_hpa < falling_off) {
+        trend = PRESSURE_TREND_FALLING;
+    } else {
+        trend = PRESSURE_TREND_STABLE;
+    }
+
+    data->metrics.pressure_trend = trend;
 }
 #endif /* CONFIG_METRICS_PRESSURE_TREND_ENABLE */
 
 /* ========== CO2 Rate of Change ========== */
 
 #ifdef CONFIG_METRICS_CO2_RATE_ENABLE
-
-/* Helper: median of 3 values (for filtering noisy CO2 readings before rate calc) */
-static float median3(float a, float b, float c)
-{
-    if (a > b) {
-        if (b > c) return b;       // a > b > c
-        else if (a > c) return c;  // a > c >= b
-        else return a;             // c >= a > b
-    } else {
-        if (a > c) return a;       // b >= a > c
-        else if (b > c) return c;  // b > c >= a
-        else return b;             // c >= b >= a
-    }
-}
 
 static void update_co2_rate(iaq_data_t *data)
 {

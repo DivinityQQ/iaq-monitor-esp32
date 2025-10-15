@@ -270,11 +270,20 @@ menu "Derived Metrics"
 
     config METRICS_PRESSURE_TREND_THRESHOLD_HPA
         string "Pressure trend threshold (hPa)"
-        default "0.5"
+        default "1.5"
         depends on METRICS_PRESSURE_TREND_ENABLE
         help
             Change threshold to classify as RISING or FALLING.
-            Default: 0.5 hPa over window.
+            Value represents delta over the configured window (default 3h).
+
+    config METRICS_PRESSURE_TREND_HYSTERESIS_HPA
+        string "Pressure trend hysteresis (hPa)"
+        default "0.3"
+        depends on METRICS_PRESSURE_TREND_ENABLE
+        help
+            Hysteresis band applied when exiting RISING/FALLING back to STABLE.
+            Prevents rapid oscillation around the trend threshold.
+            Must be <= threshold.
 
     config METRICS_VOC_NOX_CATEGORIES_ENABLE
         bool "Calculate VOC/NOx quality categories"

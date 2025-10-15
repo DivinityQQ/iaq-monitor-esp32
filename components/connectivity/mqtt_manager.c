@@ -477,8 +477,10 @@ static void mqtt_publish_ha_discovery(void)
     ha_publish_sensor_config(device, "overall_iaq_score", "Overall IAQ Score", TOPIC_METRICS, NULL, "score", "{{ value_json.overall_iaq_score }}", "mdi:air-filter");
     ha_publish_sensor_config(device, "mold_risk", "Mold Risk Score", TOPIC_METRICS, NULL, "score", "{{ value_json.mold_risk.score }}", "mdi:water-percent");
     ha_publish_sensor_config(device, "mold_category", "Mold Risk Category", TOPIC_METRICS, NULL, NULL, "{{ value_json.mold_risk.category }}", "mdi:water-alert");
+    char pressure_delta_name[48];
+    snprintf(pressure_delta_name, sizeof(pressure_delta_name), "Pressure Change (%d hr)", CONFIG_METRICS_PRESSURE_TREND_WINDOW_HR);
     ha_publish_sensor_config(device, "pressure_trend", "Pressure Trend", TOPIC_METRICS, NULL, NULL, "{{ value_json.pressure.trend }}", "mdi:trending-up");
-    ha_publish_sensor_config(device, "pressure_delta_3hr", "Pressure Change (3hr)", TOPIC_METRICS, "pressure", "hPa", "{{ value_json.pressure.delta_3hr_hpa }}", NULL);
+    ha_publish_sensor_config(device, "pressure_delta", pressure_delta_name, TOPIC_METRICS, "pressure", "hPa", "{{ value_json.pressure.delta_hpa }}", NULL);
     ha_publish_sensor_config(device, "co2_rate", "CO2 Rate", TOPIC_METRICS, NULL, "ppm/hr", "{{ value_json.co2_rate_ppm_hr }}", "mdi:trending-up");
     ha_publish_sensor_config(device, "pm25_spike", "PM2.5 Spike Detected", TOPIC_METRICS, NULL, NULL, "{{ value_json.pm25_spike_detected }}", "mdi:alert");
 
@@ -719,10 +721,15 @@ esp_err_t mqtt_publish_metrics(const iaq_data_t *data)
         default: break;
     }
     cJSON_AddStringToObject(pressure, "trend", trend_str);
-    if (!isnan(data->metrics.pressure_delta_3hr_hpa)) {
-        cJSON_AddNumberToObject(pressure, "delta_3hr_hpa", round(data->metrics.pressure_delta_3hr_hpa * 100.0) / 100.0);
+    if (!isnan(data->metrics.pressure_delta_hpa)) {
+        cJSON_AddNumberToObject(pressure, "delta_hpa", round(data->metrics.pressure_delta_hpa * 100.0) / 100.0);
     } else {
-        cJSON_AddNullToObject(pressure, "delta_3hr_hpa");
+        cJSON_AddNullToObject(pressure, "delta_hpa");
+    }
+    if (!isnan(data->metrics.pressure_window_hours)) {
+        cJSON_AddNumberToObject(pressure, "window_hours", round(data->metrics.pressure_window_hours * 10.0) / 10.0);
+    } else {
+        cJSON_AddNullToObject(pressure, "window_hours");
     }
     cJSON_AddItemToObject(root, "pressure", pressure);
 

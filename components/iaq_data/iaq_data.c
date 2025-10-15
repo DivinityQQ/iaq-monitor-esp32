@@ -64,7 +64,8 @@ esp_err_t iaq_data_init(void)
     g_iaq_data.metrics.mold_risk_score = UINT8_MAX;  // Tier 1, 255 = unknown/invalid
     g_iaq_data.metrics.mold_risk_category = "unknown";  // Tier 1
     g_iaq_data.metrics.pressure_trend = PRESSURE_TREND_UNKNOWN;
-    g_iaq_data.metrics.pressure_delta_3hr_hpa = NAN;
+    g_iaq_data.metrics.pressure_delta_hpa = NAN;
+    g_iaq_data.metrics.pressure_window_hours = NAN;
     g_iaq_data.metrics.co2_rate_ppm_hr = NAN;  // Tier 1
     g_iaq_data.metrics.pm25_spike_detected = false;  // Tier 1
 

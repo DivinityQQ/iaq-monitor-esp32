@@ -149,7 +149,7 @@ sensor cadence set <sensor> <ms>
 ## Home Assistant
 - Home Assistant discovery payloads are published when MQTT connects (retained).
 - Core entities read from `/state` (fused values) while advanced sensors use `/metrics`.
-- Value templates in the discovery payload map JSON fields (for example `{{ value_json.temp_c }}`, `{{ value_json.aqi.value }}`, `{{ value_json.pressure.delta_3hr_hpa }}`).
+- Value templates in the discovery payload map JSON fields (for example `{{ value_json.temp_c }}`, `{{ value_json.aqi.value }}`, `{{ value_json.pressure.delta_hpa }}`).
 - Optional diagnostics topic is excluded from discovery; subscribe manually when tuning sensor fusion.
 ## Architecture Overview
 ### Data Flow Pipeline
