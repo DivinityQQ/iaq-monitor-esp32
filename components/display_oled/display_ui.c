@@ -665,7 +665,7 @@ static void render_overview(uint8_t page, uint8_t *buf, bool full)
 
     /* Page 2: AQI (show "--" if UINT16_MAX or 0) */
     if (page == 2) {
-        if (aqi == UINT16_MAX || aqi == 0) {
+        if (aqi == UINT16_MAX) {
             snprintf(str, sizeof(str), "AQI: --");
         } else {
             snprintf(str, sizeof(str), "AQI:%u %s", aqi, get_aqi_short(aqi));
