@@ -64,9 +64,13 @@ CONFIG_FATFS_MAX_LFN=255
 CONFIG_NVS_ENCRYPTION=n  # Enable later for production
 
 # Console (for runtime commands)
-CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+# Set the primary console to the on‑chip USB‑Serial/JTAG (CDC ACM on /dev/ttyACM*)
+CONFIG_ESP_CONSOLE_UART_DEFAULT=n
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
 CONFIG_ESP_CONSOLE_USB_CDC=n
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
+# Do not mirror logs to a secondary console
+CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
 # Power Management (disabled for now)
 CONFIG_PM_ENABLE=n

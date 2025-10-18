@@ -45,8 +45,8 @@ If RESET is enabled (`IAQ_PMS5003_RST_GPIO` ≥ 0):
 
 | Signal | GPIO | Kconfig Variable     | Notes                          |
 |--------|------|----------------------|--------------------------------|
-| TX     | 19   | `IAQ_S8_TX_GPIO`     | ESP TX → S8 RX                 |
-| RX     | 20   | `IAQ_S8_RX_GPIO`     | ESP RX ← S8 TX                 |
+| TX     | 47   | `IAQ_S8_TX_GPIO`     | ESP TX → S8 RX                 |
+| RX     | 48   | `IAQ_S8_RX_GPIO`     | ESP RX ← S8 TX                 |
 
 **UART Port:** UART2 (`IAQ_S8_UART_PORT`)
 **Baud Rate:** 9600 bps (fixed)
@@ -54,6 +54,8 @@ If RESET is enabled (`IAQ_PMS5003_RST_GPIO` ≥ 0):
 **RX Buffer:** 256 bytes (default)
 
 Voltage levels: Senseair S8 exposes CMOS TTL UART. Many variants accept 3.3V on RX; some modules may output 5V on TX. Verify your module’s TX level; add a level shifter or resistor divider if necessary to protect ESP32 RX.
+
+Default pin change rationale: GPIO19/20 are the ESP32‑S3 native USB D−/D+ pins. Using them for UART conflicts with USB flashing/CDC. Defaults now use GPIO47/48 to keep USB functional.
 
 ---
 
@@ -80,7 +82,7 @@ Sensor Hardware Configuration → UART Configuration → [Sensor] → RX Buffer 
 |------------|--------------------------------|-----------------------------------------|
 | 0          | Boot Mode / Strapping          | Pull-up, avoid unless needed           |
 | 3          | JTAG / Strapping               | Used during programming                 |
-| 19-20      | USB D-/D+ (on DevKitC-1)       | **Safe if not using USB-OTG**           |
+| 19-20      | USB D-/D+ (on DevKitC-1)       | Reserved for native USB; avoid for S8   |
 | 26-32      | SPI Flash / PSRAM              | **Never reassign** (bootloop risk)      |
 | 33-37      | Internal (not broken out)      | N/A                                     |
 | 45         | Strapping Pin                  | Avoid unless configured properly        |
@@ -103,8 +105,8 @@ Sensor Hardware Configuration → UART Configuration → [Sensor] → RX Buffer 
 ## Pin Conflict Warnings
 
 - **UART0 (GPIO43/44):** Reserved for console, do not reassign.
-- **I2C vs UART:** Current defaults (GPIO 8/9 for I2C, 17-20 for UART) have no conflicts.
-- **USB-OTG:** If using GPIO19/20 for S8, disable USB-OTG in `sdkconfig`.
+- **I2C vs UART:** Current defaults (GPIO 8/9 for I2C, 17/18 for PMS5003, 47/48 for S8) have no conflicts and keep USB (19/20) free.
+- **Native USB (GPIO19/20):** If you manually reassign S8 to 19/20, USB flashing/CDC will not work reliably. Prefer leaving 19/20 for USB.
 
 ---
 

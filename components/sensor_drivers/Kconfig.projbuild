@@ -228,19 +228,19 @@ menu "Sensor Hardware Configuration"
 
             config IAQ_S8_TX_GPIO
                 int "TX GPIO"
-                default 19
+                default 47
                 range 0 48
                 help
                     GPIO for UART TX to S8.
-                    Default: GPIO19.
+                    Default: GPIO47 (avoids conflict with USB D-/D+ on 19/20).
 
             config IAQ_S8_RX_GPIO
                 int "RX GPIO"
-                default 20
+                default 48
                 range 0 48
                 help
                     GPIO for UART RX from S8.
-                    Default: GPIO20.
+                    Default: GPIO48 (avoids conflict with USB D-/D+ on 19/20).
 
             config IAQ_S8_RX_BUF_SIZE
                 int "RX Buffer Size (bytes)"

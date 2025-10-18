@@ -34,10 +34,14 @@ All sensors also support simulation mode for testing without hardware (enable vi
 ## Quick Start
 ```
 idf.py build
+# Linux/macOS (USB Serial/JTAG default):
+idf.py -p /dev/ttyACM0 flash
+idf.py -p /dev/ttyACM0 monitor
+# Windows:
 idf.py -p \\.\COM3 flash
 idf.py -p \\.\COM3 monitor
 ```
-Tip: On Windows, use `\\.\COMx` or set `$env:ESPPORT='\\.\COM3'`.
+Tip: On Windows, use `\\.\COMx` or set `$env:ESPPORT='\\.\COM3'`. On Linux, the default console is the on‑chip USB‑Serial/JTAG device (`/dev/ttyACM*`).
 ## First Boot + Configuration
 - Open the serial console and type `help`.
 - Set Wi‑Fi credentials and reconnect:
