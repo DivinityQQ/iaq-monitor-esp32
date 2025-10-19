@@ -74,7 +74,7 @@ config IAQ_WARMUP_SHT45_MS
 
     config IAQ_WARMUP_BMP280_MS
         int "BMP280 warm-up (ms)"
-        default 0
+        default 20000
         range 0 60000
         help
             BMP280 warm-up time after power-on.
@@ -187,7 +187,7 @@ menu "Sensor Fusion"
     config FUSION_CO2_ABC_ENABLE
         bool "Enable CO2 automatic baseline correction (ABC)"
         depends on !IAQ_S8_ENABLE_ABC
-        default y
+        default n
         help
             Automatically track and correct CO2 sensor baseline drift.
             Assumes sensor is occasionally exposed to outdoor air (400 ppm).

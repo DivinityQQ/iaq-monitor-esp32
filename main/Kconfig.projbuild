@@ -184,13 +184,13 @@ menu "Time Synchronization"
 
     config IAQ_NTP_SERVER0
         string "Primary NTP server"
-        default "pool.ntp.org"
+        default "time.google.com"
         help
             Hostname of the primary NTP server.
 
     config IAQ_NTP_SERVER1
         string "Secondary NTP server"
-        default "time.google.com"
+        default "pool.ntp.org"
         help
             Hostname of a secondary NTP server (optional).
 endmenu

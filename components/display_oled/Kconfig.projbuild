@@ -41,7 +41,7 @@ menu "OLED Display (SH1106)"
 
     config IAQ_OLED_CONTRAST
         int "Contrast (0-255)"
-        default 96
+        default 150
         range 0 255
         depends on IAQ_OLED_ENABLE
         help
@@ -66,7 +66,7 @@ menu "OLED Display (SH1106)"
 
     config IAQ_OLED_IDLE_TIMEOUT_MS
         int "Idle auto-off timeout (ms)"
-        default 60000
+        default 0
         range 0 3600000
         depends on IAQ_OLED_ENABLE
         help
