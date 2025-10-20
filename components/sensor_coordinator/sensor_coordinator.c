@@ -82,7 +82,7 @@ static const uint32_t s_warmup_ms[SENSOR_ID_MAX] = {
 static const char* state_to_string(sensor_state_t state);
 static const char* sensor_id_to_string(sensor_id_t id);
 
-typedef enum { CMD_READ = 0, CMD_RESET, CMD_CALIBRATE } sensor_cmd_type_t;
+typedef enum { CMD_READ = 0, CMD_RESET, CMD_CALIBRATE, CMD_DISABLE, CMD_ENABLE } sensor_cmd_type_t;
 typedef struct {
     sensor_cmd_type_t type;
     sensor_id_t id;
@@ -215,6 +215,7 @@ static const char* state_to_string(sensor_state_t state)
         case SENSOR_STATE_WARMING: return "WARMING";
         case SENSOR_STATE_READY:   return "READY";
         case SENSOR_STATE_ERROR:   return "ERROR";
+        case SENSOR_STATE_DISABLED: return "DISABLED";
         default:                   return "UNKNOWN";
     }
 }
@@ -517,6 +518,10 @@ static void sensor_coordinator_task(void *arg)
 
         /* Auto-recovery: periodically retry ERROR state sensors with exponential backoff */
         for (int i = 0; i < SENSOR_ID_MAX; ++i) {
+            /* Skip DISABLED sensors - they should not auto-recover */
+            if (s_runtime[i].state == SENSOR_STATE_DISABLED) {
+                continue;
+            }
             if (s_runtime[i].state == SENSOR_STATE_ERROR) {
                 int64_t time_since_retry_us = now_us - s_recovery[i].last_retry_us;
                 uint64_t retry_delay_us = (uint64_t)s_recovery[i].next_retry_delay_ms * 1000ULL;
@@ -650,6 +655,71 @@ static void sensor_coordinator_task(void *arg)
                         op_res = s8_driver_calibrate_co2(cmd.value);
                     }
                     break;
+                case CMD_DISABLE:
+                    /* Call driver disable function and transition to DISABLED state */
+                    switch (cmd.id) {
+                        case SENSOR_ID_MCU:     op_res = mcu_temp_driver_disable(); break;
+                        case SENSOR_ID_SHT45:   op_res = sht45_driver_disable(); break;
+                        case SENSOR_ID_BMP280:  op_res = bmp280_driver_disable(); break;
+                        case SENSOR_ID_SGP41:   op_res = sgp41_driver_disable(); break;
+                        case SENSOR_ID_PMS5003: op_res = pms5003_driver_disable(); break;
+                        case SENSOR_ID_S8:      op_res = s8_driver_disable(); break;
+                        default: op_res = ESP_ERR_INVALID_ARG; break;
+                    }
+                    if (op_res == ESP_OK) {
+                        transition_to_state(cmd.id, SENSOR_STATE_DISABLED);
+                        /* Clear data validity flags for this sensor */
+                        IAQ_DATA_WITH_LOCK() {
+                            iaq_data_t *data = iaq_data_get();
+                            switch (cmd.id) {
+                                case SENSOR_ID_MCU:
+                                    data->valid.mcu_temp_c = false;
+                                    break;
+                                case SENSOR_ID_SHT45:
+                                    data->valid.temp_c = false;
+                                    data->valid.rh_pct = false;
+                                    break;
+                                case SENSOR_ID_BMP280:
+                                    data->valid.pressure_pa = false;
+                                    break;
+                                case SENSOR_ID_SGP41:
+                                    data->valid.voc_index = false;
+                                    data->valid.nox_index = false;
+                                    break;
+                                case SENSOR_ID_PMS5003:
+                                    data->valid.pm1_ugm3 = false;
+                                    data->valid.pm25_ugm3 = false;
+                                    data->valid.pm10_ugm3 = false;
+                                    break;
+                                case SENSOR_ID_S8:
+                                    data->valid.co2_ppm = false;
+                                    break;
+                                default:
+                                    break;
+                            }
+                        }
+                    }
+                    break;
+                case CMD_ENABLE:
+                    /* Call driver enable function and transition back to appropriate state */
+                    switch (cmd.id) {
+                        case SENSOR_ID_MCU:     op_res = mcu_temp_driver_enable(); break;
+                        case SENSOR_ID_SHT45:   op_res = sht45_driver_enable(); break;
+                        case SENSOR_ID_BMP280:  op_res = bmp280_driver_enable(); break;
+                        case SENSOR_ID_SGP41:   op_res = sgp41_driver_enable(); break;
+                        case SENSOR_ID_PMS5003: op_res = pms5003_driver_enable(); break;
+                        case SENSOR_ID_S8:      op_res = s8_driver_enable(); break;
+                        default: op_res = ESP_ERR_INVALID_ARG; break;
+                    }
+                    if (op_res == ESP_OK) {
+                        /* Transition to WARMING if warm-up needed, otherwise READY */
+                        if (s_warmup_ms[cmd.id] > 0) {
+                            transition_to_state(cmd.id, SENSOR_STATE_WARMING);
+                        } else {
+                            transition_to_state(cmd.id, SENSOR_STATE_READY);
+                        }
+                    }
+                    break;
                 default:
                     break;
             }
@@ -663,7 +733,7 @@ static void sensor_coordinator_task(void *arg)
         /* Periodic scheduler: read sensors that are READY and due */
         now = xTaskGetTickCount();
         for (int i = 0; i < SENSOR_ID_MAX; ++i) {
-            /* Only read if sensor is READY, enabled, and due */
+            /* Only read if sensor is READY, enabled, and due (DISABLED sensors are excluded by state check) */
             if (s_runtime[i].state == SENSOR_STATE_READY &&
                 s_schedule[i].enabled &&
                 (int32_t)(now - s_schedule[i].next_due) >= 0) {
@@ -1027,6 +1097,22 @@ esp_err_t sensor_coordinator_calibrate(sensor_id_t id, int value)
     }
 
     return enqueue_cmd(CMD_CALIBRATE, id, value, NULL);
+}
+
+esp_err_t sensor_coordinator_disable(sensor_id_t id)
+{
+    if (id < 0 || id >= SENSOR_ID_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return enqueue_cmd(CMD_DISABLE, id, 0, NULL);
+}
+
+esp_err_t sensor_coordinator_enable(sensor_id_t id)
+{
+    if (id < 0 || id >= SENSOR_ID_MAX) {
+        return ESP_ERR_INVALID_ARG;
+    }
+    return enqueue_cmd(CMD_ENABLE, id, 0, NULL);
 }
 
 esp_err_t sensor_coordinator_set_cadence(sensor_id_t id, uint32_t interval_ms)

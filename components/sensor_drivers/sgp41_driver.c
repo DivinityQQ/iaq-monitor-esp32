@@ -250,4 +250,18 @@ esp_err_t sgp41_driver_deinit(void)
     return ESP_OK;
 }
 
+esp_err_t sgp41_driver_disable(void)
+{
+    /* Stub implementation - SGP41 has no hardware sleep mode */
+    ESP_LOGI(TAG, "SGP41 disabled (no hardware sleep mode)");
+    return ESP_OK;
+}
+
+esp_err_t sgp41_driver_enable(void)
+{
+    /* Stub implementation - SGP41 has no hardware sleep mode */
+    ESP_LOGI(TAG, "SGP41 enabled (no hardware sleep mode)");
+    return ESP_OK;
+}
+
 /* No VOC baseline management functions: persistence removed */

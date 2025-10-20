@@ -39,6 +39,20 @@ esp_err_t sht45_driver_reset(void);
  */
 esp_err_t sht45_driver_deinit(void);
 
+/**
+ * Disable the SHT45 sensor (stub - no hardware sleep mode).
+ *
+ * @return ESP_OK
+ */
+esp_err_t sht45_driver_disable(void);
+
+/**
+ * Enable the SHT45 sensor (stub - no hardware sleep mode).
+ *
+ * @return ESP_OK
+ */
+esp_err_t sht45_driver_enable(void);
+
 #ifdef __cplusplus
 }
 #endif

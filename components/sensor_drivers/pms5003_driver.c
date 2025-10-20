@@ -383,3 +383,47 @@ esp_err_t pms5003_driver_deinit(void)
     ESP_LOGI(TAG, "PMS5003 driver deinitialized");
     return ESP_OK;
 }
+
+esp_err_t pms5003_driver_disable(void)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "PMS5003 driver not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Flush UART buffer to discard any pending data */
+    (void)uart_bus_flush_rx(s_uart_port);
+
+    /* Put sensor to sleep via SET pin if available */
+    if (s_use_set) {
+        pms_set_work_mode(false);  /* Set to sleep mode (LOW) */
+        ESP_LOGI(TAG, "PMS5003 disabled (hardware sleep via SET pin)");
+    } else {
+        ESP_LOGW(TAG, "PMS5003 disabled (SET pin not configured, no hardware sleep)");
+    }
+
+    return ESP_OK;
+}
+
+esp_err_t pms5003_driver_enable(void)
+{
+    if (!s_initialized) {
+        ESP_LOGE(TAG, "PMS5003 driver not initialized");
+        return ESP_ERR_INVALID_STATE;
+    }
+
+    /* Wake sensor from sleep via SET pin if available */
+    if (s_use_set) {
+        pms_set_work_mode(true);  /* Set to work mode (HIGH) */
+        /* Give sensor time to wake up and stabilize */
+        vTaskDelay(pdMS_TO_TICKS(100));
+        ESP_LOGI(TAG, "PMS5003 enabled (woke from sleep via SET pin)");
+    } else {
+        ESP_LOGI(TAG, "PMS5003 enabled (SET pin not configured)");
+    }
+
+    /* Flush UART buffer to clear any wake-up noise */
+    (void)uart_bus_flush_rx(s_uart_port);
+
+    return ESP_OK;
+}

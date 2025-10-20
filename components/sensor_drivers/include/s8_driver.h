@@ -67,6 +67,20 @@ esp_err_t s8_driver_set_abc_period(uint16_t hours);
 /** Enable/disable ABC; when enabling, use provided period (default 180 if 0). */
 esp_err_t s8_driver_set_abc_enabled(bool enable, uint16_t period_hours);
 
+/**
+ * Disable the S8 sensor (stub - no hardware sleep mode).
+ *
+ * @return ESP_OK
+ */
+esp_err_t s8_driver_disable(void);
+
+/**
+ * Enable the S8 sensor (stub - no hardware sleep mode).
+ *
+ * @return ESP_OK
+ */
+esp_err_t s8_driver_enable(void);
+
 #ifdef __cplusplus
 }
 #endif

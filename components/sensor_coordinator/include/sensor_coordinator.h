@@ -58,6 +58,12 @@ esp_err_t sensor_coordinator_calibrate(sensor_id_t id, int value);
 /* Configure periodic cadence per sensor (ms). 0 disables periodic reads. */
 esp_err_t sensor_coordinator_set_cadence(sensor_id_t id, uint32_t interval_ms);
 
+/* Disable a sensor (stops reading, calls driver disable, transitions to DISABLED state). */
+esp_err_t sensor_coordinator_disable(sensor_id_t id);
+
+/* Enable a sensor (calls driver enable, transitions back to appropriate state). */
+esp_err_t sensor_coordinator_enable(sensor_id_t id);
+
 /* Synchronous force read with completion feedback. Waits up to timeout_ms. */
 esp_err_t sensor_coordinator_force_read_sync(sensor_id_t id, uint32_t timeout_ms);
 
@@ -72,7 +78,8 @@ typedef enum {
     SENSOR_STATE_INIT,
     SENSOR_STATE_WARMING,
     SENSOR_STATE_READY,
-    SENSOR_STATE_ERROR
+    SENSOR_STATE_ERROR,
+    SENSOR_STATE_DISABLED
 } sensor_state_t;
 
 typedef struct {

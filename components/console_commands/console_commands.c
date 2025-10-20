@@ -644,15 +644,65 @@ static int cmd_sensor_cadence(int argc, char **argv)
     return 1;
 }
 
+static int cmd_sensor_disable(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: sensor disable <sensor>\n");
+        printf("  sensors: mcu, sht45, bmp280, sgp41, pms5003, s8\n");
+        return 1;
+    }
+
+    const char *sensor = argv[1];
+    sensor_id_t id;
+    if (!parse_sensor_id(sensor, &id)) {
+        printf("Unknown sensor: %s\n", sensor);
+        return 1;
+    }
+
+    esp_err_t ret = sensor_coordinator_disable(id);
+    if (ret == ESP_OK) {
+        printf("Sensor '%s' disabled\n", sensor);
+        return 0;
+    }
+    printf("Failed to disable sensor '%s': %s\n", sensor, esp_err_to_name(ret));
+    return 1;
+}
+
+static int cmd_sensor_enable(int argc, char **argv)
+{
+    if (argc < 2) {
+        printf("Usage: sensor enable <sensor>\n");
+        printf("  sensors: mcu, sht45, bmp280, sgp41, pms5003, s8\n");
+        return 1;
+    }
+
+    const char *sensor = argv[1];
+    sensor_id_t id;
+    if (!parse_sensor_id(sensor, &id)) {
+        printf("Unknown sensor: %s\n", sensor);
+        return 1;
+    }
+
+    esp_err_t ret = sensor_coordinator_enable(id);
+    if (ret == ESP_OK) {
+        printf("Sensor '%s' enabled\n", sensor);
+        return 0;
+    }
+    printf("Failed to enable sensor '%s': %s\n", sensor, esp_err_to_name(ret));
+    return 1;
+}
+
 static int cmd_sensor(int argc, char **argv)
 {
     if (argc < 2) {
-        printf("Usage: sensor <status|read|reset|calibrate|cadence|s8>\n");
+        printf("Usage: sensor <status|read|reset|calibrate|cadence|disable|enable|s8>\n");
         printf("  status                 - Show sensor health status\n");
         printf("  read <sensor>          - Force read specific sensor (e.g., mcu)\n");
         printf("  reset <sensor>         - Reset specific sensor (e.g., mcu)\n");
         printf("  calibrate co2 <ppm>    - Calibrate CO2 sensor\n");
         printf("  cadence [set <sensor> <ms>] - Show or set cadences\n");
+        printf("  disable <sensor>       - Disable sensor (stop reading, hardware sleep if available)\n");
+        printf("  enable <sensor>        - Enable sensor (resume reading, wake if needed)\n");
         printf("  s8 status              - Show S8 diagnostics\n");
         printf("  s8 abc <on|off> [hours]- Enable/disable S8 ABC (period in hours)\n");
         /* SGP41 baseline ops removed */
@@ -669,6 +719,10 @@ static int cmd_sensor(int argc, char **argv)
         return cmd_sensor_calibrate(argc - 1, &argv[1]);
     } else if (strcmp(argv[1], "cadence") == 0) {
         return cmd_sensor_cadence(argc - 1, &argv[1]);
+    } else if (strcmp(argv[1], "disable") == 0) {
+        return cmd_sensor_disable(argc - 1, &argv[1]);
+    } else if (strcmp(argv[1], "enable") == 0) {
+        return cmd_sensor_enable(argc - 1, &argv[1]);
     } else if (strcmp(argv[1], "s8") == 0) {
         if (argc < 3) {
             printf("Usage: sensor s8 <status|abc> ...\n");

@@ -155,3 +155,17 @@ esp_err_t sht45_driver_deinit(void)
     ESP_LOGI(TAG, "SHT4x driver deinitialized");
     return ESP_OK;
 }
+
+esp_err_t sht45_driver_disable(void)
+{
+    /* Stub implementation - SHT45 has no hardware sleep mode */
+    ESP_LOGI(TAG, "SHT45 disabled (no hardware sleep mode)");
+    return ESP_OK;
+}
+
+esp_err_t sht45_driver_enable(void)
+{
+    /* Stub implementation - SHT45 has no hardware sleep mode */
+    ESP_LOGI(TAG, "SHT45 enabled (no hardware sleep mode)");
+    return ESP_OK;
+}

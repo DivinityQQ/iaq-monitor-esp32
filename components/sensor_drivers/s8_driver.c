@@ -279,6 +279,20 @@ esp_err_t s8_driver_deinit(void)
     return ESP_OK;
 }
 
+esp_err_t s8_driver_disable(void)
+{
+    /* Stub implementation - S8 has no hardware sleep mode */
+    ESP_LOGI(TAG, "S8 disabled (no hardware sleep mode)");
+    return ESP_OK;
+}
+
+esp_err_t s8_driver_enable(void)
+{
+    /* Stub implementation - S8 has no hardware sleep mode */
+    ESP_LOGI(TAG, "S8 enabled (no hardware sleep mode)");
+    return ESP_OK;
+}
+
 /* ===== Extended API ===== */
 
 esp_err_t s8_driver_get_diag(s8_diag_t *out)

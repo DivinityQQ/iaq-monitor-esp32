@@ -126,7 +126,7 @@ menu "Sensor Hardware Configuration"
 
             config IAQ_PMS5003_SET_GPIO
                 int "SET Pin GPIO (Sleep/Wake Control)"
-                default -1
+                default 6
                 range -1 48
                 help
                     GPIO for PMS5003 SET pin (optional).
@@ -145,7 +145,7 @@ menu "Sensor Hardware Configuration"
 
             config IAQ_PMS5003_RST_GPIO
                 int "RESET Pin GPIO (active LOW)"
-                default -1
+                default 7
                 range -1 48
                 help
                     Optional hardware RESET pin for PMS5003.

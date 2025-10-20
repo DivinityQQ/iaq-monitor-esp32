@@ -399,3 +399,17 @@ esp_err_t bmp280_driver_deinit(void)
     ESP_LOGI(TAG, "BMP280 driver deinitialized");
     return ESP_OK;
 }
+
+esp_err_t bmp280_driver_disable(void)
+{
+    /* Stub implementation - BMP280 has no hardware sleep mode */
+    ESP_LOGI(TAG, "BMP280 disabled (no hardware sleep mode)");
+    return ESP_OK;
+}
+
+esp_err_t bmp280_driver_enable(void)
+{
+    /* Stub implementation - BMP280 has no hardware sleep mode */
+    ESP_LOGI(TAG, "BMP280 enabled (no hardware sleep mode)");
+    return ESP_OK;
+}

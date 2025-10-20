@@ -40,6 +40,21 @@ esp_err_t pms5003_driver_reset(void);
  */
 esp_err_t pms5003_driver_deinit(void);
 
+/**
+ * Disable the PMS5003 sensor (put to sleep via SET pin if configured).
+ * If SET pin is not configured, warns but still returns success.
+ *
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t pms5003_driver_disable(void);
+
+/**
+ * Enable the PMS5003 sensor (wake from sleep via SET pin if configured).
+ *
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t pms5003_driver_enable(void);
+
 #ifdef __cplusplus
 }
 #endif

@@ -39,6 +39,20 @@ esp_err_t bmp280_driver_reset(void);
  */
 esp_err_t bmp280_driver_deinit(void);
 
+/**
+ * Disable the BMP280 sensor (stub - no hardware sleep mode).
+ *
+ * @return ESP_OK
+ */
+esp_err_t bmp280_driver_disable(void);
+
+/**
+ * Enable the BMP280 sensor (stub - no hardware sleep mode).
+ *
+ * @return ESP_OK
+ */
+esp_err_t bmp280_driver_enable(void);
+
 #ifdef __cplusplus
 }
 #endif

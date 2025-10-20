@@ -61,6 +61,20 @@ esp_err_t sgp41_driver_conditioning_tick(float temp_c, float humidity_rh);
  */
 bool sgp41_driver_is_reporting_ready(void);
 
+/**
+ * Disable the SGP41 sensor (stub - no hardware sleep mode).
+ *
+ * @return ESP_OK
+ */
+esp_err_t sgp41_driver_disable(void);
+
+/**
+ * Enable the SGP41 sensor (stub - no hardware sleep mode).
+ *
+ * @return ESP_OK
+ */
+esp_err_t sgp41_driver_enable(void);
+
 #ifdef __cplusplus
 }
 #endif
