@@ -356,11 +356,11 @@ esp_err_t mqtt_manager_init(iaq_system_context_t *ctx)
         BaseType_t task_ret = xTaskCreatePinnedToCore(
             mqtt_publish_worker_task,
             "mqtt_publish",
-            TASK_STACK_NETWORK_MANAGER,
+            TASK_STACK_MQTT_MANAGER,
             NULL,
-            TASK_PRIORITY_NETWORK_MANAGER,
+            TASK_PRIORITY_MQTT_MANAGER,
             &s_publish_task_handle,
-            TASK_CORE_NETWORK_MANAGER
+            TASK_CORE_MQTT_MANAGER
         );
         if (task_ret != pdPASS) {
             ESP_LOGE(TAG, "Failed to create MQTT publish worker task");

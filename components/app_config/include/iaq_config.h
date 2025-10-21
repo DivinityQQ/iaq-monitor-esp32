@@ -18,7 +18,7 @@
  * Based on project summary architecture
  */
 #define TASK_PRIORITY_SENSOR_COORDINATOR    5
-#define TASK_PRIORITY_NETWORK_MANAGER       3
+#define TASK_PRIORITY_MQTT_MANAGER          3
 #define TASK_PRIORITY_DISPLAY               2
 #define TASK_PRIORITY_STATUS_LED            1
 
@@ -26,7 +26,7 @@
  * Task stack sizes (bytes)
  */
 #define TASK_STACK_SENSOR_COORDINATOR   4096
-#define TASK_STACK_NETWORK_MANAGER      3072
+#define TASK_STACK_MQTT_MANAGER         4096  /* Increased from 3072 due to cJSON stack usage */
 #define TASK_STACK_DISPLAY              3072
 #define TASK_STACK_STATUS_LED           2048
 
@@ -36,7 +36,7 @@
  * Core 1 (APP_CPU): Network/MQTT
  */
 #define TASK_CORE_SENSOR_COORDINATOR    0
-#define TASK_CORE_NETWORK_MANAGER       1
+#define TASK_CORE_MQTT_MANAGER          1
 #define TASK_CORE_DISPLAY               0
 #define TASK_CORE_STATUS_LED            0
 

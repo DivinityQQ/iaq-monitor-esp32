@@ -168,17 +168,27 @@ esp_err_t s8_driver_init(void)
 
     /* Read serial number */
     uint8_t payload[8]; size_t len = 0;
-    uint32_t serial = 0; 
+    uint32_t serial = 0;
     if (s8_mb_read_regs(S8_MB_FN_READ_INPUT, /*addr*/(uint16_t)(S8_IR_SENSOR_ID_HIGH_REG - 1), /*qty*/2, payload, sizeof(payload), &len) == ESP_OK && len == 4) {
         serial = ((uint32_t)payload[0] << 8) | payload[1];
         serial = (serial << 16) | (((uint32_t)payload[2] << 8) | payload[3]);
     }
 
+    /* S8 needs time after UART init before accepting write commands.
+     * Read operations work immediately, but writes timeout without this delay. */
+    vTaskDelay(pdMS_TO_TICKS(100));
+
     /* Align sensor ABC with Kconfig: force disable if not enabled; set period if enabled */
 #ifdef CONFIG_IAQ_S8_ENABLE_ABC
-    (void)s8_mb_write_single((uint16_t)(S8_HR_ABC_PERIOD_REG - 1), (uint16_t)CONFIG_IAQ_S8_ABC_PERIOD_HOURS);
+    esp_err_t abc_err = s8_mb_write_single((uint16_t)(S8_HR_ABC_PERIOD_REG - 1), (uint16_t)CONFIG_IAQ_S8_ABC_PERIOD_HOURS);
+    if (abc_err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to set S8 ABC period to %d hours: %s", CONFIG_IAQ_S8_ABC_PERIOD_HOURS, esp_err_to_name(abc_err));
+    }
 #else
-    (void)s8_mb_write_single((uint16_t)(S8_HR_ABC_PERIOD_REG - 1), 0x0000);
+    esp_err_t abc_err = s8_mb_write_single((uint16_t)(S8_HR_ABC_PERIOD_REG - 1), 0x0000);
+    if (abc_err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to disable S8 ABC: %s", esp_err_to_name(abc_err));
+    }
 #endif
 
     /* Re-read ABC period for accurate log */
