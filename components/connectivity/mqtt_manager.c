@@ -28,6 +28,7 @@
 #include "esp_timer.h"
 #include "esp_task_wdt.h"
 #include "time_sync.h"
+#include "iaq_profiler.h"
 
 static const char *TAG = "MQTT_MGR";
 
@@ -366,6 +367,7 @@ esp_err_t mqtt_manager_init(iaq_system_context_t *ctx)
             ESP_LOGE(TAG, "Failed to create MQTT publish worker task");
             return ESP_FAIL;
         }
+        iaq_profiler_register_task("mqtt_publish", s_publish_task_handle, TASK_STACK_MQTT_MANAGER);
     }
 
     esp_err_t timer_ret = ensure_publish_timers_started();
@@ -1232,20 +1234,28 @@ static void mqtt_publish_worker_task(void *arg)
 
         /* Publish all requested topics from single snapshot */
         if (pending_events & (1 << MQTT_PUBLISH_EVENT_HEALTH)) {
+            iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_MQTT_HEALTH);
             mqtt_publish_status(&snapshot);
+            iaq_prof_end(p);
             if (wdt_ret == ESP_OK) esp_task_wdt_reset();
         }
         if (pending_events & (1 << MQTT_PUBLISH_EVENT_STATE)) {
+            iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_MQTT_STATE);
             mqtt_publish_state(&snapshot);
+            iaq_prof_end(p);
             if (wdt_ret == ESP_OK) esp_task_wdt_reset();
         }
         if (pending_events & (1 << MQTT_PUBLISH_EVENT_METRICS)) {
+            iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_MQTT_METRICS);
             mqtt_publish_metrics(&snapshot);
+            iaq_prof_end(p);
             if (wdt_ret == ESP_OK) esp_task_wdt_reset();
         }
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
         if (pending_events & (1 << MQTT_PUBLISH_EVENT_DIAGNOSTICS)) {
+            iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_MQTT_DIAG);
             mqtt_publish_diagnostics(&snapshot);
+            iaq_prof_end(p);
             if (wdt_ret == ESP_OK) esp_task_wdt_reset();
         }
 #endif

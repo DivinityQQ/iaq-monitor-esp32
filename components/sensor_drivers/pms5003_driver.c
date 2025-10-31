@@ -11,6 +11,7 @@
 #include <string.h>
 #include <stdlib.h>
 #include "driver/gpio.h"
+#include "iaq_profiler.h"
 
 #ifdef CONFIG_IAQ_SIMULATION
 #include "sensor_sim.h"
@@ -168,8 +169,10 @@ static void pms5003_rx_task(void *arg)
                     for (; i <= total - 32; ++i) {
                         if (buf[i] == 0x42 && buf[i+1] == 0x4D && uart_validate_pms5003_frame(&buf[i])) {
                             float pm1 = NAN, pm25 = NAN, pm10 = NAN;
+                            uint64_t t0 = iaq_prof_tic();
                             if (parse_pms_frame(&buf[i], &pm1, &pm25, &pm10)) {
                                 pms_filter_add_sample(pm1, pm25, pm10);
+                                iaq_prof_toc(IAQ_METRIC_SENSOR_PMS5003_RX, t0);
                             }
                             int remain = total - (i + 32);
                             if (remain > 0) memmove(buf, buf + i + 32, remain);
@@ -290,6 +293,8 @@ esp_err_t pms5003_driver_init(void)
             ESP_LOGE(TAG, "Failed to create PMS5003 RX task");
             return ESP_ERR_NO_MEM;
         }
+        /* Register for stack HWM reporting */
+        iaq_profiler_register_task("pms5003_rx", s_rx_task, 2048);
     }
 #endif
     ESP_LOGI(TAG, "PMS5003 driver initialized (UART%d, SET=%s, RST=%s)",

@@ -16,6 +16,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_check.h"
+#include "iaq_profiler.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include <time.h>
@@ -572,6 +573,7 @@ static void display_task(void *arg)
         s_force_redraw = false;
 
         /* Render all pages with hash skip */
+        iaq_prof_ctx_t prof = iaq_prof_start(IAQ_METRIC_DISPLAY_FRAME);
         for (uint8_t page = 0; page < 8; ++page) {
             display_gfx_clear(page_buf);
             s_screens[idx].render(page, page_buf, true);
@@ -592,11 +594,13 @@ static void display_task(void *arg)
         }
 
         if (frame_failed) {
+            iaq_prof_end(prof);
             vTaskDelay(pdMS_TO_TICKS(200));
             continue;
         }
 
         display_health_record_success();
+        iaq_prof_end(prof);
 
         /* Update last drawn screen after a render pass */
         last_drawn_screen = idx;
@@ -1182,6 +1186,9 @@ esp_err_t display_ui_start(void)
 
     /* Route button ISR events directly to display task via notifications */
     display_input_set_notify_task(s_task, DISP_NOTIFY_BTN_SHORT, DISP_NOTIFY_BTN_LONG);
+
+    /* Register for stack HWM reporting */
+    iaq_profiler_register_task("display", s_task, TASK_STACK_DISPLAY);
 
     ESP_LOGI(TAG, "Display task started (core %d, priority %d)", TASK_CORE_DISPLAY, TASK_PRIORITY_DISPLAY);
     return ESP_OK;

@@ -19,4 +19,5 @@ idf_component_register(
         sensor_coordinator
         console_commands
         app_config
+        iaq_profiler
 )

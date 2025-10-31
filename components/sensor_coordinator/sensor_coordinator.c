@@ -27,6 +27,7 @@
 #include "sensor_fusion.h"
 #include "metrics_calc.h"
 #include "esp_task_wdt.h"
+#include "iaq_profiler.h"
 
 static const char *TAG = "SENSOR_COORD";
 
@@ -230,7 +231,9 @@ static esp_err_t read_sensor_mcu(void)
     }
 
     float temp_c = 0.0f;
+    uint64_t t0 = iaq_prof_tic();
     esp_err_t ret = mcu_temp_driver_read_celsius(&temp_c);
+    iaq_prof_toc(IAQ_METRIC_SENSOR_MCU_READ, t0);
 
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
@@ -260,7 +263,9 @@ static esp_err_t read_sensor_sht45(void)
     }
 
     float temp_c = 0.0f, humidity_rh = 0.0f;
+    uint64_t t0 = iaq_prof_tic();
     esp_err_t ret = sht45_driver_read(&temp_c, &humidity_rh);
+    iaq_prof_toc(IAQ_METRIC_SENSOR_SHT45_READ, t0);
 
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
@@ -292,7 +297,9 @@ static esp_err_t read_sensor_bmp280(void)
     }
 
     float pressure_hpa = 0.0f, temp_c = 0.0f;
+    uint64_t t0 = iaq_prof_tic();
     esp_err_t ret = bmp280_driver_read(&pressure_hpa, &temp_c);
+    iaq_prof_toc(IAQ_METRIC_SENSOR_BMP280_READ, t0);
 
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
@@ -330,7 +337,9 @@ static esp_err_t read_sensor_sgp41(void)
     }
 
     uint16_t voc_index = 0, nox_index = 0;
+    uint64_t t0 = iaq_prof_tic();
     esp_err_t ret = sgp41_driver_read(&voc_index, &nox_index, temp_c, humidity_rh);
+    iaq_prof_toc(IAQ_METRIC_SENSOR_SGP41_READ, t0);
 
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
@@ -362,7 +371,9 @@ static esp_err_t read_sensor_pms5003(void)
     }
 
     float pm1_0 = 0.0f, pm2_5 = 0.0f, pm10 = 0.0f;
+    uint64_t t0 = iaq_prof_tic();
     esp_err_t ret = pms5003_driver_read(&pm1_0, &pm2_5, &pm10);
+    iaq_prof_toc(IAQ_METRIC_SENSOR_PMS5003_READ, t0);
 
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
@@ -396,7 +407,9 @@ static esp_err_t read_sensor_s8(void)
     }
 
     float co2_ppm = 0.0f;
+    uint64_t t0 = iaq_prof_tic();
     esp_err_t ret = s8_driver_read_co2(&co2_ppm);
+    iaq_prof_toc(IAQ_METRIC_SENSOR_S8_READ, t0);
 
     if (ret == ESP_OK) {
         IAQ_DATA_WITH_LOCK() {
@@ -425,10 +438,12 @@ static esp_err_t read_sensor_s8(void)
  */
 static void fusion_timer_callback(void *arg)
 {
+    iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_FUSION_TICK);
     IAQ_DATA_WITH_LOCK() {
         iaq_data_t *data = iaq_data_get();
         fusion_apply(data);
     }
+    iaq_prof_end(p);
 }
 
 /**
@@ -438,10 +453,12 @@ static void fusion_timer_callback(void *arg)
  */
 static void metrics_timer_callback(void *arg)
 {
+    iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_METRICS_TICK);
     IAQ_DATA_WITH_LOCK() {
         iaq_data_t *data = iaq_data_get();
         metrics_calculate_all(data);
     }
+    iaq_prof_end(p);
 }
 
 /**
@@ -973,6 +990,9 @@ esp_err_t sensor_coordinator_start(void)
         s_running = false;
         return ESP_FAIL;
     }
+
+    /* Register task for stack HWM reporting */
+    iaq_profiler_register_task("sensor_coord", s_sensor_task_handle, TASK_STACK_SENSOR_COORDINATOR);
 
     /* Start fusion timer (1 Hz = 1000000 microseconds) */
     if (s_fusion_timer) {

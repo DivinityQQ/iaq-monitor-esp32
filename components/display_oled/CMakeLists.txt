@@ -17,6 +17,7 @@ idf_component_register(
         system_context
         time_sync
         iaq_data
+        iaq_profiler
         sensor_drivers
         sensor_coordinator
         app_config

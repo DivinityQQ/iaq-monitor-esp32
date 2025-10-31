@@ -13,6 +13,7 @@ idf_component_register(
         mqtt
         json
         iaq_data
+        iaq_profiler
         system_context
         sensor_coordinator
         time_sync

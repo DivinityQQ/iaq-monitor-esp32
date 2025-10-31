@@ -21,6 +21,7 @@
 #include "console_commands.h"
 #include "time_sync.h"
 #include "display_oled/display_ui.h"
+#include "iaq_profiler.h"
 
 static const char *TAG = "IAQ_MAIN";
 
@@ -58,13 +59,8 @@ static void system_status_timer_callback(void* arg)
         data->system.wifi_rssi = wifi_manager_get_rssi();
     }
 
-    /* Log status to console (always, regardless of MQTT state) */
-    ESP_LOGI(TAG, "Status: Uptime=%lus, Heap=%lu/%lu, WiFi=%s, MQTT=%s",
-             (uint32_t)(esp_timer_get_time() / 1000000),
-             esp_get_free_heap_size(),
-             esp_get_minimum_free_heap_size(),
-             wifi_manager_is_connected() ? "OK" : "Down",
-             mqtt_manager_is_connected() ? "OK" : "Down");
+    /* Unified status/profiling report (simple when profiling disabled) */
+    iaq_status_report();
 }
 
 /**
@@ -158,6 +154,9 @@ void app_main(void)
     ESP_LOGI(TAG, "Initializing IAQ data structure");
     ESP_ERROR_CHECK(iaq_data_init());
 
+    /* Initialize profiler (no-op when disabled) */
+    iaq_profiler_init();
+
     /* Create and start system status timer BEFORE mqtt_manager_init to prevent race */
     ESP_LOGI(TAG, "Creating system status timer");
     const esp_timer_create_args_t system_status_timer_args = {
@@ -165,11 +164,17 @@ void app_main(void)
         .name = "system_status"
     };
     ESP_ERROR_CHECK(esp_timer_create(&system_status_timer_args, &system_status_timer));
-    ESP_ERROR_CHECK(esp_timer_start_periodic(system_status_timer, STATUS_PUBLISH_INTERVAL_MS * 1000));
+    uint64_t status_interval_ms = STATUS_PUBLISH_INTERVAL_MS;
+#ifdef CONFIG_IAQ_PROFILING
+    if (CONFIG_IAQ_PROFILING && CONFIG_IAQ_PROFILING_INTERVAL_SEC > 0) {
+        status_interval_ms = (uint64_t)CONFIG_IAQ_PROFILING_INTERVAL_SEC * 1000ULL;
+    }
+#endif
+    ESP_ERROR_CHECK(esp_timer_start_periodic(system_status_timer, status_interval_ms * 1000ULL));
 
     /* Call timer callback once immediately to populate initial values before MQTT init */
     system_status_timer_callback(NULL);
-    ESP_LOGI(TAG, "System status timer started (%d ms interval)", STATUS_PUBLISH_INTERVAL_MS);
+    ESP_LOGI(TAG, "System status timer started (%llu ms interval)", (unsigned long long)status_interval_ms);
 
     /* Initialize WiFi manager */
     ESP_LOGI(TAG, "Initializing WiFi manager");

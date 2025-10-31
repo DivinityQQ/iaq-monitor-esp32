@@ -195,4 +195,50 @@ menu "Time Synchronization"
             Hostname of a secondary NTP server (optional).
 endmenu
 
+menu "Profiling"
+    config IAQ_PROFILING
+        bool "Enable profiling and extended status reporting"
+        default n
+        help
+            Enable low-overhead profiling of key operations and enhanced
+            system status report. When disabled, reporting falls back to a
+            single concise status line.
+
+    config IAQ_PROFILING_INTERVAL_SEC
+        int "Profiling report interval (seconds)"
+        default 30
+        range 5 600
+        depends on IAQ_PROFILING
+        help
+            How often to print and reset profiling statistics.
+
+    config IAQ_PROFILING_TASK_STACKS
+        bool "Include task stack high-water marks in report"
+        default y
+        depends on IAQ_PROFILING
+        help
+            Report FreeRTOS task stack headroom (bytes) for registered tasks.
+
+    config IAQ_PROFILING_RUNTIME_STATS
+        bool "Include CPU runtime stats per task"
+        default n
+        depends on IAQ_PROFILING
+        select FREERTOS_USE_TRACE_FACILITY
+        select FREERTOS_GENERATE_RUN_TIME_STATS
+        select FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER
+        select FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
+        help
+            Adds CPU usage breakdown per task using FreeRTOS runtime stats.
+            Increases code size modestly.
+
+    config IAQ_PROFILING_PARSEABLE_OUTPUT
+        bool "Use machine-parseable output format"
+        default n
+        depends on IAQ_PROFILING
+        help
+            Emit simplified parseable lines instead of human-friendly formatting.
+            Useful for scraping logs; off by default.
+            Note: Reserved for future use; currently not used.
+endmenu
+
 endmenu
