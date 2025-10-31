@@ -1,0 +1,140 @@
+# Changelog
+
+All notable changes to this project are documented in this file.
+
+The format follows Keep a Changelog, and the project adheres to Semantic Versioning.
+
+## [0.7.6] - 2025-10-31
+
+- Added: Ability to disable individual sensors.
+- Changed: Tuned Kconfig defaults for better out-of-the-box behavior.
+- Fixed: Ensure S8 ABC setting applies correctly on boot; renamed legacy network manager macros to MQTT manager.
+- Fixed: PMS5003 error recovery logic to handle sensor faults more robustly.
+
+## [0.7.5] - 2025-10-18
+
+- Added: Option to disable internal pull-ups via Kconfig.
+- Added: Display disconnect recovery logic and basic logging for display input.
+- Changed: Reworked display to be event-driven; proper night schedule; updated console commands to match new architecture.
+- Changed: Optimized default settings (performance, log level, certificate bundle).
+- Changed: Default UART2 pins to free USB D-/D+ for native USB flashing.
+- Changed: Improved pressure trend calculation.
+- Changed: General code structure optimizations and cleanups.
+- Fixed: Do not treat AQI of 0 as invalid in display.
+
+## [0.7.2] - 2025-10-13
+
+Improvements:
+- Display driver improvements and code refinements
+- SGP41 warmup logic made more intuitive
+- Reworked OLED overview screen for better readability
+
+## [0.7.1] - 2025-10-13
+
+Features:
+- Improved time sync robustness with better error handling
+- Completed display driver with all 6 screens implemented
+- Added button input handling with debounce and long-press detection
+- Fixed compilation warnings when button is disabled
+
+## [0.7.0] - 2025-10-13
+
+Major Features:
+- Implemented SH1106 OLED display driver (128x64 resolution)
+  - 6 information screens: Overview, Environment, Air Quality, CO₂ Detail, Particulate, System
+  - Button navigation support (short press = next screen, long press = toggle on/off)
+  - Night mode with configurable schedule (auto-dim during specified hours)
+  - Wake-on-button during night mode with configurable duration
+  - Idle auto-off with configurable timeout
+  - Dirty tracking for efficient screen updates
+  - Console commands for display control (on/off/next/prev/screen/invert/contrast)
+- Enhanced MQTT TLS support:
+  - Custom Root CA PEM embedding
+  - Mutual TLS (mTLS) with client certificates
+  - AWS IoT Core support with ALPN for port 443
+  - Flexible trust modes (certificate bundle, custom CA, or insecure for testing)
+- CO₂ rate calculation improvements:
+  - Switched from simple endpoint comparison to linear regression
+  - Added Exponential Moving Average (EMA) smoothing to reduce jitter
+  - Implemented minimum time span requirement (5 minutes) to avoid extrapolation errors
+  - Added outlier clamping (±2500 ppm/hr) for more stable metrics
+
+## [0.6.3] - 2025-10-12
+
+Improvements:
+- Tightened Wi‑Fi reconnect behavior for robustness
+- Console `wifi set` now supports SSID/password with spaces (quoted)
+- Added SNTP time sync component with configurable TZ and events
+- Fixed CO₂ rate metric calculation
+
+## [0.6.0] - 2025-10-12
+
+Major Features:
+- Implemented real hardware drivers: PMS5003 (PM) with background reader and smoothing, Senseair S8 (CO₂) with diagnostics/ABC controls, SHT45 (T/RH)
+- Implemented SGP41 (VOC/NOx) driver using Sensirion Gas Index Algorithm (vendor code)
+- Implemented BMP280 (pressure) driver with auto‑probe (0x76/0x77)
+- Fusion: recompute RH at corrected temperature; used in PM humidity correction
+
+## [0.5.5] - 2025-10-08
+
+Fixes & Tweaks:
+- Always publish score metrics; improved simulated sensor data
+- Set telemetry QoS to 0 and added safeguards for full MQTT queue
+- Fixed absolute humidity calculation
+
+## [0.5.3] - 2025-10-07
+
+Reliability:
+- Optimized MQTT publish queue; clarified event naming
+- Ensured metrics publishing always includes all JSON fields
+
+## [0.5.1] - 2025-10-07
+
+Refactoring:
+- Restructured IAQ data model to separate raw and fused sensor readings
+  - Added `iaq_data.raw` structure for uncompensated sensor values
+  - Renamed compensated values to `iaq_data.fused` for clarity
+  - Updated all components (MQTT, console, fusion, metrics) to use new structure
+  - Improved data flow transparency for diagnostics and validation
+
+## [0.5.0] - 2025-10-07
+
+Major Features:
+- Added sensor fusion with cross-sensor compensation:
+  - PM humidity correction using RH-dependent factor
+  - CO₂ pressure compensation (reference 101.325 kPa)
+  - CO₂ ABC (Automatic Baseline Correction) with 7-day tracking
+  - Temperature self-heating offset
+- Implemented derived metrics calculation (0.2 Hz timer):
+  - EPA AQI (PM2.5/PM10 piecewise linear)
+  - Thermal comfort (dew point, absolute humidity, heat index, comfort score/category)
+  - Pressure trend (3-hour window, rising/stable/falling)
+  - CO₂ rate of change (ppm/hr with median filtering)
+  - PM2.5 spike detection (statistical + absolute threshold)
+  - Mold risk index (dew point-based, 0-100 score)
+  - VOC/NOx categorization (Excellent/Good/Moderate/Poor/Very Poor/Severe)
+  - Overall IAQ score (weighted average of sub-scores)
+- Enhanced MQTT architecture:
+  - Migrated to unified topics (/state, /metrics, /health, /diagnostics)
+  - Timer-based publishing with staggered starts (reduces CPU/network bursts)
+  - Event coalescing in publish worker (single snapshot for efficiency)
+  - Queue draining on disconnect (prevents stale message bursts)
+- Sensor auto-recovery:
+  - Exponential backoff for ERROR state sensors (30s → 60s → 120s → 300s cap)
+  - Automatic reset attempts with state machine transitions
+- Robustness improvements:
+  - Task Watchdog Timer (TWDT) integration for deadlock detection
+  - Median filtering for CO₂ rate calculation (noise suppression)
+  - Enhanced error handling and logging
+
+Documentation:
+- Added comprehensive METRICS.md with calculation details and interpretation guidelines
+- Updated architecture diagrams and data flow documentation
+
+## [0.4.0] - 2025-10-03
+
+- Sensor coordinator with state machine (UNINIT → INIT → WARMING → READY → ERROR)
+- Per-sensor configurable cadences and warm-up periods
+- Console commands for sensor control and diagnostics
+- Basic MQTT integration with Home Assistant discovery
+

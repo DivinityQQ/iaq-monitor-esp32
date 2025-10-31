@@ -8,10 +8,18 @@
 
 /**
  * Version information
+ * These may be provided via compiler definitions from CMake (PROJECT_VERSION_*).
+ * Fallbacks below are only used if not supplied by the build system.
  */
+#ifndef IAQ_VERSION_MAJOR
 #define IAQ_VERSION_MAJOR  0
+#endif
+#ifndef IAQ_VERSION_MINOR
 #define IAQ_VERSION_MINOR  7
-#define IAQ_VERSION_PATCH  5
+#endif
+#ifndef IAQ_VERSION_PATCH
+#define IAQ_VERSION_PATCH  6
+#endif
 
 /**
  * Task priorities (higher number = higher priority)
