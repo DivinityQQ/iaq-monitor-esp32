@@ -32,6 +32,8 @@ static QueueHandle_t s_uart_queue = NULL;
 static portMUX_TYPE s_pm_lock = portMUX_INITIALIZER_UNLOCKED;
 static float s_smoothed_pm1 = NAN, s_smoothed_pm25 = NAN, s_smoothed_pm10 = NAN;
 static int64_t s_last_update_us = 0;
+/* Signal for RX task to clear its internal parser buffer (e.g., after reset) */
+static volatile bool s_rx_clear_requested = false;
 
 static int cmp_f(const void *a, const void *b)
 {
@@ -125,20 +127,44 @@ static void pms5003_rx_task(void *arg)
     uart_event_t ev;
     while (s_initialized) {
         if (xQueueReceive(s_uart_queue, &ev, portMAX_DELAY) != pdTRUE) continue;
-        if (ev.type == UART_DATA || ev.type == UART_FIFO_OVF || ev.type == UART_BUFFER_FULL) {
+
+        /* Handle explicit clear requests (e.g., after reset/flush) */
+        if (s_rx_clear_requested) {
+            total = 0;
+            s_rx_clear_requested = false;
+        }
+
+        if (ev.type == UART_FIFO_OVF || ev.type == UART_BUFFER_FULL) {
+            /* On overflow/full conditions, flush hardware buffer and drop any partial parse state */
+            (void)uart_bus_flush_rx(s_uart_port);
+            total = 0;
+            /* Continue to next event */
+            continue;
+        }
+
+        if (ev.type == UART_DATA) {
             size_t available = 0;
             (void)uart_get_buffered_data_len(s_uart_port, &available);
             while (available > 0) {
                 int max_can = (int)(sizeof(buf) - (size_t)total);
+                if (max_can <= 0) {
+                    /* Buffer full without a parsed frame: drop all but last byte to resync */
+                    if (total > 1) {
+                        buf[0] = buf[total - 1];
+                        total = 1;
+                    }
+                    max_can = (int)(sizeof(buf) - (size_t)total);
+                }
                 int to_read = (available < (size_t)max_can) ? (int)available : max_can;
                 int n = uart_bus_read_bytes(s_uart_port, buf + total, to_read, 0);
                 if (n <= 0) break;
                 total += n;
                 available -= n;
 
-                /* Try to parse frames from buffer */
+                /* Try to parse frames from buffer, discarding junk until sync */
                 while (total >= 32) {
                     int i = 0;
+                    bool found = false;
                     for (; i <= total - 32; ++i) {
                         if (buf[i] == 0x42 && buf[i+1] == 0x4D && uart_validate_pms5003_frame(&buf[i])) {
                             float pm1 = NAN, pm25 = NAN, pm10 = NAN;
@@ -148,10 +174,18 @@ static void pms5003_rx_task(void *arg)
                             int remain = total - (i + 32);
                             if (remain > 0) memmove(buf, buf + i + 32, remain);
                             total = remain;
+                            found = true;
                             break;
                         }
                     }
-                    if (i > total - 32) break;
+                    if (!found) {
+                        /* No valid frame found: discard all but last byte to allow resync on next data */
+                        if (total > 1) {
+                            buf[0] = buf[total - 1];
+                            total = 1;
+                        }
+                        break;
+                    }
                 }
             }
         }
@@ -341,8 +375,6 @@ esp_err_t pms5003_driver_reset(void)
         vTaskDelay(pdMS_TO_TICKS(CONFIG_IAQ_PMS5003_RST_PULSE_MS));
         gpio_set_level(s_rst_gpio, 1);
         vTaskDelay(pdMS_TO_TICKS(CONFIG_IAQ_PMS5003_RST_SETTLE_MS));
-        /* After reset, ensure sensor is in work mode if SET available */
-        pms_set_work_mode(true);
         /* Flush any reset noise */
         (void)uart_bus_flush_rx(s_uart_port);
         ESP_LOGI(TAG, "PMS5003 hardware reset pulsed (LOW %d ms, settle %d ms)",
@@ -350,10 +382,17 @@ esp_err_t pms5003_driver_reset(void)
     } else {
         /* Flush RX buffer to clear any stale data */
         (void)uart_bus_flush_rx(s_uart_port);
-        /* If SET pin available, ensure we are awake */
-        pms_set_work_mode(true);
-        ESP_LOGI(TAG, "PMS5003 driver reset (RX flushed, sensor awake)");
+        ESP_LOGI(TAG, "PMS5003 driver reset (RX flushed)");
     }
+
+#ifdef CONFIG_IAQ_PMS5003_BG_READER
+    /* Ask RX task to drop any partial buffer; mark last update as stale */
+    s_rx_clear_requested = true;
+    portENTER_CRITICAL(&s_pm_lock);
+    s_last_update_us = 0;
+    portEXIT_CRITICAL(&s_pm_lock);
+#endif
+
     return ESP_OK;
 }
 
