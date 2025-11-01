@@ -402,6 +402,12 @@ esp_err_t mqtt_manager_start(void)
         return ESP_ERR_INVALID_STATE;
     }
 
+    /* Do not start MQTT unless WiFi is connected (IP acquired). */
+    if (!wifi_manager_is_connected()) {
+        ESP_LOGI(TAG, "WiFi not connected; deferring MQTT start until WiFi connects");
+        return ESP_ERR_INVALID_STATE;
+    }
+
     esp_err_t timer_ret = ensure_publish_timers_started();
     if (timer_ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to ensure MQTT timers running: %s", esp_err_to_name(timer_ret));
@@ -425,12 +431,17 @@ esp_err_t mqtt_manager_stop(void)
     if (!s_initialized || s_mqtt_client == NULL) return ESP_OK;
     ESP_LOGI(TAG, "Stopping MQTT client");
     esp_err_t ret = esp_mqtt_client_stop(s_mqtt_client);
-    if (ret == ESP_OK) {
-        esp_mqtt_client_destroy(s_mqtt_client);
-        s_mqtt_client = NULL;
-        ESP_LOGI(TAG, "MQTT client stopped and destroyed");
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "esp_mqtt_client_stop returned %s; destroying client anyway", esp_err_to_name(ret));
     }
-    return ret;
+    /* Always destroy to ensure a clean slate regardless of start state */
+    esp_mqtt_client_destroy(s_mqtt_client);
+    s_mqtt_client = NULL;
+    s_mqtt_connected = false;
+    IAQ_DATA_WITH_LOCK() { iaq_data_get()->system.mqtt_connected = false; }
+    xEventGroupClearBits(s_system_ctx->event_group, MQTT_CONNECTED_BIT);
+    ESP_LOGI(TAG, "MQTT client stopped and destroyed");
+    return ESP_OK;
 }
 
 /* HA discovery */

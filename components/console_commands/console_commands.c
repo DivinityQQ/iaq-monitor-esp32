@@ -459,13 +459,17 @@ static int cmd_mqtt_restart(int argc, char **argv)
     mqtt_manager_stop();
     vTaskDelay(pdMS_TO_TICKS(1000));
 
-    esp_err_t ret = mqtt_manager_start();
-    if (ret != ESP_OK) {
-        printf("Failed to start MQTT: %s\n", esp_err_to_name(ret));
-        return 1;
+    /* Only start immediately if WiFi is connected. Otherwise, defer until WiFi connects. */
+    if (wifi_manager_is_connected()) {
+        esp_err_t ret = mqtt_manager_start();
+        if (ret != ESP_OK) {
+            printf("Failed to start MQTT: %s\n", esp_err_to_name(ret));
+            return 1;
+        }
+        printf("MQTT restarted.\n");
+    } else {
+        printf("WiFi not connected; MQTT will start automatically after WiFi connects.\n");
     }
-
-    printf("MQTT restarted.\n");
     return 0;
 }
 
