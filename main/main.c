@@ -50,13 +50,16 @@ static void system_status_timer_callback(void* arg)
 {
     (void)arg;
 
+    /* Read values that don't require the data lock to minimize hold time */
+    int32_t rssi = wifi_manager_get_rssi();
+
     /* Update system metrics in IAQ data */
     IAQ_DATA_WITH_LOCK() {
         iaq_data_t *data = iaq_data_get();
         data->system.uptime_seconds = esp_timer_get_time() / 1000000;
         data->system.free_heap = esp_get_free_heap_size();
         data->system.min_free_heap = esp_get_minimum_free_heap_size();
-        data->system.wifi_rssi = wifi_manager_get_rssi();
+        data->system.wifi_rssi = rssi;
     }
 
     /* Unified status/profiling report (simple when profiling disabled) */
