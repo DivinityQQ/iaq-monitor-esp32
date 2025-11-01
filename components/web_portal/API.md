@@ -97,10 +97,18 @@
 - API errors are returned as JSON: `{ "error": { "code":"...", "message":"...", "status":<int> } }`.
 
 **Quick Test (curl)**
-- `curl http://<ip>/api/v1/info`
-- `curl http://<ip>/api/v1/state`
-- `curl http://<ip>/api/v1/metrics`
-- `curl http://<ip>/api/v1/health`
-- `curl http://<ip>/api/v1/sensors/cadence`
-- `curl -X POST http://<ip>/api/v1/wifi -H 'Content-Type: application/json' -d '{"ssid":"SSID","password":"PASS","restart":true}'`
-- `curl -X POST http://<ip>/api/v1/sensor/sht45/cadence -H 'Content-Type: application/json' -d '{"ms":5000}'`
+- HTTP examples:
+  - `curl http://<ip>/api/v1/info`
+  - `curl http://<ip>/api/v1/state`
+  - `curl http://<ip>/api/v1/metrics`
+  - `curl http://<ip>/api/v1/health`
+  - `curl http://<ip>/api/v1/sensors/cadence`
+  - `curl -X POST http://<ip>/api/v1/wifi -H 'Content-Type: application/json' -d '{"ssid":"SSID","password":"PASS","restart":true}'`
+  - `curl -X POST http://<ip>/api/v1/sensor/sht45/cadence -H 'Content-Type: application/json' -d '{"ms":5000}'`
+
+- HTTPS with self‑signed cert:
+  - When HTTPS is enabled and the device uses a self‑signed certificate (default), add `-k` (`--insecure`) to curl:
+    - `curl -k https://<ip>/api/v1/info`
+    - `curl -k https://<ip>/api/v1/state`
+    - `curl -k -X POST https://<ip>/api/v1/wifi -H 'Content-Type: application/json' -d '{"ssid":"SSID","password":"PASS","restart":true}'`
+  - Alternatively, supply the server cert/CA with `--cacert /path/to/cert.pem` instead of `-k`.
