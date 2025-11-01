@@ -17,40 +17,40 @@ cJSON* iaq_json_build_state(const iaq_data_t *data)
 
     cJSON *root = cJSON_CreateObject();
 
-    /* Fused (compensated) sensor values */
-    if (!isnan(data->fused.temp_c)) cJSON_AddNumberToObject(root, "temp_c", round_to_1dp(data->fused.temp_c));
+    /* Fused (compensated) sensor values - use validity flags instead of NaN checks */
+    if (data->valid.temp_c && !isnan(data->fused.temp_c)) cJSON_AddNumberToObject(root, "temp_c", round_to_1dp(data->fused.temp_c));
     else cJSON_AddNullToObject(root, "temp_c");
 
-    if (!isnan(data->fused.rh_pct)) cJSON_AddNumberToObject(root, "rh_pct", round_to_1dp(data->fused.rh_pct));
+    if (data->valid.rh_pct && !isnan(data->fused.rh_pct)) cJSON_AddNumberToObject(root, "rh_pct", round_to_1dp(data->fused.rh_pct));
     else cJSON_AddNullToObject(root, "rh_pct");
 
     /* Convert Pa -> hPa (1 hPa = 100 Pa) */
-    if (!isnan(data->fused.pressure_pa)) cJSON_AddNumberToObject(root, "pressure_hpa", round_to_1dp(data->fused.pressure_pa / 100.0));
+    if (data->valid.pressure_pa && !isnan(data->fused.pressure_pa)) cJSON_AddNumberToObject(root, "pressure_hpa", round_to_1dp(data->fused.pressure_pa / 100.0));
     else cJSON_AddNullToObject(root, "pressure_hpa");
 
-    if (!isnan(data->fused.pm25_ugm3)) cJSON_AddNumberToObject(root, "pm25_ugm3", round_to_1dp(data->fused.pm25_ugm3));
+    if (data->valid.pm25_ugm3 && !isnan(data->fused.pm25_ugm3)) cJSON_AddNumberToObject(root, "pm25_ugm3", round_to_1dp(data->fused.pm25_ugm3));
     else cJSON_AddNullToObject(root, "pm25_ugm3");
 
-    if (!isnan(data->fused.pm10_ugm3)) cJSON_AddNumberToObject(root, "pm10_ugm3", round_to_1dp(data->fused.pm10_ugm3));
+    if (data->valid.pm10_ugm3 && !isnan(data->fused.pm10_ugm3)) cJSON_AddNumberToObject(root, "pm10_ugm3", round_to_1dp(data->fused.pm10_ugm3));
     else cJSON_AddNullToObject(root, "pm10_ugm3");
 
 #ifdef CONFIG_MQTT_PUBLISH_PM1
-    if (!isnan(data->fused.pm1_ugm3)) cJSON_AddNumberToObject(root, "pm1_ugm3", round_to_1dp(data->fused.pm1_ugm3));
+    if (data->valid.pm1_ugm3 && !isnan(data->fused.pm1_ugm3)) cJSON_AddNumberToObject(root, "pm1_ugm3", round_to_1dp(data->fused.pm1_ugm3));
     else cJSON_AddNullToObject(root, "pm1_ugm3");
 #endif
 
-    if (!isnan(data->fused.co2_ppm)) cJSON_AddNumberToObject(root, "co2_ppm", round(data->fused.co2_ppm));
+    if (data->valid.co2_ppm && !isnan(data->fused.co2_ppm)) cJSON_AddNumberToObject(root, "co2_ppm", round(data->fused.co2_ppm));
     else cJSON_AddNullToObject(root, "co2_ppm");
 
     /* VOC/NOx indices (raw) */
-    if (data->raw.voc_index != UINT16_MAX) cJSON_AddNumberToObject(root, "voc_index", data->raw.voc_index);
+    if (data->valid.voc_index && data->raw.voc_index != UINT16_MAX) cJSON_AddNumberToObject(root, "voc_index", data->raw.voc_index);
     else cJSON_AddNullToObject(root, "voc_index");
 
-    if (data->raw.nox_index != UINT16_MAX) cJSON_AddNumberToObject(root, "nox_index", data->raw.nox_index);
+    if (data->valid.nox_index && data->raw.nox_index != UINT16_MAX) cJSON_AddNumberToObject(root, "nox_index", data->raw.nox_index);
     else cJSON_AddNullToObject(root, "nox_index");
 
     /* MCU temperature */
-    if (!isnan(data->raw.mcu_temp_c)) cJSON_AddNumberToObject(root, "mcu_temp_c", round_to_1dp(data->raw.mcu_temp_c));
+    if (data->valid.mcu_temp_c && !isnan(data->raw.mcu_temp_c)) cJSON_AddNumberToObject(root, "mcu_temp_c", round_to_1dp(data->raw.mcu_temp_c));
     else cJSON_AddNullToObject(root, "mcu_temp_c");
 
     /* Basic metrics */

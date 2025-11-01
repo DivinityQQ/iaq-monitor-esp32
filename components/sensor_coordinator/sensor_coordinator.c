@@ -76,6 +76,60 @@ static const uint32_t s_warmup_ms[SENSOR_ID_MAX] = {
     [SENSOR_ID_S8]      = CONFIG_IAQ_WARMUP_S8_MS,
 };
 
+/* Invalidate data for a specific sensor: clear valid flags and set values to sentinels.
+ * This ensures downstream publishers/UI do not display stale or default zeros
+ * during ERROR/DISABLED/recovery windows. */
+static void invalidate_sensor_data(sensor_id_t id)
+{
+    IAQ_DATA_WITH_LOCK() {
+        iaq_data_t *data = iaq_data_get();
+        switch (id) {
+            case SENSOR_ID_MCU:
+                data->valid.mcu_temp_c = false;
+                data->raw.mcu_temp_c = NAN;
+                break;
+            case SENSOR_ID_SHT45:
+                data->valid.temp_c = false;
+                data->valid.rh_pct = false;
+                data->raw.temp_c = NAN;
+                data->raw.rh_pct = NAN;
+                /* Fused values depend on SHT45 */
+                data->fused.temp_c = NAN;
+                data->fused.rh_pct = NAN;
+                break;
+            case SENSOR_ID_BMP280:
+                data->valid.pressure_pa = false;
+                data->raw.pressure_pa = NAN;
+                data->fused.pressure_pa = NAN;
+                break;
+            case SENSOR_ID_SGP41:
+                data->valid.voc_index = false;
+                data->valid.nox_index = false;
+                data->raw.voc_index = UINT16_MAX;
+                data->raw.nox_index = UINT16_MAX;
+                break;
+            case SENSOR_ID_PMS5003:
+                data->valid.pm1_ugm3 = false;
+                data->valid.pm25_ugm3 = false;
+                data->valid.pm10_ugm3 = false;
+                data->raw.pm1_ugm3 = NAN;
+                data->raw.pm25_ugm3 = NAN;
+                data->raw.pm10_ugm3 = NAN;
+                data->fused.pm1_ugm3 = NAN;
+                data->fused.pm25_ugm3 = NAN;
+                data->fused.pm10_ugm3 = NAN;
+                break;
+            case SENSOR_ID_S8:
+                data->valid.co2_ppm = false;
+                data->raw.co2_ppm = NAN;
+                data->fused.co2_ppm = NAN;
+                break;
+            default:
+                break;
+        }
+    }
+}
+
 /* Error threshold before transitioning to ERROR state */
 #define ERROR_THRESHOLD 3
 
@@ -185,6 +239,11 @@ static void transition_to_state(sensor_id_t id, sensor_state_t new_state)
         /* On transition to READY, reset error count */
         if (new_state == SENSOR_STATE_READY) {
             s_runtime[id].error_count = 0;
+        }
+
+        /* Invalidate data in states where values are not trustworthy */
+        if (new_state == SENSOR_STATE_ERROR || new_state == SENSOR_STATE_DISABLED) {
+            invalidate_sensor_data(id);
         }
     }
 }
@@ -576,6 +635,8 @@ static void sensor_coordinator_task(void *arg)
                         } else {
                             transition_to_state(i, SENSOR_STATE_READY);
                         }
+                        /* After recovery, mark values invalid until next good read */
+                        invalidate_sensor_data((sensor_id_t)i);
                         /* Reset recovery tracking */
                         s_recovery[i].retry_count = 0;
                         s_recovery[i].next_retry_delay_ms = 30000; // Reset to initial delay
@@ -636,6 +697,8 @@ static void sensor_coordinator_task(void *arg)
                         mcu_temp_driver_disable();
                         if (mcu_temp_driver_enable() == ESP_OK) {
                             transition_to_state(SENSOR_ID_MCU, SENSOR_STATE_READY);
+                            /* After reset, mark values invalid until next read */
+                            invalidate_sensor_data(SENSOR_ID_MCU);
                             op_res = ESP_OK;
                         } else {
                             op_res = ESP_FAIL;
@@ -644,26 +707,31 @@ static void sensor_coordinator_task(void *arg)
                         op_res = sht45_driver_reset();
                         if (op_res == ESP_OK) {
                             transition_to_state(SENSOR_ID_SHT45, SENSOR_STATE_READY);
+                            invalidate_sensor_data(SENSOR_ID_SHT45);
                         }
                     } else if (cmd.id == SENSOR_ID_BMP280) {
                         op_res = bmp280_driver_reset();
                         if (op_res == ESP_OK) {
                             transition_to_state(SENSOR_ID_BMP280, SENSOR_STATE_READY);
+                            invalidate_sensor_data(SENSOR_ID_BMP280);
                         }
                     } else if (cmd.id == SENSOR_ID_SGP41) {
                         op_res = sgp41_driver_reset();
                         if (op_res == ESP_OK) {
                             transition_to_state(SENSOR_ID_SGP41, SENSOR_STATE_READY);
+                            invalidate_sensor_data(SENSOR_ID_SGP41);
                         }
                     } else if (cmd.id == SENSOR_ID_PMS5003) {
                         op_res = pms5003_driver_reset();
                         if (op_res == ESP_OK) {
                             transition_to_state(SENSOR_ID_PMS5003, SENSOR_STATE_READY);
+                            invalidate_sensor_data(SENSOR_ID_PMS5003);
                         }
                     } else if (cmd.id == SENSOR_ID_S8) {
                         op_res = s8_driver_reset();
                         if (op_res == ESP_OK) {
                             transition_to_state(SENSOR_ID_S8, SENSOR_STATE_READY);
+                            invalidate_sensor_data(SENSOR_ID_S8);
                         }
                     }
                     break;
@@ -685,36 +753,7 @@ static void sensor_coordinator_task(void *arg)
                     }
                     if (op_res == ESP_OK) {
                         transition_to_state(cmd.id, SENSOR_STATE_DISABLED);
-                        /* Clear data validity flags for this sensor */
-                        IAQ_DATA_WITH_LOCK() {
-                            iaq_data_t *data = iaq_data_get();
-                            switch (cmd.id) {
-                                case SENSOR_ID_MCU:
-                                    data->valid.mcu_temp_c = false;
-                                    break;
-                                case SENSOR_ID_SHT45:
-                                    data->valid.temp_c = false;
-                                    data->valid.rh_pct = false;
-                                    break;
-                                case SENSOR_ID_BMP280:
-                                    data->valid.pressure_pa = false;
-                                    break;
-                                case SENSOR_ID_SGP41:
-                                    data->valid.voc_index = false;
-                                    data->valid.nox_index = false;
-                                    break;
-                                case SENSOR_ID_PMS5003:
-                                    data->valid.pm1_ugm3 = false;
-                                    data->valid.pm25_ugm3 = false;
-                                    data->valid.pm10_ugm3 = false;
-                                    break;
-                                case SENSOR_ID_S8:
-                                    data->valid.co2_ppm = false;
-                                    break;
-                                default:
-                                    break;
-                            }
-                        }
+                        invalidate_sensor_data(cmd.id);
                     }
                     break;
                 case CMD_ENABLE:
@@ -735,6 +774,8 @@ static void sensor_coordinator_task(void *arg)
                         } else {
                             transition_to_state(cmd.id, SENSOR_STATE_READY);
                         }
+                        /* After (re-)enable, clear any stale values until first read */
+                        invalidate_sensor_data(cmd.id);
                     }
                     break;
                 default:
