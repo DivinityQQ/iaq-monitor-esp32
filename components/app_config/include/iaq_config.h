@@ -37,6 +37,7 @@
 #define TASK_STACK_MQTT_MANAGER         4096  /* Increased from 3072 due to cJSON stack usage */
 #define TASK_STACK_DISPLAY              3072
 #define TASK_STACK_STATUS_LED           2048
+#define TASK_STACK_WEB_SERVER           6144
 
 /**
  * Task core affinity (ESP32-S3 is dual-core)
@@ -47,6 +48,7 @@
 #define TASK_CORE_MQTT_MANAGER          1
 #define TASK_CORE_DISPLAY               0
 #define TASK_CORE_STATUS_LED            0
+#define TASK_CORE_WEB_SERVER            1
 
 /**
  * Event bits for inter-task synchronization

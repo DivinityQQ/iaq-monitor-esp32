@@ -20,4 +20,5 @@ idf_component_register(
         console_commands
         app_config
         iaq_profiler
+        web_portal
 )

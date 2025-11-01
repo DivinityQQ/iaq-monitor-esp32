@@ -22,6 +22,7 @@
 #include "time_sync.h"
 #include "display_oled/display_ui.h"
 #include "iaq_profiler.h"
+#include "web_portal.h"
 
 static const char *TAG = "IAQ_MAIN";
 
@@ -183,6 +184,10 @@ void app_main(void)
     ESP_LOGI(TAG, "Initializing WiFi manager");
     ESP_ERROR_CHECK(wifi_manager_init(&g_system_ctx));
 
+    /* Initialize web portal (mount SPIFFS, prepare handlers) */
+    ESP_LOGI(TAG, "Initializing web portal");
+    ESP_ERROR_CHECK(web_portal_init(&g_system_ctx));
+
     /* Initialize MQTT manager (system metrics already populated, no race condition) */
     ESP_LOGI(TAG, "Initializing MQTT manager");
     ESP_ERROR_CHECK(mqtt_manager_init(&g_system_ctx));
@@ -218,6 +223,10 @@ void app_main(void)
         ESP_LOGW(TAG, "WiFi not provisioned. SoftAP '%s' is active for setup.", CONFIG_IAQ_AP_SSID);
         ESP_LOGW(TAG, "You can also use console: wifi set <ssid> <password> and then wifi restart");
     }
+
+    /* Start web portal after Wi‑Fi begin to make protocol choice simpler.
+     * It will start HTTP by default and switch to HTTPS once STA connects. */
+    ESP_ERROR_CHECK(web_portal_start());
 
     /* MQTT will be started automatically by iaq_event_handler when WiFi connects */
     if (mqtt_manager_is_configured()) {

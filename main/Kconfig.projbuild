@@ -275,7 +275,6 @@ menu "Profiling"
         depends on IAQ_PROFILING
         select FREERTOS_USE_TRACE_FACILITY
         select FREERTOS_GENERATE_RUN_TIME_STATS
-        select FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER
         select FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
         help
             Adds CPU usage breakdown per task using FreeRTOS runtime stats.

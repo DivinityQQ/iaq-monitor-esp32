@@ -29,6 +29,7 @@
 #include "esp_task_wdt.h"
 #include "time_sync.h"
 #include "iaq_profiler.h"
+#include "iaq_json.h"
 
 static const char *TAG = "MQTT_MGR";
 
@@ -505,53 +506,7 @@ static void mqtt_publish_ha_discovery(void)
 esp_err_t mqtt_publish_status(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
-    cJSON *root = cJSON_CreateObject();
-
-    /* System metrics */
-    cJSON_AddNumberToObject(root, "uptime", data->system.uptime_seconds);
-    cJSON_AddNumberToObject(root, "wifi_rssi", data->system.wifi_rssi);
-    cJSON_AddNumberToObject(root, "free_heap", data->system.free_heap);
-
-    /* Time sync status */
-    bool ts_ok = time_sync_is_set();
-    cJSON_AddBoolToObject(root, "time_synced", ts_ok);
-    if (ts_ok) {
-        time_t now = 0; time(&now);
-        cJSON_AddNumberToObject(root, "epoch", (double)now);
-    }
-
-    /* Per-sensor state details (query coordinator API) */
-    cJSON *sensors = cJSON_CreateObject();
-
-    for (int i = 0; i < SENSOR_ID_MAX; i++) {
-        sensor_runtime_info_t info;
-        if (sensor_coordinator_get_runtime_info((sensor_id_t)i, &info) != ESP_OK) {
-            continue;
-        }
-
-        cJSON *sensor = cJSON_CreateObject();
-        cJSON_AddStringToObject(sensor, "state", sensor_coordinator_state_to_string(info.state));
-        cJSON_AddNumberToObject(sensor, "errors", info.error_count);
-
-        int64_t now_us = esp_timer_get_time();
-
-        if (info.last_read_us > 0) {
-            int64_t age_s = (now_us - info.last_read_us) / 1000000LL;
-            cJSON_AddNumberToObject(sensor, "last_read_s", (double)age_s);
-        }
-
-        if (info.state == SENSOR_STATE_WARMING) {
-            int64_t remaining_us = info.warmup_deadline_us - now_us;
-            if (remaining_us > 0) {
-                cJSON_AddNumberToObject(sensor, "warmup_remaining_s", remaining_us / 1e6);
-            }
-        }
-
-        cJSON_AddItemToObject(sensors, sensor_coordinator_id_to_name((sensor_id_t)i), sensor);
-    }
-    cJSON_AddItemToObject(root, "sensors", sensors);
-
-    /* Publish using helper (takes ownership of root) */
+    cJSON *root = iaq_json_build_health(data);
     return publish_json(TOPIC_HEALTH, root);
 }
 
@@ -584,87 +539,7 @@ static esp_err_t publish_json(const char *topic, cJSON *obj)
 esp_err_t mqtt_publish_state(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
-
-    cJSON *root = cJSON_CreateObject();
-
-    /* Fused (compensated) sensor values */
-    if (!isnan(data->fused.temp_c)) {
-        cJSON_AddNumberToObject(root, "temp_c", round(data->fused.temp_c * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(root, "temp_c");
-    }
-
-    if (!isnan(data->fused.rh_pct)) {
-        cJSON_AddNumberToObject(root, "rh_pct", round(data->fused.rh_pct * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(root, "rh_pct");
-    }
-
-    if (!isnan(data->fused.pressure_pa)) {
-        cJSON_AddNumberToObject(root, "pressure_hpa", round(data->fused.pressure_pa / 10.0) / 10.0);  /* Pa -> hPa */
-    } else {
-        cJSON_AddNullToObject(root, "pressure_hpa");
-    }
-
-    if (!isnan(data->fused.pm25_ugm3)) {
-        cJSON_AddNumberToObject(root, "pm25_ugm3", round(data->fused.pm25_ugm3 * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(root, "pm25_ugm3");
-    }
-
-    if (!isnan(data->fused.pm10_ugm3)) {
-        cJSON_AddNumberToObject(root, "pm10_ugm3", round(data->fused.pm10_ugm3 * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(root, "pm10_ugm3");
-    }
-
-#ifdef CONFIG_MQTT_PUBLISH_PM1
-    if (!isnan(data->fused.pm1_ugm3)) {
-        cJSON_AddNumberToObject(root, "pm1_ugm3", round(data->fused.pm1_ugm3 * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(root, "pm1_ugm3");
-    }
-#endif
-
-    if (!isnan(data->fused.co2_ppm)) {
-        cJSON_AddNumberToObject(root, "co2_ppm", round(data->fused.co2_ppm));
-    } else {
-        cJSON_AddNullToObject(root, "co2_ppm");
-    }
-
-    /* VOC/NOx indices (not compensated, use raw) */
-    if (data->raw.voc_index != UINT16_MAX) {
-        cJSON_AddNumberToObject(root, "voc_index", data->raw.voc_index);
-    } else {
-        cJSON_AddNullToObject(root, "voc_index");
-    }
-
-    if (data->raw.nox_index != UINT16_MAX) {
-        cJSON_AddNumberToObject(root, "nox_index", data->raw.nox_index);
-    } else {
-        cJSON_AddNullToObject(root, "nox_index");
-    }
-
-    /* MCU temperature (not compensated) */
-    if (!isnan(data->raw.mcu_temp_c)) {
-        cJSON_AddNumberToObject(root, "mcu_temp_c", round(data->raw.mcu_temp_c * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(root, "mcu_temp_c");
-    }
-
-    /* Basic metrics (for quick overview) */
-    if (data->metrics.aqi_value != UINT16_MAX) {
-        cJSON_AddNumberToObject(root, "aqi", data->metrics.aqi_value);
-    } else {
-        cJSON_AddNullToObject(root, "aqi");
-    }
-
-    if (data->metrics.comfort_score > 0) {
-        cJSON_AddNumberToObject(root, "comfort_score", data->metrics.comfort_score);
-    } else {
-        cJSON_AddNullToObject(root, "comfort_score");
-    }
-
+    cJSON *root = iaq_json_build_state(data);
     return publish_json(TOPIC_STATE, root);
 }
 
@@ -675,109 +550,7 @@ esp_err_t mqtt_publish_state(const iaq_data_t *data)
 esp_err_t mqtt_publish_metrics(const iaq_data_t *data)
 {
     if (!s_mqtt_connected || !data) return ESP_FAIL;
-
-    cJSON *root = cJSON_CreateObject();
-
-    /* AQI breakdown */
-    cJSON *aqi = cJSON_CreateObject();
-    if (data->metrics.aqi_value != UINT16_MAX) {
-        cJSON_AddNumberToObject(aqi, "value", data->metrics.aqi_value);
-    } else {
-        cJSON_AddNullToObject(aqi, "value");
-    }
-    cJSON_AddStringToObject(aqi, "category", data->metrics.aqi_category);
-    cJSON_AddStringToObject(aqi, "dominant", data->metrics.aqi_dominant);
-    if (!isnan(data->metrics.aqi_pm25_subindex)) {
-        cJSON_AddNumberToObject(aqi, "pm25_subindex", round(data->metrics.aqi_pm25_subindex * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(aqi, "pm25_subindex");
-    }
-    if (!isnan(data->metrics.aqi_pm10_subindex)) {
-        cJSON_AddNumberToObject(aqi, "pm10_subindex", round(data->metrics.aqi_pm10_subindex * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(aqi, "pm10_subindex");
-    }
-    cJSON_AddItemToObject(root, "aqi", aqi);
-
-    /* Comfort breakdown */
-    cJSON *comfort = cJSON_CreateObject();
-    if (data->metrics.comfort_score != UINT8_MAX) {
-        cJSON_AddNumberToObject(comfort, "score", data->metrics.comfort_score);
-    } else {
-        cJSON_AddNullToObject(comfort, "score");
-    }
-    cJSON_AddStringToObject(comfort, "category", data->metrics.comfort_category);
-    if (!isnan(data->metrics.dew_point_c)) {
-        cJSON_AddNumberToObject(comfort, "dew_point_c", round(data->metrics.dew_point_c * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(comfort, "dew_point_c");
-    }
-    if (!isnan(data->metrics.abs_humidity_gm3)) {
-        cJSON_AddNumberToObject(comfort, "abs_humidity_gm3", round(data->metrics.abs_humidity_gm3 * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(comfort, "abs_humidity_gm3");
-    }
-    if (!isnan(data->metrics.heat_index_c)) {
-        cJSON_AddNumberToObject(comfort, "heat_index_c", round(data->metrics.heat_index_c * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(comfort, "heat_index_c");
-    }
-    cJSON_AddItemToObject(root, "comfort", comfort);
-
-    /* Pressure trend */
-    cJSON *pressure = cJSON_CreateObject();
-    const char *trend_str = "unknown";
-    switch (data->metrics.pressure_trend) {
-        case PRESSURE_TREND_RISING:  trend_str = "rising"; break;
-        case PRESSURE_TREND_STABLE:  trend_str = "stable"; break;
-        case PRESSURE_TREND_FALLING: trend_str = "falling"; break;
-        default: break;
-    }
-    cJSON_AddStringToObject(pressure, "trend", trend_str);
-    if (!isnan(data->metrics.pressure_delta_hpa)) {
-        cJSON_AddNumberToObject(pressure, "delta_hpa", round(data->metrics.pressure_delta_hpa * 100.0) / 100.0);
-    } else {
-        cJSON_AddNullToObject(pressure, "delta_hpa");
-    }
-    if (!isnan(data->metrics.pressure_window_hours)) {
-        cJSON_AddNumberToObject(pressure, "window_hours", round(data->metrics.pressure_window_hours * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(pressure, "window_hours");
-    }
-    cJSON_AddItemToObject(root, "pressure", pressure);
-
-    /* Air quality scores */
-    if (data->metrics.co2_score != UINT8_MAX) {
-        cJSON_AddNumberToObject(root, "co2_score", data->metrics.co2_score);
-    } else {
-        cJSON_AddNullToObject(root, "co2_score");
-    }
-    cJSON_AddStringToObject(root, "voc_category", data->metrics.voc_category);
-    cJSON_AddStringToObject(root, "nox_category", data->metrics.nox_category);
-    if (data->metrics.overall_iaq_score != UINT8_MAX) {
-        cJSON_AddNumberToObject(root, "overall_iaq_score", data->metrics.overall_iaq_score);
-    } else {
-        cJSON_AddNullToObject(root, "overall_iaq_score");
-    }
-
-    /* Mold risk */
-    cJSON *mold = cJSON_CreateObject();
-    if (data->metrics.mold_risk_score != UINT8_MAX) {
-        cJSON_AddNumberToObject(mold, "score", data->metrics.mold_risk_score);
-    } else {
-        cJSON_AddNullToObject(mold, "score");
-    }
-    cJSON_AddStringToObject(mold, "category", data->metrics.mold_risk_category);
-    cJSON_AddItemToObject(root, "mold_risk", mold);
-
-    /* Trends */
-    if (!isnan(data->metrics.co2_rate_ppm_hr)) {
-        cJSON_AddNumberToObject(root, "co2_rate_ppm_hr", round(data->metrics.co2_rate_ppm_hr * 10.0) / 10.0);
-    } else {
-        cJSON_AddNullToObject(root, "co2_rate_ppm_hr");
-    }
-    cJSON_AddBoolToObject(root, "pm25_spike_detected", data->metrics.pm25_spike_detected);
-
+    cJSON *root = iaq_json_build_metrics(data);
     return publish_json(TOPIC_METRICS, root);
 }
 
