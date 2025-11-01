@@ -2,15 +2,19 @@ menu "IAQ Monitor Configuration"
 
     config IAQ_WIFI_SSID
         string "WiFi SSID"
-        default "YourWiFiNetwork"
+        default ""
         help
             SSID of the WiFi network to connect to.
+            Leave empty to start in SoftAP provisioning mode on first boot
+            (or when credentials are not present in NVS).
 
     config IAQ_WIFI_PASSWORD
         string "WiFi Password"
-        default "YourPassword"
+        default ""
         help
-            WiFi password (WPA/WPA2) for the network.
+            WiFi password for the network.
+            Leave empty if not pre-provisioning via menuconfig. You can always
+            set credentials later using the web UI or console.
 
     config IAQ_MQTT_BROKER_URL
         string "MQTT Broker URL"
@@ -70,6 +74,52 @@ menu "IAQ Monitor Configuration"
         default y
         help
             Enable runtime console commands for configuration and debugging
+
+    menu "Wi-Fi AP Provisioning"
+        config IAQ_AP_SSID
+            string "SoftAP SSID (provisioning)"
+            default "IAQ-Setup"
+            help
+                SSID used when device starts in SoftAP mode for provisioning.
+
+        config IAQ_AP_PASSWORD
+            string "SoftAP Password (empty = open)"
+            default ""
+        help
+            Password for the provisioning SoftAP. Leave empty to run an open AP.
+            If set but shorter than 8 characters, the firmware will warn at
+            startup and start the AP in OPEN mode for compatibility.
+
+        config IAQ_AP_CHANNEL
+            int "SoftAP Channel"
+            range 1 13
+            default 1
+            help
+                Wi-Fi channel for SoftAP mode.
+
+        config IAQ_AP_MAX_CONN
+            int "SoftAP max stations"
+            range 1 10
+            default 4
+            help
+                Maximum number of stations allowed to connect to the SoftAP.
+
+        config IAQ_WIFI_CONNECT_MAX_RETRY
+            int "Max STA retries before AP fallback"
+            range 0 100
+            default 10
+            help
+                Number of reconnect attempts in STA mode before falling back to SoftAP
+                (provisioning) mode.
+
+        config IAQ_AP_KEEP_AFTER_PROVISION
+            bool "Keep SoftAP active after STA connects (AP+STA)"
+            default n
+            help
+                When enabled, device runs in AP+STA after credentials are provisioned, so the
+                web UI can always be reached via SoftAP and LAN simultaneously. By default we
+                switch to STA-only after provisioning.
+    endmenu
 
     menu "MQTT Publishing Options"
         config MQTT_STATE_PUBLISH_INTERVAL_SEC

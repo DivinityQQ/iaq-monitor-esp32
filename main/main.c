@@ -212,10 +212,11 @@ void app_main(void)
     /* Start WiFi (non-blocking, event-driven) */
     ESP_LOGI(TAG, "Starting WiFi");
     ESP_ERROR_CHECK(wifi_manager_start());
-    if (wifi_manager_is_configured()) {
-        ESP_LOGI(TAG, "WiFi configured, connecting in background");
+    if (wifi_manager_is_provisioned()) {
+        ESP_LOGI(TAG, "WiFi provisioned, connecting in background");
     } else {
-        ESP_LOGW(TAG, "WiFi not configured. Use console: wifi set <ssid> <password>");
+        ESP_LOGW(TAG, "WiFi not provisioned. SoftAP '%s' is active for setup.", CONFIG_IAQ_AP_SSID);
+        ESP_LOGW(TAG, "You can also use console: wifi set <ssid> <password> and then wifi restart");
     }
 
     /* MQTT will be started automatically by iaq_event_handler when WiFi connects */

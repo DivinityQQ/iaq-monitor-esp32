@@ -12,6 +12,7 @@
 #include "esp_flash.h"
 
 #include "console_commands.h"
+#include "esp_wifi.h"
 #include "iaq_data.h"
 #include "iaq_config.h"
 #include "wifi_manager.h"
@@ -186,15 +187,43 @@ static int cmd_wifi_status(int argc, char **argv)
 {
     printf("\n=== WiFi Status ===\n");
 
-    char ssid[33];
-    wifi_manager_get_ssid(ssid, sizeof(ssid));
-    printf("Configured SSID: %s\n", ssid);
+    bool provisioned = wifi_manager_is_provisioned();
+    printf("Provisioned: %s\n", provisioned ? "yes" : "no");
 
-    IAQ_DATA_WITH_LOCK() {
-        iaq_data_t *data = iaq_data_get();
-        printf("Status: %s\n", data->system.wifi_connected ? "Connected" : "Disconnected");
-        if (data->system.wifi_connected) {
-            printf("RSSI: %ld dBm\n", data->system.wifi_rssi);
+    wifi_mode_t mode = wifi_manager_get_mode();
+    const char *mode_str = (mode == WIFI_MODE_STA) ? "STA" :
+                           (mode == WIFI_MODE_AP) ? "AP" :
+                           (mode == WIFI_MODE_APSTA) ? "AP+STA" : "OFF";
+    printf("Mode: %s\n", mode_str);
+
+    /* STA details */
+    if (mode == WIFI_MODE_STA || mode == WIFI_MODE_APSTA) {
+        char ssid[33] = {0};
+        wifi_manager_get_ssid(ssid, sizeof(ssid));
+        IAQ_DATA_WITH_LOCK() {
+            iaq_data_t *data = iaq_data_get();
+            printf("STA: SSID=%s, Status=%s", ssid, data->system.wifi_connected ? "Connected" : "Disconnected");
+            if (data->system.wifi_connected) {
+                printf(" (RSSI: %ld dBm)", data->system.wifi_rssi);
+            }
+            printf("\n");
+        }
+    }
+
+    /* AP details */
+    if (mode == WIFI_MODE_AP || mode == WIFI_MODE_APSTA) {
+        wifi_config_t ap_cfg = {0};
+        if (esp_wifi_get_config(WIFI_IF_AP, &ap_cfg) == ESP_OK) {
+            const char *auth = "OPEN";
+            switch (ap_cfg.ap.authmode) {
+                case WIFI_AUTH_WPA2_PSK: auth = "WPA2"; break;
+                case WIFI_AUTH_WPA3_PSK: auth = "WPA3"; break;
+                case WIFI_AUTH_WPA2_WPA3_PSK: auth = "WPA2/WPA3"; break;
+                default: break;
+            }
+            printf("AP:  SSID=%s, Channel=%d, Auth=%s\n", (char*)ap_cfg.ap.ssid, ap_cfg.ap.channel, auth);
+        } else {
+            printf("AP:  (config unavailable)\n");
         }
     }
 
@@ -219,6 +248,11 @@ static int cmd_wifi_scan(int argc, char **argv)
     esp_err_t ret = wifi_manager_scan(ap_records, max_aps, &num_aps);
     if (ret != ESP_OK) {
         printf("Scan failed: %s\n", esp_err_to_name(ret));
+        if (ret == ESP_ERR_NOT_SUPPORTED) {
+            printf("Note: WiFi scan is not supported while running as SoftAP.\n");
+            printf("      Provide credentials (wifi set ... ; wifi restart) to switch to STA,\n");
+            printf("      or enable AP+STA in menuconfig to allow scanning while AP is up.\n");
+        }
         free(ap_records);
         return 1;
     }

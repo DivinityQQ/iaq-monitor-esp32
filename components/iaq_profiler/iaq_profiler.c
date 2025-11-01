@@ -11,6 +11,7 @@
 #include "freertos/queue.h"
 #include "iaq_profiler.h"
 #include "iaq_data.h"
+#include "esp_wifi.h"
 
 static const char *TAG = "IAQ_PROF";
 
@@ -107,6 +108,23 @@ static const char* metric_name(int id)
 #endif
 
 #if !CONFIG_IAQ_PROFILING
+static const char* wifi_mode_to_str(wifi_mode_t m)
+{
+    switch (m) {
+        case WIFI_MODE_STA:  return "STA";
+        case WIFI_MODE_AP:   return "AP";
+        case WIFI_MODE_APSTA:return "AP+STA";
+        default:             return "OFF";
+    }
+}
+
+static wifi_mode_t get_wifi_mode_safe(void)
+{
+    wifi_mode_t m = WIFI_MODE_NULL;
+    if (esp_wifi_get_mode(&m) != ESP_OK) m = WIFI_MODE_NULL;
+    return m;
+}
+
 static void print_simple_status(void)
 {
     /* Snapshot */
@@ -122,17 +140,35 @@ static void print_simple_status(void)
         rssi = d->system.wifi_rssi;
     }
 
+    wifi_mode_t mode = get_wifi_mode_safe();
+    const char *mode_str = wifi_mode_to_str(mode);
+    char wifi_str[64];
+    if (mode == WIFI_MODE_AP) {
+        snprintf(wifi_str, sizeof(wifi_str), "%s", mode_str);
+    } else if (mode == WIFI_MODE_APSTA) {
+        if (wifi_ok)
+            snprintf(wifi_str, sizeof(wifi_str), "%s OK (%ddBm)", mode_str, rssi);
+        else
+            snprintf(wifi_str, sizeof(wifi_str), "%s Down", mode_str);
+    } else if (mode == WIFI_MODE_STA) {
+        if (wifi_ok)
+            snprintf(wifi_str, sizeof(wifi_str), "%s OK (%ddBm)", mode_str, rssi);
+        else
+            snprintf(wifi_str, sizeof(wifi_str), "%s Down", mode_str);
+    } else {
+        snprintf(wifi_str, sizeof(wifi_str), "%s", mode_str);
+    }
+
     unsigned h = uptime_s / 3600U;
     unsigned m = (uptime_s % 3600U) / 60U;
     unsigned s = uptime_s % 60U;
     unsigned heap_k = heap_now / 1024U;
     unsigned heap_min_k = heap_min / 1024U;
 
-    ESP_LOGI(TAG, "Sys up %uh%um%us | heap %uk (min %uk) | WiFi %s (%ddBm) | MQTT %s",
+    ESP_LOGI(TAG, "Sys up %uh%um%us | heap %uk (min %uk) | WiFi %s | MQTT %s",
              h, m, s,
              heap_k, heap_min_k,
-             wifi_ok ? "OK" : "Down",
-             rssi,
+             wifi_str,
              mqtt_ok ? "OK" : "Down");
 }
 #endif
@@ -159,8 +195,18 @@ void iaq_status_report(void)
         rssi = d->system.wifi_rssi;
     }
     unsigned uh = uptime_s / 3600U, um = (uptime_s % 3600U) / 60U, us = uptime_s % 60U;
-    ESP_LOGI(TAG, "[%us] Profiling Report | up %uh%um%us | WiFi %s (%ddBm) | MQTT %s",
-             (unsigned)window_s, uh, um, us, wifi_ok ? "OK" : "Down", rssi, mqtt_ok ? "OK" : "Down");
+    wifi_mode_t mode = get_wifi_mode_safe();
+    const char *mode_str = wifi_mode_to_str(mode);
+    char wifi_str[64];
+    if (mode == WIFI_MODE_AP) {
+        snprintf(wifi_str, sizeof(wifi_str), "%s", mode_str);
+    } else if (wifi_ok) {
+        snprintf(wifi_str, sizeof(wifi_str), "%s OK (%ddBm)", mode_str, rssi);
+    } else {
+        snprintf(wifi_str, sizeof(wifi_str), "%s Down", mode_str);
+    }
+    ESP_LOGI(TAG, "[%us] Profiling Report | up %uh%um%us | WiFi %s | MQTT %s",
+             (unsigned)window_s, uh, um, us, wifi_str, mqtt_ok ? "OK" : "Down");
 
     /* Take one consistent snapshot of metrics and reset window under lock */
     iaq_metric_t snap[IAQ_METRIC_MAX];

@@ -23,6 +23,27 @@ esp_err_t wifi_manager_init(iaq_system_context_t *ctx);
 esp_err_t wifi_manager_start(void);
 
 /**
+ * Start WiFi in Station mode explicitly (connect using saved credentials).
+ *
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t wifi_manager_start_sta(void);
+
+/**
+ * Start WiFi SoftAP (provisioning / local access point).
+ *
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t wifi_manager_start_ap(void);
+
+/**
+ * Stop WiFi SoftAP if running.
+ *
+ * @return ESP_OK on success, error code otherwise
+ */
+esp_err_t wifi_manager_stop_ap(void);
+
+/**
  * Stop WiFi.
  *
  * @return ESP_OK on success, error code otherwise
@@ -79,5 +100,17 @@ esp_err_t wifi_manager_get_ssid(char *ssid, size_t ssid_len);
  * @return true if SSID is configured, false otherwise
  */
 bool wifi_manager_is_configured(void);
+
+/**
+ * Return true if WiFi credentials are stored in NVS (provisioned).
+ *
+ * @return true if credentials exist in NVS
+ */
+bool wifi_manager_is_provisioned(void);
+
+/**
+ * Get current WiFi mode (STA/AP/APSTA/NULL).
+ */
+wifi_mode_t wifi_manager_get_mode(void);
 
 #endif /* WIFI_MANAGER_H */
