@@ -70,6 +70,7 @@ static dns_server_handle_t s_dns = NULL;
 /* Forward declarations */
 static bool web_portal_should_use_https(void);
 static void web_portal_restart_task(void *arg);
+/* no-op */
 
 /* Forward declarations for captive portal helpers registered later */
 static void dhcp_set_captiveportal_uri(void);
@@ -169,6 +170,7 @@ static void ws_broadcast_json(const char *type, cJSON *payload)
         if (!s_ws_clients[i].active) continue;
         int sock = s_ws_clients[i].sock;
         if (httpd_ws_get_fd_info(s_server, sock) != HTTPD_WS_CLIENT_WEBSOCKET) {
+            ESP_LOGD(TAG, "WS fd %d not in WEBSOCKET state during broadcast; removing", sock);
             s_ws_clients[i].active = false;
             s_ws_clients[i].sock = -1;
             s_ws_clients[i].last_pong_us = 0;
@@ -207,6 +209,7 @@ static void ws_ping_and_prune(void)
         if (!s_ws_clients[i].active) continue;
         int sock = s_ws_clients[i].sock;
         if (httpd_ws_get_fd_info(s_server, sock) != HTTPD_WS_CLIENT_WEBSOCKET) {
+            ESP_LOGD(TAG, "WS fd %d not in WEBSOCKET state during ping; removing", sock);
             s_ws_clients[i].active = false;
             s_ws_clients[i].sock = -1;
             s_ws_clients[i].last_pong_us = 0;
@@ -224,7 +227,12 @@ static void ws_ping_and_prune(void)
         ping.type = HTTPD_WS_TYPE_PING;
         ping.payload = (uint8_t*)"ping";
         ping.len = 4;
-        (void)httpd_ws_send_frame_async(s_server, sock, &ping);
+        esp_err_t pr = httpd_ws_send_frame_async(s_server, sock, &ping);
+        if (pr != ESP_OK) {
+            ESP_LOGW(TAG, "WS: failed to enqueue PING to %d: %s", sock, esp_err_to_name(pr));
+        } else {
+            ESP_LOGD(TAG, "WS: sent PING to %d", sock);
+        }
     }
     xSemaphoreGive(s_ws_mutex);
 }
@@ -241,6 +249,7 @@ static void ws_health_timer_cb(void *arg)
         ws_ping_and_prune();
     }
 }
+
 
 /* Utilities */
 static inline void set_cors(httpd_req_t *req)
@@ -740,7 +749,32 @@ static esp_err_t ws_handler(httpd_req_t *req)
     frame.type = HTTPD_WS_TYPE_TEXT;
     /* Get frame len */
     esp_err_t ret = httpd_ws_recv_frame(req, &frame, 0);
-    if (ret != ESP_OK) return ret;
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "WS recv header failed (fd=%d): %s", httpd_req_to_sockfd(req), esp_err_to_name(ret));
+        return ret;
+    }
+
+    /* Log header info early for debugging */
+    ESP_LOGD(TAG, "WS hdr fd=%d type=%d len=%u", httpd_req_to_sockfd(req), (int)frame.type, (unsigned)frame.len);
+
+    /* Refresh PONG timestamp even for zero-length payloads */
+    if (frame.type == HTTPD_WS_TYPE_PONG) {
+        int sock = httpd_req_to_sockfd(req);
+        if (s_ws_mutex) {
+            xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
+            for (int i = 0; i < MAX_WS_CLIENTS; ++i) {
+                if (s_ws_clients[i].active && s_ws_clients[i].sock == sock) {
+                    s_ws_clients[i].last_pong_us = esp_timer_get_time();
+                    break;
+                }
+            }
+            xSemaphoreGive(s_ws_mutex);
+        }
+        if (frame.len == 0) {
+            /* Fast-path: no payload to read */
+            return ESP_OK;
+        }
+    }
     if (frame.len) {
         uint64_t t0 = iaq_prof_tic();
         uint8_t *buf = (uint8_t*)malloc(frame.len + 1);
@@ -750,21 +784,21 @@ static esp_err_t ws_handler(httpd_req_t *req)
         if (ret == ESP_OK) {
             buf[frame.len] = 0;
             if (frame.type == HTTPD_WS_TYPE_PONG) {
-                int sock = httpd_req_to_sockfd(req);
-                if (s_ws_mutex) {
-                    xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
-                    for (int i = 0; i < MAX_WS_CLIENTS; ++i) {
-                        if (s_ws_clients[i].active && s_ws_clients[i].sock == sock) {
-                            s_ws_clients[i].last_pong_us = esp_timer_get_time();
-                            break;
-                        }
-                    }
-                    xSemaphoreGive(s_ws_mutex);
-                }
+                ESP_LOGD(TAG, "WS PONG fd=%d (%u bytes)", httpd_req_to_sockfd(req), (unsigned)frame.len);
+            } else if (frame.type == HTTPD_WS_TYPE_PING) {
+                ESP_LOGD(TAG, "WS PING from fd=%d (%u bytes)", httpd_req_to_sockfd(req), (unsigned)frame.len);
+                /* Reply with PONG mirroring payload (RFC6455 5.5.2/5.5.3) */
+                httpd_ws_frame_t pong = { 0 };
+                pong.type = HTTPD_WS_TYPE_PONG;
+                pong.payload = frame.payload;
+                pong.len = frame.len;
+                (void)httpd_ws_send_frame(req, &pong);
             } else {
-                ESP_LOGD(TAG, "WS RX (%u): %s", (unsigned)frame.len, (char*)buf);
+                ESP_LOGD(TAG, "WS RX fd=%d (%u): %s", httpd_req_to_sockfd(req), (unsigned)frame.len, (char*)buf);
                 /* Future: parse commands. For now ignore. */
             }
+        } else {
+            ESP_LOGW(TAG, "WS recv payload failed (fd=%d, len=%u): %s", httpd_req_to_sockfd(req), (unsigned)frame.len, esp_err_to_name(ret));
         }
         free(buf);
         iaq_prof_toc(IAQ_METRIC_WEB_WS_RX, t0);
@@ -773,6 +807,10 @@ static esp_err_t ws_handler(httpd_req_t *req)
         int sock = httpd_req_to_sockfd(req);
         ws_clients_remove(sock);
         ESP_LOGI(TAG, "WS client closed: %d", sock);
+        /* Echo a CLOSE back to complete handshake (no body) */
+        httpd_ws_frame_t closefrm = { 0 };
+        closefrm.type = HTTPD_WS_TYPE_CLOSE;
+        (void)httpd_ws_send_frame(req, &closefrm);
     }
     return ret;
 }
@@ -885,6 +923,7 @@ esp_err_t web_portal_start(void)
         httpd_config_t dcfg = HTTPD_DEFAULT_CONFIG();
         scfg.httpd = dcfg;
         scfg.httpd.uri_match_fn = httpd_uri_match_wildcard;
+        /* Default LRU purge behavior */
         scfg.httpd.lru_purge_enable = true;
         scfg.httpd.max_uri_handlers = 20;
         scfg.httpd.stack_size = TASK_STACK_WEB_SERVER;
@@ -925,11 +964,13 @@ esp_err_t web_portal_start(void)
         if (file_cert && file_key) {
             cert_ptr = (const unsigned char *)file_cert; cert_len = file_cert_len;
             key_ptr  = (const unsigned char *)file_key;  key_len  = file_key_len;
+            ESP_LOGI(TAG, "HTTPS: using cert/key from LittleFS (%u/%u bytes)", (unsigned)cert_len, (unsigned)key_len);
         } else {
             cert_ptr = (const unsigned char *)servercert_pem_start;
             cert_len = (size_t)(servercert_pem_end - servercert_pem_start);
             key_ptr  = (const unsigned char *)prvtkey_pem_start;
             key_len  = (size_t)(prvtkey_pem_end - prvtkey_pem_start);
+            ESP_LOGW(TAG, "HTTPS: using built-in self-signed development certificate");
         }
 
         scfg.servercert = cert_ptr;
@@ -937,6 +978,9 @@ esp_err_t web_portal_start(void)
         scfg.prvtkey_pem = key_ptr;
         scfg.prvtkey_len = key_len;
 
+        ESP_LOGD(TAG, "HTTPS httpd cfg: port=%d, recv_to=%d, send_to=%d, backlog=%d, max_socks=%d, max_uris=%d",
+                 scfg.httpd.server_port, scfg.httpd.recv_wait_timeout, scfg.httpd.send_wait_timeout,
+                 scfg.httpd.backlog_conn, scfg.httpd.max_open_sockets, scfg.httpd.max_uri_handlers);
         esp_err_t r = httpd_ssl_start(&s_server, &scfg);
         if (r != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start HTTPS server: %s", esp_err_to_name(r));
@@ -957,11 +1001,15 @@ esp_err_t web_portal_start(void)
     } else {
         httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
         cfg.uri_match_fn = httpd_uri_match_wildcard;
+        /* Default LRU purge behavior */
         cfg.lru_purge_enable = true;
         cfg.max_uri_handlers = 20;
         cfg.stack_size = TASK_STACK_WEB_SERVER;
         cfg.core_id = TASK_CORE_WEB_SERVER;
         if (cfg.stack_size < 6144) cfg.stack_size = 6144;
+        ESP_LOGD(TAG, "HTTP httpd cfg: port=%d, recv_to=%d, send_to=%d, backlog=%d, max_socks=%d, max_uris=%d",
+                 cfg.server_port, cfg.recv_wait_timeout, cfg.send_wait_timeout,
+                 cfg.backlog_conn, cfg.max_open_sockets, cfg.max_uri_handlers);
         esp_err_t r = httpd_start(&s_server, &cfg);
         if (r != ESP_OK) {
             ESP_LOGE(TAG, "Failed to start HTTP server: %s", esp_err_to_name(r));
@@ -996,7 +1044,13 @@ esp_err_t web_portal_start(void)
     const httpd_uri_t uri_sensors = { .uri = "/api/v1/sensors", .method = HTTP_GET, .handler = api_sensors_get, .user_ctx = NULL };
     const httpd_uri_t uri_sensors_cadence = { .uri = "/api/v1/sensors/cadence", .method = HTTP_GET, .handler = api_sensors_cadence_get, .user_ctx = NULL };
     const httpd_uri_t uri_sensor_action = { .uri = "/api/v1/sensor/*", .method = HTTP_POST, .handler = api_sensor_action, .user_ctx = NULL };
-    const httpd_uri_t uri_ws = { .uri = "/ws", .method = HTTP_GET, .handler = ws_handler, .is_websocket = true };
+    const httpd_uri_t uri_ws = {
+        .uri = "/ws",
+        .method = HTTP_GET,
+        .handler = ws_handler,
+        .is_websocket = true,
+        .handle_ws_control_frames = true  /* We handle PING/PONG/CLOSE in ws_handler */
+    };
     const httpd_uri_t uri_static = { .uri = "/*", .method = HTTP_GET, .handler = static_handler, .user_ctx = NULL };
 
     httpd_register_uri_handler(s_server, &uri_options);
@@ -1020,6 +1074,18 @@ esp_err_t web_portal_start(void)
     httpd_register_err_handler(s_server, HTTPD_404_NOT_FOUND, http_404_error_handler);
 
     /* WS timers will start on first WS client connection */
+    ESP_LOGI(TAG, "WS config: ping=%ds, pong_timeout=%ds, max_clients=%d",
+             CONFIG_IAQ_WEB_PORTAL_WS_PING_INTERVAL_SEC,
+             CONFIG_IAQ_WEB_PORTAL_WS_PONG_TIMEOUT_SEC,
+             MAX_WS_CLIENTS);
+    
+#ifdef CONFIG_IAQ_WEB_PORTAL_DEBUG_LOGS
+    /* Turn up verbosity for troubleshooting WS/TLS issues */
+    esp_log_level_set("httpd", ESP_LOG_DEBUG);
+    esp_log_level_set("httpd_ws", ESP_LOG_DEBUG);
+    esp_log_level_set("esp_https_server", ESP_LOG_DEBUG);
+    esp_log_level_set("esp-tls-mbedtls", ESP_LOG_DEBUG);
+#endif
 
     ESP_LOGI(TAG, "Web portal started (%s)", s_server_is_https ? "HTTPS" : "HTTP");
     return ESP_OK;

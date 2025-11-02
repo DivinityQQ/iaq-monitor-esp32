@@ -128,7 +128,8 @@ class ApiClient {
     const response = await window.fetch(this.baseUrl + path, {
       ...options,
       headers: {
-        'Content-Type': 'application/json',
+        ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+        'Accept': 'application/json',
         ...options?.headers,
       },
       body: options?.body ? JSON.stringify(options.body) : undefined,

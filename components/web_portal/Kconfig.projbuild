@@ -26,6 +26,14 @@ config IAQ_WEB_PORTAL_STATIC_MAX_AGE_SEC
     range 0 86400
     default 600
 
+config IAQ_WEB_PORTAL_DEBUG_LOGS
+    bool "Enable verbose Web Portal logs (WS/TLS)"
+    default n
+    help
+      Turns on DEBUG level for httpd, httpd_ws, esp_https_server, and esp-tls-mbedtls
+      tags. Useful for troubleshooting connection drops/handshakes. Disable for
+      normal operation to reduce log noise.
+
 config IAQ_WEB_PORTAL_WS_PING_INTERVAL_SEC
     int "WebSocket ping interval (seconds)"
     range 5 600

@@ -133,6 +133,15 @@ export const getComfortColor = (score: number | null | undefined): string => {
   return '#f44336';                   // Red - Very Uncomfortable
 };
 
+// IAQ score color mapping (0-100 scale, higher is better)
+export const getIAQColor = (score: number | null | undefined): string => {
+  if (score === null || score === undefined) return '#9e9e9e';
+  if (score >= 80) return '#4caf50';  // Green - Excellent
+  if (score >= 60) return '#ffeb3b';  // Yellow - Good
+  if (score >= 40) return '#ff9800';  // Orange - Fair
+  return '#f44336';                   // Red - Poor/Very Poor
+};
+
 // Sensor state color mapping
 export const getSensorStateColor = (state: SensorState): string => {
   switch (state) {

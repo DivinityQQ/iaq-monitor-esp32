@@ -1,9 +1,9 @@
 # Frontend Implementation Plan for IAQ Monitor Web Portal
 
 **Last Updated:** 2025-11-02
-**Status:** Week 1 Complete - Foundation Implemented
+**Status:** Week 2 Complete - Core Dashboard Implemented
 **Estimated Timeline:** 38-47 hours over 4 weeks
-**Progress:** Week 1 (100%) | Week 2 (0%) | Week 3 (0%) | Week 4 (0%)
+**Progress:** Week 1 (100%) | Week 2 (100%) | Week 3 (0%) | Week 4 (0%)
 
 ---
 
@@ -454,6 +454,8 @@ export function useRealtimeData() {
   return { connected: readyState === WebSocket.OPEN };
 }
 ```
+
+Heartbeat: Server handles WebSocket protocol PING/PONG and prunes stale clients. The frontend does not send application-level heartbeats.
 
 ### Phase 2: Configuration (Priority: HIGH)
 
@@ -924,6 +926,26 @@ du -sh assets/* # Per-file sizes
 - ✅ Polish animations and transitions
 
 **Deliverable:** Functional real-time dashboard with 6 cards updating at 1Hz
+
+**Implementation Notes (2025-11-02):**
+- ✅ All Week 2 tasks completed successfully
+- ✅ WebSocket integration with exponential backoff reconnection (1s→10s cap)
+- ✅ Jotai atoms store created with primitive and derived atoms
+- ✅ Real-time data updates working (state, metrics, health atoms)
+- ✅ Connection status indicators wired up with real data
+- ✅ 8 sensor cards implemented (Temperature, Humidity, CO2, Pressure, PM2.5, PM10, PM1.0, VOC)
+- ✅ 2 featured cards implemented (AQI, Comfort)
+- ✅ Responsive MetricsGrid layout using MUI Grid2
+- ✅ Loading skeletons for smooth UX
+- ✅ Dashboard component integrated into App.tsx
+- ✅ Device info fetching on mount
+- ✅ Error handling and loading states
+- 📝 Modern best practices applied:
+  - React 19: Functional components with strict TypeScript
+  - Jotai 2.15: Atomic state pattern with derived atoms
+  - react-use-websocket 4.8: Infinite reconnection (no app-level heartbeat; server handles PING/PONG)
+  - MUI 7: Grid2 component, sx prop styling, responsive breakpoints
+- 📝 Ready for Week 3: Configuration UI (WiFi, MQTT, Sensors)
 
 ---
 
