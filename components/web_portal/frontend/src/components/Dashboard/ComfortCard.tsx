@@ -26,7 +26,7 @@ export function ComfortCard() {
       typeof metrics.comfort.abs_humidity_gm3 !== 'number' ||
       typeof metrics.comfort.dew_point_c !== 'number') {
     return (
-      <Card sx={{ height: '100%' }}>
+      <Card sx={{ height: '100%', minHeight: 280 }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
             <Skeleton variant="circular" width={32} height={32} />
@@ -56,6 +56,7 @@ export function ComfortCard() {
     <Card
       sx={{
         height: '100%',
+        minHeight: 280,
         background: `linear-gradient(135deg, ${comfortColor}15 0%, ${comfortColor}05 100%)`,
         border: `2px solid ${comfortColor}40`,
         transition: 'transform 0.2s, box-shadow 0.2s',
@@ -83,6 +84,8 @@ export function ComfortCard() {
               fontWeight: 700,
               fontSize: { xs: '3rem', sm: '3.5rem', md: '4rem' },
               color: comfortColor,
+              fontVariantNumeric: 'tabular-nums',
+              minWidth: '3ch',
             }}
           >
             {score.toFixed(0)}

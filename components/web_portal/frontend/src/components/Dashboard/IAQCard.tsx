@@ -27,7 +27,7 @@ export function IAQCard() {
       typeof metrics.co2_score !== 'number' ||
       !metrics.comfort || typeof metrics.comfort.score !== 'number') {
     return (
-      <Card sx={{ height: '100%' }}>
+      <Card sx={{ height: '100%', minHeight: 280 }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
             <Skeleton variant="circular" width={32} height={32} />
@@ -70,6 +70,7 @@ export function IAQCard() {
     <Card
       sx={{
         height: '100%',
+        minHeight: 280,
         background: `linear-gradient(135deg, ${iaqColor}15 0%, ${iaqColor}05 100%)`,
         border: `2px solid ${iaqColor}40`,
         transition: 'transform 0.2s, box-shadow 0.2s',
@@ -97,6 +98,8 @@ export function IAQCard() {
               fontWeight: 700,
               fontSize: { xs: '3rem', sm: '3.5rem', md: '4rem' },
               color: iaqColor,
+              fontVariantNumeric: 'tabular-nums',
+              minWidth: '3ch',
             }}
           >
             {iaqScore.toFixed(0)}

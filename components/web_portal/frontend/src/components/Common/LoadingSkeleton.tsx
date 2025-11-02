@@ -6,7 +6,7 @@ import { Box, Card, CardContent, Container, Grid, Skeleton, Typography } from '@
  */
 export function CardSkeleton() {
   return (
-    <Card>
+    <Card sx={{ minHeight: 148 }}>
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <Skeleton variant="circular" width={24} height={24} />
@@ -25,7 +25,7 @@ export function CardSkeleton() {
  */
 export function FeaturedCardSkeleton() {
   return (
-    <Card>
+    <Card sx={{ minHeight: 280 }}>
       <CardContent>
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <Skeleton variant="circular" width={32} height={32} />

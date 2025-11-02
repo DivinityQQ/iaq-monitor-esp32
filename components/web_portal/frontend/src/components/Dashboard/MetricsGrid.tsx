@@ -116,17 +116,17 @@ export function MetricsGrid() {
         />
       </Grid>
 
-      {/* Row 3: Featured Cards - AQI, Comfort, and IAQ */}
-      <Grid size={{ xs: 12, md: 4 }}>
-        <AQICard />
-      </Grid>
-
-      <Grid size={{ xs: 12, md: 4 }}>
-        <ComfortCard />
-      </Grid>
-
-      <Grid size={{ xs: 12, md: 4 }}>
-        <IAQCard />
+      {/* Featured row as a full-width nested container item */}
+      <Grid container size={{ xs: 12 }} spacing={3}>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <AQICard />
+        </Grid>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <ComfortCard />
+        </Grid>
+        <Grid size={{ xs: 12, md: 4 }}>
+          <IAQCard />
+        </Grid>
       </Grid>
     </Grid>
   );

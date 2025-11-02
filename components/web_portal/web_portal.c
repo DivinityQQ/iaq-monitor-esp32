@@ -405,9 +405,18 @@ static esp_err_t static_handler(httpd_req_t *req)
         httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
     }
 
-    /* Caching */
-    char cc[32];
-    snprintf(cc, sizeof(cc), "public, max-age=%d", CONFIG_IAQ_WEB_PORTAL_STATIC_MAX_AGE_SEC);
+    /* Caching: long TTL for hashed assets, no-cache for HTML, default otherwise */
+    char cc[64];
+    const char *ext = strrchr(uri, '.');
+    bool is_html = (ext && (!strcasecmp(ext, ".html") || !strcasecmp(ext, ".htm"))) || strcmp(uri, "/") == 0;
+    bool is_asset = (strncmp(uri, "/assets/", 8) == 0);
+    if (is_asset) {
+        snprintf(cc, sizeof(cc), "public, max-age=%d, immutable", 31536000); /* 1 year */
+    } else if (is_html) {
+        snprintf(cc, sizeof(cc), "no-cache");
+    } else {
+        snprintf(cc, sizeof(cc), "public, max-age=%d", CONFIG_IAQ_WEB_PORTAL_STATIC_MAX_AGE_SEC);
+    }
     httpd_resp_set_hdr(req, "Cache-Control", cc);
 
     char buf[1024];

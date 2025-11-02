@@ -24,7 +24,7 @@ export function AQICard() {
       typeof metrics.aqi.pm25_subindex !== 'number' ||
       typeof metrics.aqi.pm10_subindex !== 'number') {
     return (
-      <Card sx={{ height: '100%' }}>
+      <Card sx={{ height: '100%', minHeight: 280 }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
             <Skeleton variant="circular" width={32} height={32} />
@@ -51,6 +51,7 @@ export function AQICard() {
     <Card
       sx={{
         height: '100%',
+        minHeight: 280,
         background: `linear-gradient(135deg, ${aqiColor}15 0%, ${aqiColor}05 100%)`,
         border: `2px solid ${aqiColor}40`,
         transition: 'transform 0.2s, box-shadow 0.2s',
@@ -78,6 +79,8 @@ export function AQICard() {
             fontSize: { xs: '3rem', sm: '3.5rem', md: '4rem' },
             color: aqiColor,
             mb: 1,
+            fontVariantNumeric: 'tabular-nums',
+            minWidth: '3ch',
           }}
         >
           {value.toFixed(0)}

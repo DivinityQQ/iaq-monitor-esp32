@@ -49,7 +49,7 @@ export function SensorCard({
   // Show loading skeleton if loading or value is null
   if (loading || value === null) {
     return (
-      <Card>
+      <Card sx={{ minHeight: 148 }}>
         <CardContent>
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
             <Skeleton variant="circular" width={24} height={24} />
@@ -66,6 +66,7 @@ export function SensorCard({
     <Card
       sx={{
         height: '100%',
+        minHeight: 148,
         transition: 'transform 0.2s, box-shadow 0.2s',
         '&:hover': {
           transform: 'translateY(-4px)',
@@ -83,13 +84,14 @@ export function SensorCard({
         </Box>
 
         {/* Main Value */}
-        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1 }}>
+        <Box sx={{ display: 'flex', alignItems: 'baseline', gap: 1, whiteSpace: 'nowrap' }}>
           <Typography
             variant="h3"
             component="div"
             sx={{
               fontWeight: 600,
               fontSize: { xs: '2rem', sm: '2.25rem', md: '2.5rem' },
+              fontVariantNumeric: 'tabular-nums',
             }}
           >
             {value.toFixed(precision)}
