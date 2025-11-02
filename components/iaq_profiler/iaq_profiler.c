@@ -66,6 +66,23 @@ void iaq_profiler_register_task(const char *name, TaskHandle_t handle, uint32_t 
 #endif
 }
 
+void iaq_profiler_unregister_task(TaskHandle_t handle)
+{
+#if CONFIG_IAQ_PROFILING && CONFIG_IAQ_PROFILING_TASK_STACKS
+    if (!handle) return;
+    for (int i = 0; i < s_task_count; ++i) {
+        if (s_tasks[i].handle == handle) {
+            s_tasks[i].handle = NULL;
+            s_tasks[i].name = s_tasks[i].name ? s_tasks[i].name : "(task)";
+            /* keep entry to avoid shifting; will be skipped in report */
+            break;
+        }
+    }
+#else
+    (void)handle;
+#endif
+}
+
 void iaq_profiler_record(int metric_id, uint32_t duration_us)
 {
 #if CONFIG_IAQ_PROFILING
@@ -102,12 +119,23 @@ static const char* metric_name(int id)
         case IAQ_METRIC_MQTT_METRICS:        return "mqtt/metrics";
         case IAQ_METRIC_MQTT_DIAG:           return "mqtt/diag";
         case IAQ_METRIC_DISPLAY_FRAME:       return "display/frame";
+        case IAQ_METRIC_WEB_STATIC:          return "web/static";
+        case IAQ_METRIC_WEB_API_STATE:       return "web/api_state";
+        case IAQ_METRIC_WEB_API_METRICS:     return "web/api_metrics";
+        case IAQ_METRIC_WEB_API_HEALTH:      return "web/api_health";
+        case IAQ_METRIC_WEB_API_WIFI_SCAN:   return "web/api_wifi_scan";
+        case IAQ_METRIC_WEB_API_WIFI_POST:   return "web/api_wifi_post";
+        case IAQ_METRIC_WEB_API_MQTT_POST:   return "web/api_mqtt_post";
+        case IAQ_METRIC_WEB_API_SENSORS:     return "web/api_sensors";
+        case IAQ_METRIC_WEB_API_SENSOR_ACTION:return "web/api_sensor_action";
+        case IAQ_METRIC_WEB_WS_BROADCAST:    return "web/ws_broadcast";
+        case IAQ_METRIC_WEB_WS_RX:           return "web/ws_rx";
         default: return "unknown";
     }
 }
 #endif
 
-#if !CONFIG_IAQ_PROFILING
+/* WiFi helpers used in both simple and comprehensive reports */
 static const char* wifi_mode_to_str(wifi_mode_t m)
 {
     switch (m) {
@@ -125,6 +153,7 @@ static wifi_mode_t get_wifi_mode_safe(void)
     return m;
 }
 
+#if !CONFIG_IAQ_PROFILING
 static void print_simple_status(void)
 {
     /* Snapshot */

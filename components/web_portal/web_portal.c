@@ -28,6 +28,7 @@
 #include "dns_server.h"
 #include "esp_wifi.h"
 #include "web_portal.h"
+#include "iaq_profiler.h"
 
 static const char *TAG = "WEB_PORTAL";
 
@@ -58,6 +59,7 @@ static volatile bool s_portal_restart_pending = false;
 static iaq_system_context_t *s_ctx = NULL;
 static ws_client_t s_ws_clients[MAX_WS_CLIENTS];
 static SemaphoreHandle_t s_ws_mutex;
+static TaskHandle_t s_httpd_task_handle = NULL;
 
 static esp_timer_handle_t s_ws_state_timer = NULL;
 static esp_timer_handle_t s_ws_metrics_timer = NULL;
@@ -153,6 +155,7 @@ static void ws_async_send(void *arg)
 static void ws_broadcast_json(const char *type, cJSON *payload)
 {
     if (!s_server || !payload) { if (payload) cJSON_Delete(payload); return; }
+    uint64_t t0 = iaq_prof_tic();
 
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", type);
@@ -184,6 +187,7 @@ static void ws_broadcast_json(const char *type, cJSON *payload)
     if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
 
     free(txt);
+    iaq_prof_toc(IAQ_METRIC_WEB_WS_BROADCAST, t0);
 }
 
 /* Timers to push live data (offload work to HTTP server task) */
@@ -335,6 +339,7 @@ static const char* guess_mime_type(const char *path)
 
 static esp_err_t static_handler(httpd_req_t *req)
 {
+    uint64_t t0 = iaq_prof_tic();
     char path[CONFIG_HTTPD_MAX_URI_LEN + 32];
     const char *uri = req->uri;
     if (strcmp(uri, "/") == 0) uri = "/index.html"; /* SPA entry */
@@ -343,11 +348,12 @@ static esp_err_t static_handler(httpd_req_t *req)
     struct stat st;
     if (stat(path, &st) != 0 || st.st_size <= 0) {
         respond_error(req, 404, "NOT_FOUND", "Resource not found");
+        iaq_prof_toc(IAQ_METRIC_WEB_STATIC, t0);
         return ESP_OK;
     }
 
     FILE *f = fopen(path, "rb");
-    if (!f) { respond_error(req, 500, "OPEN_FAILED", "Failed to open file"); return ESP_OK; }
+    if (!f) { respond_error(req, 500, "OPEN_FAILED", "Failed to open file"); iaq_prof_toc(IAQ_METRIC_WEB_STATIC, t0); return ESP_OK; }
 
     httpd_resp_set_type(req, guess_mime_type(path));
     /* Caching */
@@ -362,6 +368,7 @@ static esp_err_t static_handler(httpd_req_t *req)
     }
     fclose(f);
     httpd_resp_send_chunk(req, NULL, 0);
+    iaq_prof_toc(IAQ_METRIC_WEB_STATIC, t0);
     return ESP_OK;
 }
 
@@ -396,9 +403,32 @@ static esp_err_t api_info_get(httpd_req_t *req)
     return ESP_OK;
 }
 
-static esp_err_t api_state_get(httpd_req_t *req) { iaq_data_t s = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){s=*iaq_data_get();} respond_json(req, iaq_json_build_state(&s), 200); return ESP_OK; }
-static esp_err_t api_metrics_get(httpd_req_t *req) { iaq_data_t s = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){s=*iaq_data_get();} respond_json(req, iaq_json_build_metrics(&s), 200); return ESP_OK; }
-static esp_err_t api_health_get(httpd_req_t *req) { iaq_data_t s = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){s=*iaq_data_get();} respond_json(req, iaq_json_build_health(&s), 200); return ESP_OK; }
+static esp_err_t api_state_get(httpd_req_t *req)
+{
+    uint64_t t0 = iaq_prof_tic();
+    iaq_data_t s = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){s=*iaq_data_get();}
+    respond_json(req, iaq_json_build_state(&s), 200);
+    iaq_prof_toc(IAQ_METRIC_WEB_API_STATE, t0);
+    return ESP_OK;
+}
+
+static esp_err_t api_metrics_get(httpd_req_t *req)
+{
+    uint64_t t0 = iaq_prof_tic();
+    iaq_data_t s = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){s=*iaq_data_get();}
+    respond_json(req, iaq_json_build_metrics(&s), 200);
+    iaq_prof_toc(IAQ_METRIC_WEB_API_METRICS, t0);
+    return ESP_OK;
+}
+
+static esp_err_t api_health_get(httpd_req_t *req)
+{
+    uint64_t t0 = iaq_prof_tic();
+    iaq_data_t s = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){s=*iaq_data_get();}
+    respond_json(req, iaq_json_build_health(&s), 200);
+    iaq_prof_toc(IAQ_METRIC_WEB_API_HEALTH, t0);
+    return ESP_OK;
+}
 
 static esp_err_t api_wifi_get(httpd_req_t *req)
 {
@@ -417,10 +447,11 @@ static esp_err_t api_wifi_get(httpd_req_t *req)
 
 static esp_err_t api_sensors_cadence_get(httpd_req_t *req)
 {
+    uint64_t t0 = iaq_prof_tic();
     uint32_t ms[SENSOR_ID_MAX] = {0};
     bool from_nvs[SENSOR_ID_MAX] = {0};
     esp_err_t r = sensor_coordinator_get_cadences(ms, from_nvs);
-    if (r != ESP_OK) { respond_error(req, 500, esp_err_to_name(r), "Failed to read cadences"); return ESP_OK; }
+    if (r != ESP_OK) { respond_error(req, 500, esp_err_to_name(r), "Failed to read cadences"); iaq_prof_toc(IAQ_METRIC_WEB_API_SENSORS, t0); return ESP_OK; }
     cJSON *root = cJSON_CreateObject();
     cJSON *cad = cJSON_CreateObject();
     cJSON_AddItemToObject(root, "cadences", cad);
@@ -432,6 +463,7 @@ static esp_err_t api_sensors_cadence_get(httpd_req_t *req)
         cJSON_AddItemToObject(cad, names[i], entry);
     }
     respond_json(req, root, 200);
+    iaq_prof_toc(IAQ_METRIC_WEB_API_SENSORS, t0);
     return ESP_OK;
 }
 
@@ -449,9 +481,10 @@ static bool parse_sensor_name(const char *name, sensor_id_t *out)
 
 static esp_err_t api_sensor_action(httpd_req_t *req)
 {
+    uint64_t t0 = iaq_prof_tic();
     const char *uri = req->uri; // /api/v1/sensor/<id>/<action>
     const char *p = strstr(uri, "/api/v1/sensor/");
-    if (!p) { respond_error(req, 404, "BAD_URI", "Bad URI"); return ESP_OK; }
+    if (!p) { respond_error(req, 404, "BAD_URI", "Bad URI"); iaq_prof_toc(IAQ_METRIC_WEB_API_SENSOR_ACTION, t0); return ESP_OK; }
     p += strlen("/api/v1/sensor/");
     char name[16] = {0};
     int i = 0; while (*p && *p != '/' && i < (int)sizeof(name)-1) name[i++] = *p++;
@@ -461,7 +494,7 @@ static esp_err_t api_sensor_action(httpd_req_t *req)
     action[i] = '\0';
 
     sensor_id_t id;
-    if (!parse_sensor_name(name, &id)) { respond_error(req, 400, "UNKNOWN_SENSOR", "Unknown sensor id"); return ESP_OK; }
+    if (!parse_sensor_name(name, &id)) { respond_error(req, 400, "UNKNOWN_SENSOR", "Unknown sensor id"); iaq_prof_toc(IAQ_METRIC_WEB_API_SENSOR_ACTION, t0); return ESP_OK; }
 
     esp_err_t r = ESP_OK;
     if (strcasecmp(action, "read") == 0) {
@@ -473,9 +506,9 @@ static esp_err_t api_sensor_action(httpd_req_t *req)
     } else if (strcasecmp(action, "disable") == 0) {
         r = sensor_coordinator_disable(id);
     } else if (strcasecmp(action, "cadence") == 0) {
-        cJSON *body = NULL; if (!read_req_json(req, &body)) { respond_error(req, 400, "INVALID_JSON", "Failed to parse JSON body"); return ESP_OK; }
+        cJSON *body = NULL; if (!read_req_json(req, &body)) { respond_error(req, 400, "INVALID_JSON", "Failed to parse JSON body"); iaq_prof_toc(IAQ_METRIC_WEB_API_SENSOR_ACTION, t0); return ESP_OK; }
         cJSON *jms = cJSON_GetObjectItem(body, "ms");
-        if (!cJSON_IsNumber(jms)) { cJSON_Delete(body); respond_error(req, 400, "INVALID_MS", "'ms' must be a number"); return ESP_OK; }
+        if (!cJSON_IsNumber(jms)) { cJSON_Delete(body); respond_error(req, 400, "INVALID_MS", "'ms' must be a number"); iaq_prof_toc(IAQ_METRIC_WEB_API_SENSOR_ACTION, t0); return ESP_OK; }
         int ms = (int)jms->valuedouble;
         if (ms < 0) ms = 0;
         if (ms > CONFIG_IAQ_WEB_PORTAL_CADENCE_MAX_MS) ms = CONFIG_IAQ_WEB_PORTAL_CADENCE_MAX_MS;
@@ -483,12 +516,14 @@ static esp_err_t api_sensor_action(httpd_req_t *req)
         cJSON_Delete(body);
     } else {
         respond_error(req, 400, "UNKNOWN_ACTION", "Unknown sensor action");
+        iaq_prof_toc(IAQ_METRIC_WEB_API_SENSOR_ACTION, t0);
         return ESP_OK;
     }
 
-    if (r != ESP_OK) { respond_error(req, 500, esp_err_to_name(r), "Sensor operation failed"); return ESP_OK; }
+    if (r != ESP_OK) { respond_error(req, 500, esp_err_to_name(r), "Sensor operation failed"); iaq_prof_toc(IAQ_METRIC_WEB_API_SENSOR_ACTION, t0); return ESP_OK; }
     cJSON *ok = cJSON_CreateObject(); cJSON_AddStringToObject(ok, "status", "ok");
     respond_json(req, ok, 200);
+    iaq_prof_toc(IAQ_METRIC_WEB_API_SENSOR_ACTION, t0);
     return ESP_OK;
 }
 
@@ -507,6 +542,7 @@ static const char* authmode_to_str(wifi_auth_mode_t m)
 
 static esp_err_t api_wifi_scan_get(httpd_req_t *req)
 {
+    uint64_t t0 = iaq_prof_tic();
     uint16_t max_aps = CONFIG_IAQ_WEB_PORTAL_WIFI_SCAN_LIMIT;
     /* Query params: ?limit=&offset= */
     int qlen = httpd_req_get_url_query_len(req);
@@ -523,7 +559,7 @@ static esp_err_t api_wifi_scan_get(httpd_req_t *req)
         free(q);
     }
     wifi_ap_record_t *aps = calloc(max_aps, sizeof(wifi_ap_record_t));
-    if (!aps) { respond_error(req, 500, "OOM", "Out of memory"); return ESP_OK; }
+    if (!aps) { respond_error(req, 500, "OOM", "Out of memory"); iaq_prof_toc(IAQ_METRIC_WEB_API_WIFI_SCAN, t0); return ESP_OK; }
     uint16_t found = 0;
     esp_err_t r = wifi_manager_scan(aps, max_aps, &found);
     if (r != ESP_OK) {
@@ -532,6 +568,7 @@ static esp_err_t api_wifi_scan_get(httpd_req_t *req)
         if (r == ESP_ERR_NOT_SUPPORTED) cJSON_AddStringToObject(err, "note", "scan not supported in AP mode");
         respond_json(req, err, 400);
         free(aps);
+        iaq_prof_toc(IAQ_METRIC_WEB_API_WIFI_SCAN, t0);
         return ESP_OK;
     }
     cJSON *root = cJSON_CreateObject();
@@ -547,21 +584,23 @@ static esp_err_t api_wifi_scan_get(httpd_req_t *req)
     cJSON_AddItemToObject(root, "aps", arr);
     respond_json(req, root, 200);
     free(aps);
+    iaq_prof_toc(IAQ_METRIC_WEB_API_WIFI_SCAN, t0);
     return ESP_OK;
 }
 
 static esp_err_t api_wifi_post(httpd_req_t *req)
 {
+    uint64_t t0 = iaq_prof_tic();
     cJSON *root = NULL;
-    if (!read_req_json(req, &root)) { respond_error(req, 400, "INVALID_JSON", "Failed to parse JSON body"); return ESP_OK; }
+    if (!read_req_json(req, &root)) { respond_error(req, 400, "INVALID_JSON", "Failed to parse JSON body"); iaq_prof_toc(IAQ_METRIC_WEB_API_WIFI_POST, t0); return ESP_OK; }
     const cJSON *jssid = cJSON_GetObjectItem(root, "ssid");
     const cJSON *jpass = cJSON_GetObjectItem(root, "password");
     const cJSON *jrestart = cJSON_GetObjectItem(root, "restart");
-    if (!cJSON_IsString(jssid) || !cJSON_IsString(jpass)) { cJSON_Delete(root); respond_error(req, 400, "SSID_OR_PASSWORD", "Missing or invalid ssid/password"); return ESP_OK; }
-    if (strlen(jssid->valuestring) == 0 || strlen(jssid->valuestring) > 32) { cJSON_Delete(root); respond_error(req, 400, "SSID_LEN", "SSID length must be 1..32"); return ESP_OK; }
-    if (strlen(jpass->valuestring) > 64) { cJSON_Delete(root); respond_error(req, 400, "PASS_LEN", "Password length must be 0..64"); return ESP_OK; }
+    if (!cJSON_IsString(jssid) || !cJSON_IsString(jpass)) { cJSON_Delete(root); respond_error(req, 400, "SSID_OR_PASSWORD", "Missing or invalid ssid/password"); iaq_prof_toc(IAQ_METRIC_WEB_API_WIFI_POST, t0); return ESP_OK; }
+    if (strlen(jssid->valuestring) == 0 || strlen(jssid->valuestring) > 32) { cJSON_Delete(root); respond_error(req, 400, "SSID_LEN", "SSID length must be 1..32"); iaq_prof_toc(IAQ_METRIC_WEB_API_WIFI_POST, t0); return ESP_OK; }
+    if (strlen(jpass->valuestring) > 64) { cJSON_Delete(root); respond_error(req, 400, "PASS_LEN", "Password length must be 0..64"); iaq_prof_toc(IAQ_METRIC_WEB_API_WIFI_POST, t0); return ESP_OK; }
     esp_err_t r = wifi_manager_set_credentials(jssid->valuestring, jpass->valuestring);
-    if (r != ESP_OK) { cJSON_Delete(root); respond_error(req, 500, esp_err_to_name(r), "Failed to save credentials"); return ESP_OK; }
+    if (r != ESP_OK) { cJSON_Delete(root); respond_error(req, 500, esp_err_to_name(r), "Failed to save credentials"); iaq_prof_toc(IAQ_METRIC_WEB_API_WIFI_POST, t0); return ESP_OK; }
     bool restart = cJSON_IsBool(jrestart) ? cJSON_IsTrue(jrestart) : false;
     cJSON_Delete(root);
     if (restart) {
@@ -569,6 +608,7 @@ static esp_err_t api_wifi_post(httpd_req_t *req)
     }
     cJSON *ok = cJSON_CreateObject(); cJSON_AddStringToObject(ok, "status", "ok");
     respond_json(req, ok, 200);
+    iaq_prof_toc(IAQ_METRIC_WEB_API_WIFI_POST, t0);
     return ESP_OK;
 }
 
@@ -594,25 +634,27 @@ static esp_err_t api_mqtt_get(httpd_req_t *req)
 
 static esp_err_t api_mqtt_post(httpd_req_t *req)
 {
+    uint64_t t0 = iaq_prof_tic();
     cJSON *root = NULL;
-    if (!read_req_json(req, &root)) { respond_error(req, 400, "INVALID_JSON", "Failed to parse JSON body"); return ESP_OK; }
+    if (!read_req_json(req, &root)) { respond_error(req, 400, "INVALID_JSON", "Failed to parse JSON body"); iaq_prof_toc(IAQ_METRIC_WEB_API_MQTT_POST, t0); return ESP_OK; }
     const cJSON *jurl = cJSON_GetObjectItem(root, "broker_url");
     const cJSON *juser = cJSON_GetObjectItem(root, "username");
     const cJSON *jpass = cJSON_GetObjectItem(root, "password");
     const cJSON *jrestart = cJSON_GetObjectItem(root, "restart");
-    if (!cJSON_IsString(jurl)) { cJSON_Delete(root); respond_error(req, 400, "BROKER_URL", "Missing broker_url"); return ESP_OK; }
+    if (!cJSON_IsString(jurl)) { cJSON_Delete(root); respond_error(req, 400, "BROKER_URL", "Missing broker_url"); iaq_prof_toc(IAQ_METRIC_WEB_API_MQTT_POST, t0); return ESP_OK; }
     const char *user = cJSON_IsString(juser) ? juser->valuestring : NULL;
     const char *pass = cJSON_IsString(jpass) ? jpass->valuestring : NULL;
     esp_err_t r = mqtt_manager_set_broker(jurl->valuestring, user, pass);
     bool restart = cJSON_IsBool(jrestart) ? cJSON_IsTrue(jrestart) : false;
     cJSON_Delete(root);
-    if (r != ESP_OK) { respond_error(req, 500, esp_err_to_name(r), "Failed to save MQTT settings"); return ESP_OK; }
+    if (r != ESP_OK) { respond_error(req, 500, esp_err_to_name(r), "Failed to save MQTT settings"); iaq_prof_toc(IAQ_METRIC_WEB_API_MQTT_POST, t0); return ESP_OK; }
     if (restart) {
         mqtt_manager_stop(); vTaskDelay(pdMS_TO_TICKS(300));
         if (wifi_manager_is_connected()) (void)mqtt_manager_start();
     }
     cJSON *ok = cJSON_CreateObject(); cJSON_AddStringToObject(ok, "status", "ok");
     respond_json(req, ok, 200);
+    iaq_prof_toc(IAQ_METRIC_WEB_API_MQTT_POST, t0);
     return ESP_OK;
 }
 
@@ -630,6 +672,7 @@ static esp_err_t api_device_restart(httpd_req_t *req)
 /* Sensors overview (same structure as health.sensors) */
 static esp_err_t api_sensors_get(httpd_req_t *req)
 {
+    uint64_t t0 = iaq_prof_tic();
     iaq_data_t snap = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){ snap = *iaq_data_get(); }
     cJSON *root = iaq_json_build_health(&snap);
     /* Extract just sensors */
@@ -638,6 +681,7 @@ static esp_err_t api_sensors_get(httpd_req_t *req)
     cJSON *wrap = cJSON_CreateObject();
     cJSON_AddItemToObject(wrap, "sensors", sensors ? sensors : cJSON_CreateObject());
     respond_json(req, wrap, 200);
+    iaq_prof_toc(IAQ_METRIC_WEB_API_SENSORS, t0);
     return ESP_OK;
 }
 
@@ -658,6 +702,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
     esp_err_t ret = httpd_ws_recv_frame(req, &frame, 0);
     if (ret != ESP_OK) return ret;
     if (frame.len) {
+        uint64_t t0 = iaq_prof_tic();
         uint8_t *buf = (uint8_t*)malloc(frame.len + 1);
         if (!buf) return ESP_ERR_NO_MEM;
         frame.payload = buf;
@@ -682,6 +727,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
             }
         }
         free(buf);
+        iaq_prof_toc(IAQ_METRIC_WEB_WS_RX, t0);
     }
     if (frame.type == HTTPD_WS_TYPE_CLOSE) {
         int sock = httpd_req_to_sockfd(req);
@@ -861,6 +907,13 @@ esp_err_t web_portal_start(void)
         if (file_cert) free(file_cert);
         if (file_key) free(file_key);
         s_server_is_https = true;
+        /* Register HTTPD task for stack profiling */
+#if defined(INCLUDE_xTaskGetHandle) && (INCLUDE_xTaskGetHandle == 1)
+        s_httpd_task_handle = xTaskGetHandle("httpd");
+        if (s_httpd_task_handle) {
+            iaq_profiler_register_task("httpd", s_httpd_task_handle, scfg.httpd.stack_size);
+        }
+#endif
     } else {
         httpd_config_t cfg = HTTPD_DEFAULT_CONFIG();
         cfg.uri_match_fn = httpd_uri_match_wildcard;
@@ -878,6 +931,13 @@ esp_err_t web_portal_start(void)
         if (wifi_manager_get_mode() == WIFI_MODE_AP) {
             ESP_LOGI(TAG, "AP-only mode: using HTTP to improve captive portal compatibility");
         }
+        /* Register HTTPD task for stack profiling */
+#if defined(INCLUDE_xTaskGetHandle) && (INCLUDE_xTaskGetHandle == 1)
+        s_httpd_task_handle = xTaskGetHandle("httpd");
+        if (s_httpd_task_handle) {
+            iaq_profiler_register_task("httpd", s_httpd_task_handle, cfg.stack_size);
+        }
+#endif
     }
 
     /* Register API handlers */
@@ -928,6 +988,11 @@ esp_err_t web_portal_start(void)
 esp_err_t web_portal_stop(void)
 {
     if (!s_server) return ESP_OK;
+    /* Unregister task before stopping server */
+    if (s_httpd_task_handle) {
+        iaq_profiler_unregister_task(s_httpd_task_handle);
+        s_httpd_task_handle = NULL;
+    }
     esp_timer_stop(s_ws_state_timer);
     esp_timer_stop(s_ws_metrics_timer);
     esp_timer_stop(s_ws_health_timer);

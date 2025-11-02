@@ -29,6 +29,19 @@ typedef enum {
 
     IAQ_METRIC_DISPLAY_FRAME,
 
+    /* Web portal metrics */
+    IAQ_METRIC_WEB_STATIC,
+    IAQ_METRIC_WEB_API_STATE,
+    IAQ_METRIC_WEB_API_METRICS,
+    IAQ_METRIC_WEB_API_HEALTH,
+    IAQ_METRIC_WEB_API_WIFI_SCAN,
+    IAQ_METRIC_WEB_API_WIFI_POST,
+    IAQ_METRIC_WEB_API_MQTT_POST,
+    IAQ_METRIC_WEB_API_SENSORS,
+    IAQ_METRIC_WEB_API_SENSOR_ACTION,
+    IAQ_METRIC_WEB_WS_BROADCAST,
+    IAQ_METRIC_WEB_WS_RX,
+
     IAQ_METRIC_MAX
 } iaq_metric_id_t;
 
@@ -50,6 +63,9 @@ void iaq_status_report(void);
 
 /* Register a task to include in stack HWM reporting. */
 void iaq_profiler_register_task(const char *name, TaskHandle_t handle, uint32_t stack_size_bytes);
+
+/* Unregister a task (e.g., when it is stopped/restarted). Safe to call with NULL. */
+void iaq_profiler_unregister_task(TaskHandle_t handle);
 
 /* Record a duration for a metric (microseconds). */
 void iaq_profiler_record(int metric_id, uint32_t duration_us);
