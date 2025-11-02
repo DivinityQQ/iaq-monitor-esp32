@@ -25,8 +25,12 @@ CONFIG_LWIP_LOCAL_HOSTNAME="iaq-monitor"
 CONFIG_LWIP_MAX_SOCKETS=10
 CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU1=y
 
-# HTTP Server (for future web config)
-CONFIG_HTTPD_MAX_REQ_HDR_LEN=512
+# HTTP Server (portal)
+# Modern browsers send long Sec-CH-UA and related headers.
+# Increase request header limit to avoid 431 errors.
+CONFIG_HTTPD_MAX_REQ_HDR_LEN=2048
+# Bump URI length a bit as well for safety.
+CONFIG_HTTPD_MAX_URI_LEN=1024
 CONFIG_HTTPD_WS_SUPPORT=y
 
 # MQTT
@@ -43,6 +47,14 @@ CONFIG_MBEDTLS_CERTIFICATE_BUNDLE=y
 # Use the smaller "common" selection instead of full bundle
 CONFIG_MBEDTLS_CERTIFICATE_BUNDLE_DEFAULT_CMN=y
 CONFIG_FREERTOS_RUN_TIME_STATS_USING_ESP_TIMER=y
+
+# HTTPS server memory tuning
+# Reduce TLS record buffer sizes to shrink per-connection heap usage
+CONFIG_MBEDTLS_SSL_IN_CONTENT_LEN=4096
+CONFIG_MBEDTLS_SSL_OUT_CONTENT_LEN=4096
+# Allow mbedTLS to shrink buffers after handshake
+CONFIG_MBEDTLS_DYNAMIC_BUFFER=y
+CONFIG_MBEDTLS_SSL_VARIABLE_BUFFER_LENGTH=y
 
 # MQTT QoS Levels
 CONFIG_IAQ_MQTT_CRITICAL_QOS=1
@@ -63,6 +75,7 @@ CONFIG_PARTITION_TABLE_FILENAME="partitions.csv"
 # Enable filesystem support (for future web server)
 CONFIG_FATFS_LFN_HEAP=y
 CONFIG_FATFS_MAX_LFN=255
+
 
 # NVS
 CONFIG_NVS_ENCRYPTION=n  # Enable later for production

@@ -1,5 +1,5 @@
 **Overview**
-- Serves a single-page app from SPIFFS at `/` (if present) and exposes a REST API under `/api/v1/*` plus a WebSocket at `/ws`.
+- Serves a single-page app from LittleFS at `/` (if present) and exposes a REST API under `/api/v1/*` plus a WebSocket at `/ws`.
 - Protocol selection simplified for UX clarity:
   - AP-only (provisioning): HTTP only (better captive portal compatibility).
   - STA or AP+STA: HTTPS when `IAQ_WEB_PORTAL_ENABLE_HTTPS=y`.
@@ -11,7 +11,7 @@
 **Base URLs**
 - REST base: `/api/v1`
 - WebSocket: `/ws`
-- Static files: `/` (served from SPIFFS partition label `www` mounted at `/www`)
+- Static files: `/` (served from LittleFS partition label `www` mounted at `/www`)
  - Static assets include `Cache-Control: public, max-age=<cfg>` headers (`IAQ_WEB_PORTAL_STATIC_MAX_AGE_SEC`).
 
 **Info**

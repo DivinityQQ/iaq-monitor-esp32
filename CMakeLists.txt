@@ -22,11 +22,5 @@ idf_build_set_property(COMPILE_DEFINITIONS "IAQ_VERSION_MAJOR=${PROJECT_VERSION_
 idf_build_set_property(COMPILE_DEFINITIONS "IAQ_VERSION_MINOR=${PROJECT_VERSION_MINOR}" APPEND)
 idf_build_set_property(COMPILE_DEFINITIONS "IAQ_VERSION_PATCH=${PROJECT_VERSION_PATCH}" APPEND)
 
-# Create SPIFFS image for web portal if source dir exists
-set(WEB_DIR "${CMAKE_CURRENT_LIST_DIR}/www")
-if (EXISTS ${WEB_DIR})
-    message(STATUS "Including SPIFFS web content from: ${WEB_DIR}")
-    spiffs_create_partition_image(www ${WEB_DIR} FLASH_IN_PROJECT)
-else()
-    message(STATUS "No web dir '${WEB_DIR}' found; SPIFFS image will be empty or preflashed")
-endif()
+# Web content image generation is handled in main/CMakeLists.txt via
+# littlefs_create_partition_image once the LittleFS component is available.

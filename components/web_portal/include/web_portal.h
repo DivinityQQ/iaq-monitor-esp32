@@ -9,13 +9,13 @@
 extern "C" {
 #endif
 
-/* Initialize portal: mounts SPIFFS and prepares HTTP/WS server. */
+/* Initialize portal: mounts LittleFS and prepares HTTP/WS server. */
 esp_err_t web_portal_init(iaq_system_context_t *ctx);
 
 /* Start portal HTTP/WS server. */
 esp_err_t web_portal_start(void);
 
-/* Stop portal server and unmount SPIFFS. */
+/* Stop portal server (filesystem stays mounted). */
 esp_err_t web_portal_stop(void);
 
 #ifdef __cplusplus
@@ -23,4 +23,3 @@ esp_err_t web_portal_stop(void);
 #endif
 
 #endif /* WEB_PORTAL_H */
-

@@ -1,9 +1,17 @@
+# Python
 .pytest_cache/
 __pycache__/
+
+# Editor/IDE
 .devcontainer/
 .vscode/
+.idea/
 
-# esp-idf built binaries
+# OS files
+.DS_Store
+Thumbs.db
+
+# ESP-IDF built binaries
 build/
 build_*_*/
 sdkconfig
@@ -19,4 +27,14 @@ pytest_embedded_log/
 
 # idf-component-manager output
 dependencies.lock
+managed_components/
+
 CLAUDE.md
+
+# Frontend build output (final SPIFFS content)
+# Note: node_modules/, dist/, and other frontend artifacts are handled by components/web_portal/frontend/.gitignore
+www/
+
+# Local dev TLS certs (avoid committing secrets)
+components/web_portal/certs/cert.pem
+components/web_portal/certs/key.pem

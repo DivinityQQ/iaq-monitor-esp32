@@ -5,7 +5,7 @@ config IAQ_WEB_PORTAL_ENABLE_HTTPS
     default y
     help
       When enabled, the portal can run over HTTPS (esp_https_server) once STA
-      is connected. Cert/key are loaded from SPIFFS files at /www/cert.pem and
+      is connected. Cert/key are loaded from LittleFS files at /www/cert.pem and
       /www/key.pem if present; otherwise, a built-in self-signed dev cert is used.
       In AP-only provisioning mode, the portal always runs HTTP for captive portal
       compatibility.

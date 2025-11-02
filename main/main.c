@@ -184,7 +184,7 @@ void app_main(void)
     ESP_LOGI(TAG, "Initializing WiFi manager");
     ESP_ERROR_CHECK(wifi_manager_init(&g_system_ctx));
 
-    /* Initialize web portal (mount SPIFFS, prepare handlers) */
+    /* Initialize web portal (mount LittleFS, prepare handlers) */
     ESP_LOGI(TAG, "Initializing web portal");
     ESP_ERROR_CHECK(web_portal_init(&g_system_ctx));
 

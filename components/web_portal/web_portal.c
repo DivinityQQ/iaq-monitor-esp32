@@ -4,7 +4,7 @@
 #include <sys/param.h>
 #include <strings.h>
 #include "esp_log.h"
-#include "esp_spiffs.h"
+#include "esp_littlefs.h"
 #include "esp_timer.h"
 #include "esp_system.h"
 #include "esp_event.h"
@@ -32,7 +32,7 @@
 
 static const char *TAG = "WEB_PORTAL";
 
-/* SPIFFS mount base */
+/* LittleFS mount base */
 #define WEB_MOUNT_POINT "/www"
 
 /* WebSocket state */
@@ -797,19 +797,19 @@ esp_err_t web_portal_init(iaq_system_context_t *ctx)
     if (!ctx) return ESP_ERR_INVALID_ARG;
     s_ctx = ctx;
 
-    /* Mount SPIFFS (partition label 'www') */
-    esp_vfs_spiffs_conf_t conf = {
+    /* Mount LittleFS (partition label 'www') */
+    esp_vfs_littlefs_conf_t conf = {
         .base_path = WEB_MOUNT_POINT,
         .partition_label = "www",
-        .max_files = 8,
-        .format_if_mount_failed = false
+        .format_if_mount_failed = true,
+        .dont_mount = false,
     };
-    esp_err_t r = esp_vfs_spiffs_register(&conf);
+    esp_err_t r = esp_vfs_littlefs_register(&conf);
     if (r != ESP_OK) {
-        ESP_LOGW(TAG, "SPIFFS mount failed: %s (portal will serve API only)", esp_err_to_name(r));
+        ESP_LOGW(TAG, "LittleFS mount failed: %s (portal will serve API only)", esp_err_to_name(r));
     } else {
-        size_t total=0, used=0; if (esp_spiffs_info(conf.partition_label, &total, &used) == ESP_OK) {
-            ESP_LOGI(TAG, "SPIFFS mounted at %s (%u/%u bytes)", WEB_MOUNT_POINT, (unsigned)used, (unsigned)total);
+        size_t total=0, used=0; if (esp_littlefs_info(conf.partition_label, &total, &used) == ESP_OK) {
+            ESP_LOGI(TAG, "LittleFS mounted at %s (%u/%u bytes)", WEB_MOUNT_POINT, (unsigned)used, (unsigned)total);
         }
     }
 
@@ -850,7 +850,7 @@ esp_err_t web_portal_start(void)
         scfg.httpd.stack_size = TASK_STACK_WEB_SERVER;
         scfg.httpd.core_id = TASK_CORE_WEB_SERVER;
         if (scfg.httpd.stack_size < 6144) scfg.httpd.stack_size = 6144;
-        /* Try to load cert/key from SPIFFS, fallback to built-in dev cert */
+        /* Try to load cert/key from LittleFS, fallback to built-in dev cert */
         extern const unsigned char servercert_pem_start[] asm("_binary_servercert_pem_start");
         extern const unsigned char prvtkey_pem_start[] asm("_binary_prvtkey_pem_start");
         extern const unsigned char servercert_pem_end[] asm("_binary_servercert_pem_end");
@@ -1004,7 +1004,7 @@ esp_err_t web_portal_stop(void)
     s_server = NULL;
     s_server_is_https = false;
     ESP_LOGI(TAG, "Web portal stopped");
-    /* Keep SPIFFS mounted for potential reuse; callers can reboot or unmount if needed */
+    /* Keep LittleFS mounted for potential reuse; callers can reboot or unmount if needed */
     return ESP_OK;
 }
 /* ===== Captive portal helpers ===== */
