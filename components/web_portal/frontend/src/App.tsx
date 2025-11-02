@@ -6,6 +6,7 @@ import { theme } from './theme';
 import { AppBar } from './components/Layout/AppBar';
 import { NavDrawer } from './components/Layout/NavDrawer';
 import { Dashboard } from './components/Dashboard/Dashboard';
+import { ConfigView } from './components/Config/ConfigView';
 import { LoadingSpinner } from './components/Common/LoadingSkeleton';
 import { useWebSocketConnection } from './hooks/useWebSocket';
 import { deviceInfoAtom, appReadyAtom } from './store/atoms';
@@ -19,17 +20,6 @@ const ChartsView = () => (
     </Typography>
     <Typography variant="body1" color="text.secondary">
       Historical charts will be implemented in Week 4.
-    </Typography>
-  </Box>
-);
-
-const ConfigView = () => (
-  <Box p={3}>
-    <Typography variant="h4" gutterBottom>
-      Configuration
-    </Typography>
-    <Typography variant="body1" color="text.secondary">
-      WiFi, MQTT, and sensor configuration will be implemented in Week 3.
     </Typography>
   </Box>
 );
@@ -59,24 +49,31 @@ function AppContent() {
   // Establish WebSocket connection
   useWebSocketConnection();
 
-  // Fetch device info on mount
+  // Fetch only device info on mount; state/metrics/health arrive via WS
   useEffect(() => {
-    const fetchDeviceInfo = async () => {
+    const fetchInitialData = async () => {
       try {
         const info = await apiClient.getInfo();
         setDeviceInfo(info);
       } catch (err) {
-        console.error('Failed to fetch device info:', err);
+        console.error('Failed to fetch initial data:', err);
         setError('Failed to connect to device. Please check your connection.');
       }
     };
 
-    fetchDeviceInfo();
+    fetchInitialData();
   }, [setDeviceInfo]);
 
   const toggleDrawer = () => {
     setDrawerOpen(!drawerOpen);
   };
+
+  // Clear connection error once data is available (via WS or REST)
+  useEffect(() => {
+    if (appReady && error) {
+      setError(null);
+    }
+  }, [appReady, error]);
 
   // Show loading state while fetching initial data
   if (!appReady) {

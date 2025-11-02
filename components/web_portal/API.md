@@ -75,6 +75,7 @@
 **WebSocket**
 - Connect to `/ws`.
 - Messages are JSON envelopes: `{ type:"state"|"metrics"|"health", data:<payload> }`.
+- Initial snapshot: upon connection, the server immediately pushes one `state`, `metrics`, and `health` message to that client so the UI can render without REST bootstrapping.
 - Update cadence:
   - `state`: 1 Hz
   - `metrics`: every 5 s

@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import type { State, Metrics, Health, DeviceInfo, SensorId } from '../api/types';
+import type { State, Metrics, Health, DeviceInfo, SensorId, SensorCadence } from '../api/types';
 import { getAQIColor, getComfortColor, getIAQColor } from '../theme';
 
 // ============================================================================
@@ -26,6 +26,12 @@ export const healthAtom = atom<Health | null>(null);
  * Device information (fetched once via REST API on mount)
  */
 export const deviceInfoAtom = atom<DeviceInfo | null>(null);
+
+/**
+ * Sensor cadences (fetched once on Sensors tab)
+ * Record of sensor -> { ms, from_nvs }
+ */
+export const cadencesAtom = atom<Record<SensorId, SensorCadence> | null>(null);
 
 // ============================================================================
 // DERIVED ATOMS - Computed Values

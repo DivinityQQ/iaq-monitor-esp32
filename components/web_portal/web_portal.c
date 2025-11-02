@@ -192,6 +192,29 @@ static void ws_broadcast_json(const char *type, cJSON *payload)
     iaq_prof_toc(IAQ_METRIC_WEB_WS_BROADCAST, t0);
 }
 
+/* Send a single JSON envelope to a specific WS fd (async on httpd task) */
+static void ws_send_json_to_fd(int fd, const char *type, cJSON *payload)
+{
+    if (!s_server || !payload) { if (payload) cJSON_Delete(payload); return; }
+    cJSON *root = cJSON_CreateObject();
+    cJSON_AddStringToObject(root, "type", type);
+    cJSON_AddItemToObject(root, "data", payload); /* takes ownership */
+    char *txt = cJSON_PrintUnformatted(root);
+    cJSON_Delete(root);
+    if (!txt) return;
+
+    struct ws_async_arg *a = (struct ws_async_arg*)malloc(sizeof(struct ws_async_arg));
+    if (!a) { free(txt); return; }
+    a->hd = s_server; a->fd = fd; a->len = strlen(txt);
+    a->txt = (char*)malloc(a->len + 1);
+    if (!a->txt) { free(a); free(txt); return; }
+    memcpy(a->txt, txt, a->len + 1);
+    if (httpd_queue_work(s_server, ws_async_send, a) != ESP_OK) {
+        free(a->txt); free(a);
+    }
+    free(txt);
+}
+
 /* Timers to push live data (offload work to HTTP server task) */
 static void ws_work_send_state(void *arg) { (void)arg; iaq_data_t snap = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){ snap = *iaq_data_get(); } ws_broadcast_json("state", iaq_json_build_state(&snap)); }
 static void ws_work_send_metrics(void *arg) { (void)arg; iaq_data_t snap = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){ snap = *iaq_data_get(); } ws_broadcast_json("metrics", iaq_json_build_metrics(&snap)); }
@@ -751,6 +774,13 @@ static esp_err_t ws_handler(httpd_req_t *req)
         int sock = httpd_req_to_sockfd(req);
         ws_clients_add(sock);
         ESP_LOGI(TAG, "WS client connected: %d", sock);
+        /* Push an immediate snapshot targeted to this client so the UI can
+         * render without waiting for the periodic timers. */
+        iaq_data_t snap = (iaq_data_t){0};
+        IAQ_DATA_WITH_LOCK(){ snap = *iaq_data_get(); }
+        ws_send_json_to_fd(sock, "state", iaq_json_build_state(&snap));
+        ws_send_json_to_fd(sock, "metrics", iaq_json_build_metrics(&snap));
+        ws_send_json_to_fd(sock, "health", iaq_json_build_health(&snap));
         return ESP_OK;
     }
 

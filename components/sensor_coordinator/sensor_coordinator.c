@@ -1256,6 +1256,7 @@ const char* sensor_coordinator_state_to_string(sensor_state_t state)
         case SENSOR_STATE_WARMING: return "WARMING";
         case SENSOR_STATE_READY:   return "READY";
         case SENSOR_STATE_ERROR:   return "ERROR";
+        case SENSOR_STATE_DISABLED: return "DISABLED";
         default:                   return "UNKNOWN";
     }
 }
