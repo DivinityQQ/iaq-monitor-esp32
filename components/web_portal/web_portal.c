@@ -345,17 +345,57 @@ static esp_err_t static_handler(httpd_req_t *req)
     if (strcmp(uri, "/") == 0) uri = "/index.html"; /* SPA entry */
     snprintf(path, sizeof(path), WEB_MOUNT_POINT "%s", uri);
 
-    struct stat st;
-    if (stat(path, &st) != 0 || st.st_size <= 0) {
+    /* Determine if client accepts gzip */
+    bool client_accepts_gzip = false;
+    size_t ae_len = httpd_req_get_hdr_value_len(req, "Accept-Encoding");
+    if (ae_len > 0 && ae_len < 256) {
+        char ae[256];
+        if (httpd_req_get_hdr_value_str(req, "Accept-Encoding", ae, sizeof(ae)) == ESP_OK) {
+            if (strstr(ae, "gzip") != NULL) client_accepts_gzip = true;
+        }
+    }
+
+    /* Prefer precompressed .gz variant when supported and available */
+    char gz_path[sizeof(path) + 4];
+    snprintf(gz_path, sizeof(gz_path), "%s.gz", path);
+
+    const char *serve_path = path; /* default */
+    bool serve_gzip = false;
+
+    struct stat st_orig;
+    struct stat st_gz;
+
+    bool orig_ok = (stat(path, &st_orig) == 0 && st_orig.st_size > 0);
+    bool gz_ok = false;
+    if (client_accepts_gzip) {
+        gz_ok = (stat(gz_path, &st_gz) == 0 && st_gz.st_size > 0);
+        if (gz_ok) {
+            serve_path = gz_path;
+            serve_gzip = true;
+        }
+    }
+
+    if (!orig_ok && !serve_gzip) {
+        /* No original file, and either client doesn't accept gzip or .gz missing */
         respond_error(req, 404, "NOT_FOUND", "Resource not found");
         iaq_prof_toc(IAQ_METRIC_WEB_STATIC, t0);
         return ESP_OK;
     }
 
-    FILE *f = fopen(path, "rb");
-    if (!f) { respond_error(req, 500, "OPEN_FAILED", "Failed to open file"); iaq_prof_toc(IAQ_METRIC_WEB_STATIC, t0); return ESP_OK; }
+    FILE *f = fopen(serve_path, "rb");
+    if (!f) {
+        respond_error(req, 500, "OPEN_FAILED", "Failed to open file");
+        iaq_prof_toc(IAQ_METRIC_WEB_STATIC, t0);
+        return ESP_OK;
+    }
 
+    /* Set content type based on original (non-.gz) extension */
     httpd_resp_set_type(req, guess_mime_type(path));
+    if (serve_gzip) {
+        httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
+        httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
+    }
+
     /* Caching */
     char cc[32];
     snprintf(cc, sizeof(cc), "public, max-age=%d", CONFIG_IAQ_WEB_PORTAL_STATIC_MAX_AGE_SEC);
