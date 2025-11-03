@@ -392,6 +392,7 @@ static esp_err_t static_handler(httpd_req_t *req)
 
     const char *serve_path = path; /* default */
     bool serve_gzip = false;
+    bool serve_fallback_html = false; /* SPA history fallback */
 
     struct stat st_orig;
     struct stat st_gz;
@@ -406,11 +407,44 @@ static esp_err_t static_handler(httpd_req_t *req)
         }
     }
 
+    /* If file not found, implement SPA history API fallback: serve index.html
+     * for navigation requests (paths with no extension), so `/config` reloads
+     * load the app instead of 404. Keep 404 for missing assets. */
     if (!orig_ok && !serve_gzip) {
-        /* No original file, and either client doesn't accept gzip or .gz missing */
-        respond_error(req, 404, "NOT_FOUND", "Resource not found");
-        iaq_prof_toc(IAQ_METRIC_WEB_STATIC, t0);
-        return ESP_OK;
+        bool has_dot = (strchr(uri, '.') != NULL);
+        if (!has_dot) {
+            /* Fallback to /index.html (or .gz if available and accepted) */
+            static char index_path[sizeof(WEB_MOUNT_POINT) + 16];
+            static char index_gz_path[sizeof(WEB_MOUNT_POINT) + 20];
+            snprintf(index_path, sizeof(index_path), WEB_MOUNT_POINT "/index.html");
+            snprintf(index_gz_path, sizeof(index_gz_path), WEB_MOUNT_POINT "/index.html.gz");
+            struct stat st_idx;
+            struct stat st_idx_gz;
+            bool idx_ok = (stat(index_path, &st_idx) == 0 && st_idx.st_size > 0);
+            bool idx_gz_ok = false;
+            if (client_accepts_gzip) {
+                idx_gz_ok = (stat(index_gz_path, &st_idx_gz) == 0 && st_idx_gz.st_size > 0);
+            }
+            if (idx_gz_ok) {
+                serve_path = index_gz_path;
+                serve_gzip = true;
+                serve_fallback_html = true;
+            } else if (idx_ok) {
+                serve_path = index_path;
+                serve_gzip = false;
+                serve_fallback_html = true;
+            } else {
+                /* No index.html available: return 404 as before */
+                respond_error(req, 404, "NOT_FOUND", "Resource not found");
+                iaq_prof_toc(IAQ_METRIC_WEB_STATIC, t0);
+                return ESP_OK;
+            }
+        } else {
+            /* Asset-like path missing -> 404 */
+            respond_error(req, 404, "NOT_FOUND", "Resource not found");
+            iaq_prof_toc(IAQ_METRIC_WEB_STATIC, t0);
+            return ESP_OK;
+        }
     }
 
     FILE *f = fopen(serve_path, "rb");
@@ -420,8 +454,13 @@ static esp_err_t static_handler(httpd_req_t *req)
         return ESP_OK;
     }
 
-    /* Set content type based on original (non-.gz) extension */
-    httpd_resp_set_type(req, guess_mime_type(path));
+    /* Set content type: force text/html for SPA fallback */
+    if (serve_fallback_html) {
+        httpd_resp_set_type(req, "text/html");
+    } else {
+        /* Based on original (non-.gz) extension */
+        httpd_resp_set_type(req, guess_mime_type(path));
+    }
     if (serve_gzip) {
         httpd_resp_set_hdr(req, "Content-Encoding", "gzip");
         httpd_resp_set_hdr(req, "Vary", "Accept-Encoding");
@@ -430,7 +469,7 @@ static esp_err_t static_handler(httpd_req_t *req)
     /* Caching: long TTL for hashed assets, no-cache for HTML, default otherwise */
     char cc[64];
     const char *ext = strrchr(uri, '.');
-    bool is_html = (ext && (!strcasecmp(ext, ".html") || !strcasecmp(ext, ".htm"))) || strcmp(uri, "/") == 0;
+    bool is_html = serve_fallback_html || (ext && (!strcasecmp(ext, ".html") || !strcasecmp(ext, ".htm"))) || strcmp(uri, "/") == 0;
     bool is_asset = (strncmp(uri, "/assets/", 8) == 0);
     if (is_asset) {
         snprintf(cc, sizeof(cc), "public, max-age=%d, immutable", 31536000); /* 1 year */
