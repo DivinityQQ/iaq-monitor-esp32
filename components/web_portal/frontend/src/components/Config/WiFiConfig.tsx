@@ -8,7 +8,6 @@ import {
   TextField,
   Switch,
   FormControlLabel,
-  Alert,
   Table,
   TableBody,
   TableCell,
@@ -35,9 +34,11 @@ import { deviceInfoAtom } from '../../store/atoms';
 import { apiClient } from '../../api/client';
 import type { WiFiAP } from '../../api/types';
 import { validateSSID, validatePassword, getSignalBars } from '../../utils/validation';
+import { useNotification } from '../../contexts/SnackbarContext';
 
 export function WiFiConfig() {
   const deviceInfo = useAtomValue(deviceInfoAtom);
+  const { showNotification } = useNotification();
 
   // Form state
   const [ssid, setSSID] = useState('');
@@ -48,16 +49,12 @@ export function WiFiConfig() {
   // Scanner state
   const [scanResults, setScanResults] = useState<WiFiAP[]>([]);
   const [scanning, setScanning] = useState(false);
-  const [scanError, setScanError] = useState<string | null>(null);
 
   // Connection state
   const [connecting, setConnecting] = useState(false);
-  const [connectionError, setConnectionError] = useState<string | null>(null);
-  const [connectionSuccess, setConnectionSuccess] = useState(false);
 
   // Restart state
   const [restarting, setRestarting] = useState(false);
-  const [restartError, setRestartError] = useState<string | null>(null);
 
   // Validation errors
   const [ssidError, setSSIDError] = useState<string | null>(null);
@@ -67,15 +64,21 @@ export function WiFiConfig() {
 
   const handleScan = async () => {
     setScanning(true);
-    setScanError(null);
     setScanResults([]);
 
     try {
       const result = await apiClient.scanWiFi(20);
       setScanResults(result.aps);
+      showNotification({
+        message: `Found ${result.aps.length} network${result.aps.length !== 1 ? 's' : ''}`,
+        severity: 'success',
+      });
     } catch (error) {
       console.error('WiFi scan failed:', error);
-      setScanError(error instanceof Error ? error.message : 'Failed to scan networks');
+      showNotification({
+        message: error instanceof Error ? error.message : 'Failed to scan networks',
+        severity: 'error',
+      });
     } finally {
       setScanning(false);
     }
@@ -87,8 +90,6 @@ export function WiFiConfig() {
     // Clear password when selecting new network
     setPassword('');
     setPasswordError(null);
-    setConnectionError(null);
-    setConnectionSuccess(false);
   };
 
   const handleConnect = async () => {
@@ -104,8 +105,6 @@ export function WiFiConfig() {
     }
 
     setConnecting(true);
-    setConnectionError(null);
-    setConnectionSuccess(false);
 
     try {
       await apiClient.setWiFi({
@@ -114,23 +113,30 @@ export function WiFiConfig() {
         restart: restartAfterConnect,
       });
 
-      setConnectionSuccess(true);
-      setConnectionError(null);
-
       // Clear form
       setPassword('');
 
       if (restartAfterConnect) {
-        setConnectionSuccess(false);
-        // Show restarting message
+        // Show restarting message after a delay
         setTimeout(() => {
-          setConnectionError('Device is restarting. Please reconnect in a few moments.');
+          showNotification({
+            message: 'WiFi is restarting. Connection will be re-established shortly.',
+            severity: 'info',
+            duration: 5000,
+          });
         }, 1000);
+      } else {
+        showNotification({
+          message: 'WiFi configuration updated successfully!',
+          severity: 'success',
+        });
       }
     } catch (error) {
       console.error('WiFi connection failed:', error);
-      setConnectionError(error instanceof Error ? error.message : 'Failed to connect to WiFi');
-      setConnectionSuccess(false);
+      showNotification({
+        message: error instanceof Error ? error.message : 'Failed to connect to WiFi',
+        severity: 'error',
+      });
     } finally {
       setConnecting(false);
     }
@@ -138,14 +144,20 @@ export function WiFiConfig() {
 
   const handleRestart = async () => {
     setRestarting(true);
-    setRestartError(null);
 
     try {
       await apiClient.restartWiFi();
-      setRestartError('WiFi restarted successfully. Reconnecting...');
+      showNotification({
+        message: 'WiFi restarted successfully. Reconnecting...',
+        severity: 'info',
+        duration: 4000,
+      });
     } catch (error) {
       console.error('WiFi restart failed:', error);
-      setRestartError(error instanceof Error ? error.message : 'Failed to restart WiFi');
+      showNotification({
+        message: error instanceof Error ? error.message : 'Failed to restart WiFi',
+        severity: 'error',
+      });
     } finally {
       setRestarting(false);
     }
@@ -227,12 +239,6 @@ export function WiFiConfig() {
               Restart WiFi
             </Button>
           </Box>
-
-          {restartError && (
-            <Alert severity={restartError.includes('success') ? 'info' : 'error'} sx={{ mt: 2 }}>
-              {restartError}
-            </Alert>
-          )}
         </CardContent>
       </Card>
 
@@ -259,12 +265,6 @@ export function WiFiConfig() {
               {scanning ? 'Scanning...' : 'Scan Networks'}
             </Button>
           </Box>
-
-          {scanError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {scanError}
-            </Alert>
-          )}
 
           {scanResults.length > 0 && (
             <TableContainer component={Paper} variant="outlined">
@@ -307,7 +307,7 @@ export function WiFiConfig() {
             </TableContainer>
           )}
 
-          {!scanning && scanResults.length === 0 && !scanError && (
+          {!scanning && scanResults.length === 0 && (
             <Typography variant="body2" color="text.secondary" textAlign="center" py={3}>
               Click "Scan Networks" to find available WiFi networks
             </Typography>
@@ -330,19 +330,6 @@ export function WiFiConfig() {
             Connect to Network
           </Typography>
 
-          {connectionSuccess && (
-            <Alert severity="success" sx={{ mb: 2 }}>
-              WiFi configuration updated successfully!
-              {restartAfterConnect && ' Device is restarting...'}
-            </Alert>
-          )}
-
-          {connectionError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {connectionError}
-            </Alert>
-          )}
-
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <TextField
               label="SSID"
@@ -350,8 +337,6 @@ export function WiFiConfig() {
               onChange={(e) => {
                 setSSID(e.target.value);
                 setSSIDError(null);
-                setConnectionError(null);
-                setConnectionSuccess(false);
               }}
               error={!!ssidError}
               helperText={ssidError || 'Select from scan results or enter manually'}
@@ -366,8 +351,6 @@ export function WiFiConfig() {
               onChange={(e) => {
                 setPassword(e.target.value);
                 setPasswordError(null);
-                setConnectionError(null);
-                setConnectionSuccess(false);
               }}
               error={!!passwordError}
               helperText={passwordError || 'Minimum 8 characters for WPA/WPA2'}
@@ -396,7 +379,7 @@ export function WiFiConfig() {
                   disabled={connecting}
                 />
               }
-              label="Restart device after connecting"
+              label="Restart WiFi to apply changes"
             />
 
             <Button

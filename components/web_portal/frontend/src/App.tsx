@@ -11,6 +11,7 @@ import { LoadingSpinner } from './components/Common/LoadingSkeleton';
 import { useWebSocketConnection } from './hooks/useWebSocket';
 import { deviceInfoAtom, mqttStatusAtom, appReadyAtom } from './store/atoms';
 import { apiClient } from './api/client';
+import { SnackbarProvider } from './contexts/SnackbarContext';
 
 // Placeholder views - will be replaced in future weeks
 const ChartsView = () => (
@@ -152,7 +153,9 @@ function App() {
     <JotaiProvider>
       <ThemeProvider theme={theme}>
         <CssBaseline />
-        <AppContent />
+        <SnackbarProvider>
+          <AppContent />
+        </SnackbarProvider>
       </ThemeProvider>
     </JotaiProvider>
   );

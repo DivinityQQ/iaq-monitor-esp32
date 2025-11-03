@@ -1,4 +1,4 @@
-import { useState, useEffect, useMemo } from 'react';
+import { useState, useEffect } from 'react';
 import type { ReactElement } from 'react';
 import {
   Box,
@@ -9,9 +9,9 @@ import {
   Chip,
   Badge,
   Slider,
-  Alert,
   CircularProgress,
   Skeleton,
+  Alert,
 } from '@mui/material';
 import Grid from '@mui/material/Grid';
 import {
@@ -28,6 +28,7 @@ import {
 import { useAtom, useAtomValue } from 'jotai';
 import { healthAtom, cadencesAtom } from '../../store/atoms';
 import { apiClient } from '../../api/client';
+import { useNotification } from '../../contexts/SnackbarContext';
 import type { SensorId } from '../../api/types';
 import { getSensorStateColor } from '../../theme';
 import { formatRelativeTime, formatDuration, formatSeconds } from '../../utils/validation';
@@ -83,6 +84,7 @@ interface SensorCardControlProps {
 function SensorCardControl({ sensorId }: SensorCardControlProps) {
   const health = useAtomValue(healthAtom);
   const sensorStatus = health?.sensors[sensorId];
+  const { showNotification } = useNotification();
 
   // Cadence state
   const [cadences, setCadences] = useAtom(cadencesAtom);
@@ -95,10 +97,6 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
   const [resetting, setResetting] = useState(false);
   const [toggling, setToggling] = useState(false);
 
-  // Feedback
-  const [actionError, setActionError] = useState<string | null>(null);
-  const [actionSuccess, setActionSuccess] = useState<string | null>(null);
-
   const info = SENSOR_INFO[sensorId];
 
   // Sync local slider value from shared cadences atom
@@ -109,51 +107,64 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
     }
   }, [cadences, sensorId]);
 
-  // Debounced cadence update
-  const handleCadenceChange = useMemo(() => {
-    let timeoutId: number;
-    return (value: number) => {
-      setCadence(value);
-      clearTimeout(timeoutId);
-      timeoutId = setTimeout(async () => {
-        setCadenceUpdating(true);
-        setActionError(null);
-        const prevMs = cadences?.[sensorId]?.ms;
-        try {
-          await apiClient.setSensorCadence(sensorId, value);
-          // Update shared cadences atom on success
-          setCadences((prev) => {
-            if (!prev) return prev;
-            const prevEntry = prev[sensorId] || { ms: value, from_nvs: false };
-            return { ...prev, [sensorId]: { ...prevEntry, ms: value } };
-          });
-          setActionSuccess(`Cadence updated to ${formatDuration(value)}`);
-          setTimeout(() => setActionSuccess(null), 3000);
-        } catch (error) {
-          console.error(`Failed to update cadence for ${sensorId}:`, error);
-          setActionError(error instanceof Error ? error.message : 'Failed to update cadence');
-          // Revert local slider value if request failed
-          if (typeof prevMs === 'number') {
-            setCadence(prevMs);
-          }
-        } finally {
-          setCadenceUpdating(false);
-        }
-      }, 500);
-    };
-  }, [sensorId, cadences, setCadences]);
+  // Handle slider change for immediate visual feedback
+  const handleCadenceSliderChange = (_: Event, value: number | number[]) => {
+    setCadence(value as number);
+  };
+
+  // Handle slider commit - only POST if value changed
+  const handleCadenceCommitted = async (_: Event | React.SyntheticEvent, value: number | number[]) => {
+    const newValue = value as number;
+    const currentMs = cadences?.[sensorId]?.ms;
+
+    // Don't POST if value hasn't changed
+    if (currentMs === newValue) {
+      return;
+    }
+
+    setCadenceUpdating(true);
+
+    try {
+      await apiClient.setSensorCadence(sensorId, newValue);
+      // Update shared cadences atom on success
+      setCadences((prev) => {
+        if (!prev) return prev;
+        const prevEntry = prev[sensorId] || { ms: newValue, from_nvs: false };
+        return { ...prev, [sensorId]: { ...prevEntry, ms: newValue } };
+      });
+      showNotification({
+        message: `Cadence updated to ${formatDuration(newValue)}`,
+        severity: 'success',
+      });
+    } catch (error) {
+      console.error(`Failed to update cadence for ${sensorId}:`, error);
+      showNotification({
+        message: error instanceof Error ? error.message : 'Failed to update cadence',
+        severity: 'error',
+      });
+      // Revert local slider value if request failed
+      if (typeof currentMs === 'number') {
+        setCadence(currentMs);
+      }
+    } finally {
+      setCadenceUpdating(false);
+    }
+  };
 
   const handleRead = async () => {
     setReading(true);
-    setActionError(null);
-    setActionSuccess(null);
     try {
       await apiClient.readSensor(sensorId);
-      setActionSuccess('Sensor read triggered successfully');
-      setTimeout(() => setActionSuccess(null), 3000);
+      showNotification({
+        message: 'Sensor read triggered successfully',
+        severity: 'success',
+      });
     } catch (error) {
       console.error(`Failed to read sensor ${sensorId}:`, error);
-      setActionError(error instanceof Error ? error.message : 'Failed to read sensor');
+      showNotification({
+        message: error instanceof Error ? error.message : 'Failed to read sensor',
+        severity: 'error',
+      });
     } finally {
       setReading(false);
     }
@@ -161,15 +172,18 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
 
   const handleReset = async () => {
     setResetting(true);
-    setActionError(null);
-    setActionSuccess(null);
     try {
       await apiClient.resetSensor(sensorId);
-      setActionSuccess('Sensor reset successfully');
-      setTimeout(() => setActionSuccess(null), 3000);
+      showNotification({
+        message: 'Sensor reset successfully',
+        severity: 'success',
+      });
     } catch (error) {
       console.error(`Failed to reset sensor ${sensorId}:`, error);
-      setActionError(error instanceof Error ? error.message : 'Failed to reset sensor');
+      showNotification({
+        message: error instanceof Error ? error.message : 'Failed to reset sensor',
+        severity: 'error',
+      });
     } finally {
       setResetting(false);
     }
@@ -178,21 +192,27 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
   const handleToggle = async () => {
     const isEnabled = sensorStatus?.state !== 'DISABLED';
     setToggling(true);
-    setActionError(null);
-    setActionSuccess(null);
 
     try {
       if (isEnabled) {
         await apiClient.disableSensor(sensorId);
-        setActionSuccess('Sensor disabled successfully');
+        showNotification({
+          message: 'Sensor disabled successfully',
+          severity: 'success',
+        });
       } else {
         await apiClient.enableSensor(sensorId);
-        setActionSuccess('Sensor enabled successfully');
+        showNotification({
+          message: 'Sensor enabled successfully',
+          severity: 'success',
+        });
       }
-      setTimeout(() => setActionSuccess(null), 3000);
     } catch (error) {
       console.error(`Failed to toggle sensor ${sensorId}:`, error);
-      setActionError(error instanceof Error ? error.message : 'Failed to toggle sensor');
+      showNotification({
+        message: error instanceof Error ? error.message : 'Failed to toggle sensor',
+        severity: 'error',
+      });
     } finally {
       setToggling(false);
     }
@@ -356,7 +376,8 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
           </Box>
           <Slider
             value={cadence}
-            onChange={(_, value) => handleCadenceChange(value as number)}
+            onChange={handleCadenceSliderChange}
+            onChangeCommitted={handleCadenceCommitted}
             min={0}
             max={60000}
             step={1000}
@@ -369,18 +390,6 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
             }}
           />
         </Box>
-
-        {/* Feedback Messages */}
-        {actionSuccess && (
-          <Alert severity="success" sx={{ mt: 2 }}>
-            {actionSuccess}
-          </Alert>
-        )}
-        {actionError && (
-          <Alert severity="error" sx={{ mt: 2 }}>
-            {actionError}
-          </Alert>
-        )}
       </CardContent>
     </Card>
   );

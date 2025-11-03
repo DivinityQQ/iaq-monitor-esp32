@@ -8,7 +8,6 @@ import {
   TextField,
   Switch,
   FormControlLabel,
-  Alert,
   Chip,
   IconButton,
   InputAdornment,
@@ -26,11 +25,13 @@ import { useAtomValue, useSetAtom } from 'jotai';
 import { deviceInfoAtom, mqttStatusAtom } from '../../store/atoms';
 import { apiClient } from '../../api/client';
 import { validateMQTTUrl } from '../../utils/validation';
+import { useNotification } from '../../contexts/SnackbarContext';
 
 export function MQTTConfig() {
   const deviceInfo = useAtomValue(deviceInfoAtom);
   const mqttStatus = useAtomValue(mqttStatusAtom);
   const setMqttStatus = useSetAtom(mqttStatusAtom);
+  const { showNotification } = useNotification();
 
   // Form state
   const [brokerUrl, setBrokerUrl] = useState('');
@@ -41,12 +42,9 @@ export function MQTTConfig() {
 
   // Form submission state
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
-  const [saveSuccess, setSaveSuccess] = useState(false);
 
   // Restart state
   const [restarting, setRestarting] = useState(false);
-  const [restartError, setRestartError] = useState<string | null>(null);
 
   // Validation errors
   const [urlError, setUrlError] = useState<string | null>(null);
@@ -79,8 +77,6 @@ export function MQTTConfig() {
     }
 
     setSaving(true);
-    setSaveError(null);
-    setSaveSuccess(false);
 
     try {
       await apiClient.setMQTT({
@@ -90,9 +86,6 @@ export function MQTTConfig() {
         restart: restartAfterSave,
       });
 
-      setSaveSuccess(true);
-      setSaveError(null);
-
       // Clear password field after successful save
       setPassword('');
 
@@ -100,16 +93,26 @@ export function MQTTConfig() {
       await refreshStatus();
 
       if (restartAfterSave) {
-        setSaveSuccess(false);
-        // Show restarting message
+        // Show restarting message after a delay
         setTimeout(() => {
-          setSaveError('Device is restarting MQTT. Connection will be re-established shortly.');
+          showNotification({
+            message: 'MQTT is restarting. Connection will be re-established shortly.',
+            severity: 'info',
+            duration: 5000,
+          });
         }, 1000);
+      } else {
+        showNotification({
+          message: 'MQTT configuration updated successfully!',
+          severity: 'success',
+        });
       }
     } catch (error) {
       console.error('Failed to save MQTT config:', error);
-      setSaveError(error instanceof Error ? error.message : 'Failed to save MQTT configuration');
-      setSaveSuccess(false);
+      showNotification({
+        message: error instanceof Error ? error.message : 'Failed to save MQTT configuration',
+        severity: 'error',
+      });
     } finally {
       setSaving(false);
     }
@@ -117,11 +120,14 @@ export function MQTTConfig() {
 
   const handleRestart = async () => {
     setRestarting(true);
-    setRestartError(null);
 
     try {
       await apiClient.restartMQTT();
-      setRestartError('MQTT restarted successfully. Reconnecting...');
+      showNotification({
+        message: 'MQTT restarted successfully. Reconnecting...',
+        severity: 'info',
+        duration: 4000,
+      });
 
       // Refresh status after a delay
       setTimeout(() => {
@@ -129,7 +135,10 @@ export function MQTTConfig() {
       }, 2000);
     } catch (error) {
       console.error('MQTT restart failed:', error);
-      setRestartError(error instanceof Error ? error.message : 'Failed to restart MQTT');
+      showNotification({
+        message: error instanceof Error ? error.message : 'Failed to restart MQTT',
+        severity: 'error',
+      });
     } finally {
       setRestarting(false);
     }
@@ -217,15 +226,6 @@ export function MQTTConfig() {
               Refresh Status
             </Button>
           </Box>
-
-          {restartError && (
-            <Alert
-              severity={restartError.includes('success') ? 'info' : 'error'}
-              sx={{ mt: 2 }}
-            >
-              {restartError}
-            </Alert>
-          )}
         </CardContent>
       </Card>
 
@@ -244,19 +244,6 @@ export function MQTTConfig() {
             MQTT Configuration
           </Typography>
 
-          {saveSuccess && (
-            <Alert severity="success" sx={{ mb: 2 }}>
-              MQTT configuration saved successfully!
-              {restartAfterSave && ' MQTT is restarting...'}
-            </Alert>
-          )}
-
-          {saveError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {saveError}
-            </Alert>
-          )}
-
           <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
             <TextField
               label="Broker URL"
@@ -264,8 +251,6 @@ export function MQTTConfig() {
               onChange={(e) => {
                 setBrokerUrl(e.target.value);
                 setUrlError(null);
-                setSaveError(null);
-                setSaveSuccess(false);
               }}
               error={!!urlError}
               helperText={urlError || 'Example: mqtt://broker.hivemq.com:1883 or mqtts://broker.hivemq.com:8883'}
@@ -278,11 +263,7 @@ export function MQTTConfig() {
             <TextField
               label="Username"
               value={username}
-              onChange={(e) => {
-                setUsername(e.target.value);
-                setSaveError(null);
-                setSaveSuccess(false);
-              }}
+              onChange={(e) => setUsername(e.target.value)}
               helperText="Optional - leave empty if not required"
               fullWidth
               disabled={saving}
@@ -292,11 +273,7 @@ export function MQTTConfig() {
               label="Password"
               type={showPassword ? 'text' : 'password'}
               value={password}
-              onChange={(e) => {
-                setPassword(e.target.value);
-                setSaveError(null);
-                setSaveSuccess(false);
-              }}
+              onChange={(e) => setPassword(e.target.value)}
               helperText="Optional - leave empty if not required"
               fullWidth
               disabled={saving}
@@ -323,7 +300,7 @@ export function MQTTConfig() {
                   disabled={saving}
                 />
               }
-              label="Restart MQTT after saving"
+              label="Restart MQTT to apply changes"
             />
 
             <Button
