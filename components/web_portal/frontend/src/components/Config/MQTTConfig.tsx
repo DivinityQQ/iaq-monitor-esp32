@@ -22,19 +22,15 @@ import {
   Visibility as VisibilityIcon,
   VisibilityOff as VisibilityOffIcon,
 } from '@mui/icons-material';
-import { useAtomValue } from 'jotai';
-import { deviceInfoAtom } from '../../store/atoms';
+import { useAtomValue, useSetAtom } from 'jotai';
+import { deviceInfoAtom, mqttStatusAtom } from '../../store/atoms';
 import { apiClient } from '../../api/client';
-import type { MQTTStatus } from '../../api/types';
 import { validateMQTTUrl } from '../../utils/validation';
 
 export function MQTTConfig() {
   const deviceInfo = useAtomValue(deviceInfoAtom);
-
-  // MQTT status
-  const [mqttStatus, setMqttStatus] = useState<MQTTStatus | null>(null);
-  const [loadingStatus, setLoadingStatus] = useState(true);
-  const [statusError, setStatusError] = useState<string | null>(null);
+  const mqttStatus = useAtomValue(mqttStatusAtom);
+  const setMqttStatus = useSetAtom(mqttStatusAtom);
 
   // Form state
   const [brokerUrl, setBrokerUrl] = useState('');
@@ -57,28 +53,19 @@ export function MQTTConfig() {
 
   const mqttConnected = deviceInfo?.network?.mqtt_connected || false;
 
-  // Load MQTT status on mount
+  // Pre-fill form with current MQTT configuration
   useEffect(() => {
-    loadMQTTStatus();
-  }, []);
+    if (mqttStatus?.broker_url) {
+      setBrokerUrl(mqttStatus.broker_url);
+    }
+  }, [mqttStatus]);
 
-  const loadMQTTStatus = async () => {
-    setLoadingStatus(true);
-    setStatusError(null);
-
+  const refreshStatus = async () => {
     try {
       const status = await apiClient.getMQTTStatus();
       setMqttStatus(status);
-
-      // Pre-fill form with current configuration
-      if (status.broker_url) {
-        setBrokerUrl(status.broker_url);
-      }
     } catch (error) {
-      console.error('Failed to load MQTT status:', error);
-      setStatusError(error instanceof Error ? error.message : 'Failed to load MQTT status');
-    } finally {
-      setLoadingStatus(false);
+      console.error('Failed to refresh MQTT status:', error);
     }
   };
 
@@ -109,8 +96,8 @@ export function MQTTConfig() {
       // Clear password field after successful save
       setPassword('');
 
-      // Reload status
-      await loadMQTTStatus();
+      // Refresh status
+      await refreshStatus();
 
       if (restartAfterSave) {
         setSaveSuccess(false);
@@ -136,9 +123,9 @@ export function MQTTConfig() {
       await apiClient.restartMQTT();
       setRestartError('MQTT restarted successfully. Reconnecting...');
 
-      // Reload status after a delay
+      // Refresh status after a delay
       setTimeout(() => {
-        loadMQTTStatus();
+        refreshStatus();
       }, 2000);
     } catch (error) {
       console.error('MQTT restart failed:', error);
@@ -148,7 +135,8 @@ export function MQTTConfig() {
     }
   };
 
-  if (loadingStatus) {
+  // Show loading skeleton only during initial app load
+  if (!deviceInfo || !mqttStatus) {
     return (
       <Box>
         <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 3, mb: 3 }} />
@@ -187,12 +175,6 @@ export function MQTTConfig() {
             />
           </Box>
 
-          {statusError && (
-            <Alert severity="error" sx={{ mb: 2 }}>
-              {statusError}
-            </Alert>
-          )}
-
           {mqttStatus && (
             <>
               <Box sx={{ mb: 2 }}>
@@ -230,7 +212,7 @@ export function MQTTConfig() {
             <Button
               variant="outlined"
               startIcon={<RefreshIcon />}
-              onClick={loadMQTTStatus}
+              onClick={refreshStatus}
             >
               Refresh Status
             </Button>

@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import type { State, Metrics, Health, DeviceInfo, SensorId, SensorCadence } from '../api/types';
+import type { State, Metrics, Health, DeviceInfo, SensorId, SensorCadence, MQTTStatus } from '../api/types';
 import { getAQIColor, getComfortColor, getIAQColor } from '../theme';
 
 // ============================================================================
@@ -27,6 +27,11 @@ export const healthAtom = atom<Health | null>(null);
  * Device information (fetched once via REST API on mount)
  */
 export const deviceInfoAtom = atom<DeviceInfo | null>(null);
+
+/**
+ * MQTT status (fetched once via REST API on mount)
+ */
+export const mqttStatusAtom = atom<MQTTStatus | null>(null);
 
 /**
  * Sensor cadences (fetched once on Sensors tab)

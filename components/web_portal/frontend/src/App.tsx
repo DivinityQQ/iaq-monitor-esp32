@@ -9,7 +9,7 @@ import { Dashboard } from './components/Dashboard/Dashboard';
 import { ConfigView } from './components/Config/ConfigView';
 import { LoadingSpinner } from './components/Common/LoadingSkeleton';
 import { useWebSocketConnection } from './hooks/useWebSocket';
-import { deviceInfoAtom, appReadyAtom } from './store/atoms';
+import { deviceInfoAtom, mqttStatusAtom, appReadyAtom } from './store/atoms';
 import { apiClient } from './api/client';
 
 // Placeholder views - will be replaced in future weeks
@@ -44,17 +44,22 @@ function AppContent() {
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const setDeviceInfo = useSetAtom(deviceInfoAtom);
+  const setMqttStatus = useSetAtom(mqttStatusAtom);
   const appReady = useAtomValue(appReadyAtom);
 
   // Establish WebSocket connection
   useWebSocketConnection();
 
-  // Fetch only device info on mount; state/metrics/health arrive via WS
+  // Fetch device info and MQTT status on mount; state/metrics/health arrive via WS
   useEffect(() => {
     const fetchInitialData = async () => {
       try {
-        const info = await apiClient.getInfo();
+        const [info, mqttStatus] = await Promise.all([
+          apiClient.getInfo(),
+          apiClient.getMQTTStatus(),
+        ]);
         setDeviceInfo(info);
+        setMqttStatus(mqttStatus);
       } catch (err) {
         console.error('Failed to fetch initial data:', err);
         setError('Failed to connect to device. Please check your connection.');
@@ -62,7 +67,7 @@ function AppContent() {
     };
 
     fetchInitialData();
-  }, [setDeviceInfo]);
+  }, [setDeviceInfo, setMqttStatus]);
 
   const toggleDrawer = () => {
     setDrawerOpen(!drawerOpen);
