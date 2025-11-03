@@ -46,12 +46,7 @@ typedef struct {
     int64_t last_pong_us;
 } ws_client_t;
 
-struct ws_async_arg {
-    httpd_handle_t hd;
-    int fd;
-    char *txt;
-    size_t len;
-};
+/* ws_async_arg removed (no longer needed) */
 
 static httpd_handle_t s_server = NULL;
 static bool s_server_is_https = false;
@@ -81,6 +76,9 @@ static void ws_clients_init(void)
 {
     memset(s_ws_clients, 0, sizeof(s_ws_clients));
     if (!s_ws_mutex) s_ws_mutex = xSemaphoreCreateMutex();
+    if (!s_ws_mutex) {
+        ESP_LOGE(TAG, "WS: failed to create mutex");
+    }
 }
 
 static void ws_clients_add(int sock)
@@ -107,9 +105,9 @@ static void ws_clients_add(int sock)
     xSemaphoreGive(s_ws_mutex);
     if (need_start) {
         ESP_LOGI(TAG, "WS: first client, starting timers");
-        esp_timer_start_periodic(s_ws_state_timer, 1000 * 1000);
-        esp_timer_start_periodic(s_ws_metrics_timer, 5 * 1000 * 1000);
-        esp_timer_start_periodic(s_ws_health_timer, 1 * 1000 * 1000);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_start_periodic(s_ws_state_timer, 1000 * 1000));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_start_periodic(s_ws_metrics_timer, 5 * 1000 * 1000));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_start_periodic(s_ws_health_timer, 1 * 1000 * 1000));
     }
 }
 
@@ -134,24 +132,13 @@ static void ws_clients_remove(int sock)
     xSemaphoreGive(s_ws_mutex);
     if (need_stop) {
         ESP_LOGI(TAG, "WS: last client gone, stopping timers");
-        esp_timer_stop(s_ws_state_timer);
-        esp_timer_stop(s_ws_metrics_timer);
-        esp_timer_stop(s_ws_health_timer);
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_stop(s_ws_state_timer));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_stop(s_ws_metrics_timer));
+        ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_stop(s_ws_health_timer));
     }
 }
 
-static void ws_async_send(void *arg)
-{
-    struct ws_async_arg *a = (struct ws_async_arg*)arg;
-    if (!a) return;
-    httpd_ws_frame_t frame = {0};
-    frame.type = HTTPD_WS_TYPE_TEXT;
-    frame.payload = (uint8_t*)a->txt;
-    frame.len = a->len;
-    (void)httpd_ws_send_frame_async(a->hd, a->fd, &frame);
-    free(a->txt);
-    free(a);
-}
+/* async per-client sender removed; send directly via httpd_ws_send_frame_async */
 
 static void ws_broadcast_json(const char *type, cJSON *payload)
 {
@@ -176,14 +163,13 @@ static void ws_broadcast_json(const char *type, cJSON *payload)
             s_ws_clients[i].last_pong_us = 0;
             continue;
         }
-        struct ws_async_arg *a = (struct ws_async_arg*)malloc(sizeof(struct ws_async_arg));
-        if (!a) continue;
-        a->hd = s_server; a->fd = sock; a->len = strlen(txt);
-        a->txt = (char*)malloc(a->len + 1);
-        if (!a->txt) { free(a); continue; }
-        memcpy(a->txt, txt, a->len + 1);
-        if (httpd_queue_work(s_server, ws_async_send, a) != ESP_OK) {
-            free(a->txt); free(a);
+        httpd_ws_frame_t frame = { 0 };
+        frame.type = HTTPD_WS_TYPE_TEXT;
+        frame.payload = (uint8_t*)txt;
+        frame.len = strlen(txt);
+        esp_err_t er = httpd_ws_send_frame_async(s_server, sock, &frame);
+        if (er != ESP_OK) {
+            ESP_LOGW(TAG, "WS: enqueue broadcast to %d failed: %s", sock, esp_err_to_name(er));
         }
     }
     if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
@@ -203,14 +189,13 @@ static void ws_send_json_to_fd(int fd, const char *type, cJSON *payload)
     cJSON_Delete(root);
     if (!txt) return;
 
-    struct ws_async_arg *a = (struct ws_async_arg*)malloc(sizeof(struct ws_async_arg));
-    if (!a) { free(txt); return; }
-    a->hd = s_server; a->fd = fd; a->len = strlen(txt);
-    a->txt = (char*)malloc(a->len + 1);
-    if (!a->txt) { free(a); free(txt); return; }
-    memcpy(a->txt, txt, a->len + 1);
-    if (httpd_queue_work(s_server, ws_async_send, a) != ESP_OK) {
-        free(a->txt); free(a);
+    httpd_ws_frame_t frame = (httpd_ws_frame_t){ 0 };
+    frame.type = HTTPD_WS_TYPE_TEXT;
+    frame.payload = (uint8_t*)txt;
+    frame.len = strlen(txt);
+    esp_err_t er = httpd_ws_send_frame_async(s_server, fd, &frame);
+    if (er != ESP_OK) {
+        ESP_LOGW(TAG, "WS: enqueue send to %d failed: %s", fd, esp_err_to_name(er));
     }
     free(txt);
 }
@@ -220,8 +205,8 @@ static void ws_work_send_state(void *arg) { (void)arg; iaq_data_t snap = (iaq_da
 static void ws_work_send_metrics(void *arg) { (void)arg; iaq_data_t snap = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){ snap = *iaq_data_get(); } ws_broadcast_json("metrics", iaq_json_build_metrics(&snap)); }
 static void ws_work_send_health(void *arg) { (void)arg; iaq_data_t snap = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){ snap = *iaq_data_get(); } ws_broadcast_json("health", iaq_json_build_health(&snap)); }
 
-static void ws_state_timer_cb(void *arg) { (void)arg; if (s_server) (void)httpd_queue_work(s_server, ws_work_send_state, NULL); }
-static void ws_metrics_timer_cb(void *arg) { (void)arg; if (s_server) (void)httpd_queue_work(s_server, ws_work_send_metrics, NULL); }
+static void ws_state_timer_cb(void *arg) { (void)arg; if (s_server) { esp_err_t er = httpd_queue_work(s_server, ws_work_send_state, NULL); if (er != ESP_OK) ESP_LOGW(TAG, "WS: queue state failed: %s", esp_err_to_name(er)); } }
+static void ws_metrics_timer_cb(void *arg) { (void)arg; if (s_server) { esp_err_t er = httpd_queue_work(s_server, ws_work_send_metrics, NULL); if (er != ESP_OK) ESP_LOGW(TAG, "WS: queue metrics failed: %s", esp_err_to_name(er)); } }
 
 static void ws_ping_and_prune(void)
 {
@@ -264,7 +249,10 @@ static void ws_health_timer_cb(void *arg)
 {
     (void)arg;
     if (!s_server) return;
-    (void)httpd_queue_work(s_server, ws_work_send_health, NULL);
+    {
+        esp_err_t er = httpd_queue_work(s_server, ws_work_send_health, NULL);
+        if (er != ESP_OK) ESP_LOGW(TAG, "WS: queue health failed: %s", esp_err_to_name(er));
+    }
     /* Send WS PINGs at configured interval regardless of health period */
     static int secs_since_ping = 0;
     secs_since_ping += 1; /* health timer runs at 1 Hz */
@@ -379,6 +367,12 @@ static esp_err_t static_handler(httpd_req_t *req)
     uint64_t t0 = iaq_prof_tic();
     char path[CONFIG_HTTPD_MAX_URI_LEN + 32];
     const char *uri = req->uri;
+    /* Path traversal guard */
+    if (!uri || uri[0] != '/' || strstr(uri, "..") != NULL || strchr(uri, '\\') != NULL) {
+        respond_error(req, 400, "BAD_PATH", "Invalid path");
+        iaq_prof_toc(IAQ_METRIC_WEB_STATIC, t0);
+        return ESP_OK;
+    }
     if (strcmp(uri, "/") == 0) uri = "/index.html"; /* SPA entry */
     snprintf(path, sizeof(path), WEB_MOUNT_POINT "%s", uri);
 
@@ -1143,9 +1137,9 @@ esp_err_t web_portal_stop(void)
         iaq_profiler_unregister_task(s_httpd_task_handle);
         s_httpd_task_handle = NULL;
     }
-    esp_timer_stop(s_ws_state_timer);
-    esp_timer_stop(s_ws_metrics_timer);
-    esp_timer_stop(s_ws_health_timer);
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_stop(s_ws_state_timer));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_stop(s_ws_metrics_timer));
+    ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_stop(s_ws_health_timer));
     if (s_server_is_https) {
         httpd_ssl_stop(s_server);
     } else {
