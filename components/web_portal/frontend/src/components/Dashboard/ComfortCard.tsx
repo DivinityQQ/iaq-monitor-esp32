@@ -1,5 +1,6 @@
-import { Card, CardContent, Typography, Box, Chip, Grid, Skeleton } from '@mui/material';
+import { Card, CardContent, Typography, Box, Chip, Grid, Skeleton, Collapse } from '@mui/material';
 import { useAtomValue } from 'jotai';
+import { useState } from 'react';
 import SentimentSatisfiedAltIcon from '@mui/icons-material/SentimentSatisfiedAlt';
 import { metricsAtom, comfortColorAtom } from '../../store/atoms';
 
@@ -18,6 +19,7 @@ import { metricsAtom, comfortColorAtom } from '../../store/atoms';
 export function ComfortCard() {
   const metrics = useAtomValue(metricsAtom);
   const comfortColor = useAtomValue(comfortColorAtom);
+  const [expanded, setExpanded] = useState(false);
 
   // Show loading skeleton if metrics not available or incomplete
   if (!metrics?.comfort ||
@@ -54,12 +56,14 @@ export function ComfortCard() {
 
   return (
     <Card
+      onClick={() => setExpanded(!expanded)}
       sx={{
         height: '100%',
         minHeight: 280,
         background: `linear-gradient(135deg, ${comfortColor}15 0%, ${comfortColor}05 100%)`,
         border: `2px solid ${comfortColor}40`,
         transition: 'transform 0.2s, box-shadow 0.2s',
+        cursor: 'pointer',
         '&:hover': {
           transform: 'translateY(-4px)',
           boxShadow: (theme) => theme.shadows[8],
@@ -145,7 +149,7 @@ export function ComfortCard() {
                 Abs. Humidity
               </Typography>
               <Typography variant="h6" fontWeight={600}>
-                {abs_humidity_gm3.toFixed(1)}
+                {abs_humidity_gm3.toFixed(1)} g/m³
               </Typography>
             </Box>
           </Grid>
@@ -169,6 +173,87 @@ export function ComfortCard() {
             </Box>
           </Grid>
         </Grid>
+
+        {/* Expandable Explanation */}
+        <Collapse in={expanded}>
+          <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+            <Typography variant="h6" gutterBottom fontWeight={600}>
+              How Comfort Score is Calculated
+            </Typography>
+
+            <Typography variant="body2" paragraph>
+              The comfort score (0-100) is calculated by applying penalties based on temperature
+              and humidity deviations from optimal ranges. The score starts at 100 and penalties
+              are subtracted.
+            </Typography>
+
+            <Typography variant="subtitle2" gutterBottom fontWeight={600} sx={{ mt: 2 }}>
+              Temperature Ranges
+            </Typography>
+            <Grid container spacing={1} sx={{ mb: 2 }}>
+              <Grid size={{ xs: 6, sm: 4 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">20-24°C</Typography>
+                  <Typography variant="body2" fontWeight={600}>Optimal (0% penalty)</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 4 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">18-20°C / 24-26°C</Typography>
+                  <Typography variant="body2" fontWeight={600}>Cool/Warm (10-15%)</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 4 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">&lt;18°C / &gt;26°C</Typography>
+                  <Typography variant="body2" fontWeight={600}>Cold/Hot (30%)</Typography>
+                </Box>
+              </Grid>
+            </Grid>
+
+            <Typography variant="subtitle2" gutterBottom fontWeight={600}>
+              Humidity Ranges
+            </Typography>
+            <Grid container spacing={1} sx={{ mb: 2 }}>
+              <Grid size={{ xs: 6, sm: 4 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">40-60%</Typography>
+                  <Typography variant="body2" fontWeight={600}>Optimal (0% penalty)</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 4 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">30-40% / 60-70%</Typography>
+                  <Typography variant="body2" fontWeight={600}>Dry/Humid (10-15%)</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 4 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">&lt;30% / &gt;70%</Typography>
+                  <Typography variant="body2" fontWeight={600}>Very Dry/Humid (25-30%)</Typography>
+                </Box>
+              </Grid>
+            </Grid>
+
+            <Typography variant="subtitle2" gutterBottom fontWeight={600} sx={{ mt: 2 }}>
+              Additional Metrics
+            </Typography>
+            <Typography variant="body2" paragraph>
+              <strong>Absolute Humidity:</strong> Calculated using temperature and relative humidity
+              with the formula: AH = (6.112 × e^((17.67 × T)/(T + 243.5)) × RH × 2.1674) / (273.15 + T),
+              measured in g/m³.
+            </Typography>
+            <Typography variant="body2" paragraph>
+              <strong>Heat Index:</strong> For temperatures ≥27°C and humidity ≥40%, uses NOAA's
+              simplified formula: HI = -8.78 + 1.61×T + 2.34×RH - 0.146×T×RH. Otherwise equals
+              actual temperature.
+            </Typography>
+            <Typography variant="body2">
+              <strong>Dew Point:</strong> Calculated using the Magnus formula. High dew points
+              (≥18°C) correlate with increased mold risk and discomfort.
+            </Typography>
+          </Box>
+        </Collapse>
       </CardContent>
     </Card>
   );

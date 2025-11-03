@@ -1,5 +1,6 @@
-import { Card, CardContent, Typography, Box, Chip, Grid, Skeleton } from '@mui/material';
+import { Card, CardContent, Typography, Box, Chip, Grid, Skeleton, Collapse } from '@mui/material';
 import { useAtomValue } from 'jotai';
+import { useState } from 'react';
 import AirIcon from '@mui/icons-material/Air';
 import { metricsAtom, aqiColorAtom } from '../../store/atoms';
 
@@ -17,6 +18,7 @@ import { metricsAtom, aqiColorAtom } from '../../store/atoms';
 export function AQICard() {
   const metrics = useAtomValue(metricsAtom);
   const aqiColor = useAtomValue(aqiColorAtom);
+  const [expanded, setExpanded] = useState(false);
 
   // Show loading skeleton if metrics not available or incomplete
   if (!metrics?.aqi ||
@@ -33,10 +35,13 @@ export function AQICard() {
           <Skeleton variant="text" width="60%" height={72} sx={{ mb: 1 }} />
           <Skeleton variant="rectangular" width="50%" height={32} sx={{ mb: 2, borderRadius: 2 }} />
           <Grid container spacing={1}>
-            <Grid size={{ xs: 6 }}>
+            <Grid size={{ xs: 4 }}>
               <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
             </Grid>
-            <Grid size={{ xs: 6 }}>
+            <Grid size={{ xs: 4 }}>
+              <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
+            </Grid>
+            <Grid size={{ xs: 4 }}>
               <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
             </Grid>
           </Grid>
@@ -47,14 +52,22 @@ export function AQICard() {
 
   const { value, category, dominant, pm25_subindex, pm10_subindex } = metrics.aqi;
 
+  const formatDominant = (dominant: string): string => {
+    if (dominant === 'pm25') return 'PM2.5';
+    if (dominant === 'pm10') return 'PM10';
+    return dominant;
+  };
+
   return (
     <Card
+      onClick={() => setExpanded(!expanded)}
       sx={{
         height: '100%',
         minHeight: 280,
         background: `linear-gradient(135deg, ${aqiColor}15 0%, ${aqiColor}05 100%)`,
         border: `2px solid ${aqiColor}40`,
         transition: 'transform 0.2s, box-shadow 0.2s',
+        cursor: 'pointer',
         '&:hover': {
           transform: 'translateY(-4px)',
           boxShadow: (theme) => theme.shadows[8],
@@ -100,14 +113,9 @@ export function AQICard() {
           />
         </Box>
 
-        {/* Dominant Pollutant */}
-        <Typography variant="body2" color="text.secondary" sx={{ mb: 2 }}>
-          Dominant pollutant: <strong>{dominant}</strong>
-        </Typography>
-
         {/* Sub-indices Grid */}
         <Grid container spacing={1}>
-          <Grid size={{ xs: 6 }}>
+          <Grid size={{ xs: 4 }}>
             <Box
               sx={{
                 p: 1.5,
@@ -118,14 +126,32 @@ export function AQICard() {
               }}
             >
               <Typography variant="caption" color="text.secondary" display="block">
-                PM2.5
+                Dominant
+              </Typography>
+              <Typography variant="h6" fontWeight={600}>
+                {formatDominant(dominant)}
+              </Typography>
+            </Box>
+          </Grid>
+          <Grid size={{ xs: 4 }}>
+            <Box
+              sx={{
+                p: 1.5,
+                bgcolor: 'background.paper',
+                borderRadius: 2,
+                border: '1px solid',
+                borderColor: 'divider',
+              }}
+            >
+              <Typography variant="caption" color="text.secondary" display="block">
+                PM2.5 Index
               </Typography>
               <Typography variant="h6" fontWeight={600}>
                 {pm25_subindex.toFixed(0)}
               </Typography>
             </Box>
           </Grid>
-          <Grid size={{ xs: 6 }}>
+          <Grid size={{ xs: 4 }}>
             <Box
               sx={{
                 p: 1.5,
@@ -136,7 +162,7 @@ export function AQICard() {
               }}
             >
               <Typography variant="caption" color="text.secondary" display="block">
-                PM10
+                PM10 Index
               </Typography>
               <Typography variant="h6" fontWeight={600}>
                 {pm10_subindex.toFixed(0)}
@@ -144,6 +170,87 @@ export function AQICard() {
             </Box>
           </Grid>
         </Grid>
+
+        {/* Expandable Explanation */}
+        <Collapse in={expanded}>
+          <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+            <Typography variant="h6" gutterBottom fontWeight={600}>
+              How AQI is Calculated
+            </Typography>
+
+            <Typography variant="body2" paragraph>
+              The EPA Air Quality Index uses piecewise linear interpolation to convert
+              pollutant concentrations (PM2.5 and PM10 in µg/m³) to a 0-500 scale.
+              The overall AQI is the maximum of the individual pollutant sub-indices.
+            </Typography>
+
+            <Typography variant="subtitle2" gutterBottom fontWeight={600} sx={{ mt: 2 }}>
+              PM2.5 Breakpoints
+            </Typography>
+            <Grid container spacing={1} sx={{ mb: 2 }}>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">0-12 µg/m³</Typography>
+                  <Typography variant="body2" fontWeight={600}>Good (0-50)</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">12-35 µg/m³</Typography>
+                  <Typography variant="body2" fontWeight={600}>Moderate (51-100)</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">35-55 µg/m³</Typography>
+                  <Typography variant="body2" fontWeight={600}>Unhealthy for Sensitive (101-150)</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">55-150 µg/m³</Typography>
+                  <Typography variant="body2" fontWeight={600}>Unhealthy (151-200)</Typography>
+                </Box>
+              </Grid>
+            </Grid>
+
+            <Typography variant="subtitle2" gutterBottom fontWeight={600}>
+              PM10 Breakpoints
+            </Typography>
+            <Grid container spacing={1} sx={{ mb: 2 }}>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">0-54 µg/m³</Typography>
+                  <Typography variant="body2" fontWeight={600}>Good (0-50)</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">55-154 µg/m³</Typography>
+                  <Typography variant="body2" fontWeight={600}>Moderate (51-100)</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">155-254 µg/m³</Typography>
+                  <Typography variant="body2" fontWeight={600}>Unhealthy for Sensitive (101-150)</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 3 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">255-354 µg/m³</Typography>
+                  <Typography variant="body2" fontWeight={600}>Unhealthy (151-200)</Typography>
+                </Box>
+              </Grid>
+            </Grid>
+
+            <Typography variant="body2" color="text.secondary">
+              <strong>Note:</strong> The dominant pollutant is whichever has the higher sub-index.
+              We use instantaneous concentrations rather than 24-hour averages for faster response,
+              which may overestimate AQI during short pollution events.
+            </Typography>
+          </Box>
+        </Collapse>
       </CardContent>
     </Card>
   );

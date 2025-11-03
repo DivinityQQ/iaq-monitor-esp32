@@ -1,5 +1,6 @@
-import { Card, CardContent, Typography, Box, Chip, Grid, Skeleton } from '@mui/material';
+import { Card, CardContent, Typography, Box, Chip, Grid, Skeleton, Collapse } from '@mui/material';
 import { useAtomValue } from 'jotai';
+import { useState } from 'react';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
 import { metricsAtom, iaqColorAtom } from '../../store/atoms';
 
@@ -19,6 +20,7 @@ import { metricsAtom, iaqColorAtom } from '../../store/atoms';
 export function IAQCard() {
   const metrics = useAtomValue(metricsAtom);
   const iaqColor = useAtomValue(iaqColorAtom);
+  const [expanded, setExpanded] = useState(false);
 
   // Show loading skeleton if metrics not available or incomplete
   if (!metrics?.overall_iaq_score ||
@@ -68,12 +70,14 @@ export function IAQCard() {
 
   return (
     <Card
+      onClick={() => setExpanded(!expanded)}
       sx={{
         height: '100%',
         minHeight: 280,
         background: `linear-gradient(135deg, ${iaqColor}15 0%, ${iaqColor}05 100%)`,
         border: `2px solid ${iaqColor}40`,
         transition: 'transform 0.2s, box-shadow 0.2s',
+        cursor: 'pointer',
         '&:hover': {
           transform: 'translateY(-4px)',
           boxShadow: (theme) => theme.shadows[8],
@@ -183,6 +187,114 @@ export function IAQCard() {
             </Box>
           </Grid>
         </Grid>
+
+        {/* Expandable Explanation */}
+        <Collapse in={expanded}>
+          <Box sx={{ mt: 2, pt: 2, borderTop: 1, borderColor: 'divider' }}>
+            <Typography variant="h6" gutterBottom fontWeight={600}>
+              How IAQ Score is Calculated
+            </Typography>
+
+            <Typography variant="body2" paragraph>
+              The Indoor Air Quality (IAQ) score is a weighted average of multiple air quality
+              components, each contributing to the overall 0-100 score. Higher scores indicate
+              better air quality.
+            </Typography>
+
+            <Typography variant="subtitle2" gutterBottom fontWeight={600} sx={{ mt: 2 }}>
+              Weighted Formula
+            </Typography>
+            <Typography variant="body2" paragraph>
+              IAQ = 35% × CO₂ Score + 35% × Air Quality + 20% × VOC Score + 10% × Comfort
+            </Typography>
+
+            <Typography variant="subtitle2" gutterBottom fontWeight={600}>
+              Component Descriptions
+            </Typography>
+            <Grid container spacing={1} sx={{ mb: 2 }}>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Box sx={{ p: 1.5, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="body2" fontWeight={600} gutterBottom>
+                    CO₂ Score (35%)
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Linear mapping from CO₂ concentration (ppm). ≤400ppm = 100, ≥2000ppm = 0.
+                    Indicates ventilation quality and occupancy levels.
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Box sx={{ p: 1.5, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="body2" fontWeight={600} gutterBottom>
+                    Air Quality (35%)
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Normalized from EPA AQI (0-500 scale inverted to 100-0). Based on PM2.5
+                    and PM10 particulate matter concentrations.
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Box sx={{ p: 1.5, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="body2" fontWeight={600} gutterBottom>
+                    VOC Score (20%)
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Derived from VOC gas index (0-500 scale). Measures volatile organic
+                    compounds from sources like cleaning products, cooking, and building materials.
+                  </Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 12, sm: 6 }}>
+                <Box sx={{ p: 1.5, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="body2" fontWeight={600} gutterBottom>
+                    Comfort (10%)
+                  </Typography>
+                  <Typography variant="caption" color="text.secondary">
+                    Temperature and humidity comfort score (0-100). Based on deviations from
+                    optimal ranges (20-24°C, 40-60% RH).
+                  </Typography>
+                </Box>
+              </Grid>
+            </Grid>
+
+            <Typography variant="subtitle2" gutterBottom fontWeight={600}>
+              Score Categories
+            </Typography>
+            <Grid container spacing={1}>
+              <Grid size={{ xs: 6, sm: 2.4 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">80-100</Typography>
+                  <Typography variant="body2" fontWeight={600}>Excellent</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 2.4 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">60-79</Typography>
+                  <Typography variant="body2" fontWeight={600}>Good</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 2.4 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">40-59</Typography>
+                  <Typography variant="body2" fontWeight={600}>Fair</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 2.4 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">20-39</Typography>
+                  <Typography variant="body2" fontWeight={600}>Poor</Typography>
+                </Box>
+              </Grid>
+              <Grid size={{ xs: 6, sm: 2.4 }}>
+                <Box sx={{ p: 1, bgcolor: 'background.default', borderRadius: 1 }}>
+                  <Typography variant="caption" color="text.secondary">0-19</Typography>
+                  <Typography variant="body2" fontWeight={600}>Very Poor</Typography>
+                </Box>
+              </Grid>
+            </Grid>
+          </Box>
+        </Collapse>
       </CardContent>
     </Card>
   );
