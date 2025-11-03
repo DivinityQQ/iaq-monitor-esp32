@@ -21,6 +21,7 @@ export const wsReconnectingAtom = atom<boolean>(false);
 export const stateAtom = atom<State | null>(null);
 export const metricsAtom = atom<Metrics | null>(null);
 export const healthAtom = atom<Health | null>(null);
+/** Timestamp (seconds) when latest health WS update was applied */
 
 /**
  * Device information (fetched once via REST API on mount)

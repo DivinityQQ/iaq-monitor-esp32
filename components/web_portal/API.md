@@ -79,7 +79,7 @@
 - Update cadence:
   - `state`: 1 Hz
   - `metrics`: every 5 s
-  - `health`: every 30 s and on Wi‑Fi connect/disconnect
+  - `health`: 1 Hz while at least one WS client is connected
  - Heartbeats: server sends WS PINGs periodically; stale clients are removed if no PONG within timeout.
 - Timers only run while at least one WS client is connected.
 

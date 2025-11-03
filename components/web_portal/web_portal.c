@@ -109,7 +109,7 @@ static void ws_clients_add(int sock)
         ESP_LOGI(TAG, "WS: first client, starting timers");
         esp_timer_start_periodic(s_ws_state_timer, 1000 * 1000);
         esp_timer_start_periodic(s_ws_metrics_timer, 5 * 1000 * 1000);
-        esp_timer_start_periodic(s_ws_health_timer, 30 * 1000 * 1000);
+        esp_timer_start_periodic(s_ws_health_timer, 1 * 1000 * 1000);
     }
 }
 
@@ -265,13 +265,18 @@ static void ws_health_timer_cb(void *arg)
     (void)arg;
     if (!s_server) return;
     (void)httpd_queue_work(s_server, ws_work_send_health, NULL);
-    static int tick = 0;
-    tick++;
-    if (tick * 30 >= CONFIG_IAQ_WEB_PORTAL_WS_PING_INTERVAL_SEC) {
-        tick = 0;
+    /* Send WS PINGs at configured interval regardless of health period */
+    static int secs_since_ping = 0;
+    secs_since_ping += 1; /* health timer runs at 1 Hz */
+    if (secs_since_ping >= CONFIG_IAQ_WEB_PORTAL_WS_PING_INTERVAL_SEC) {
+        secs_since_ping = 0;
         ws_ping_and_prune();
     }
 }
+
+/* Coalesced health push: schedule a one-shot send a short time in the future
+ * to batch multiple state changes into a single snapshot. */
+/* No coalescing needed with 1 Hz health updates */
 
 
 /* Utilities */
@@ -604,6 +609,7 @@ static esp_err_t api_sensor_action(httpd_req_t *req)
     if (r != ESP_OK) { respond_error(req, 500, esp_err_to_name(r), "Sensor operation failed"); iaq_prof_toc(IAQ_METRIC_WEB_API_SENSOR_ACTION, t0); return ESP_OK; }
     cJSON *ok = cJSON_CreateObject(); cJSON_AddStringToObject(ok, "status", "ok");
     respond_json(req, ok, 200);
+    /* With 1 Hz periodic health, no need to push immediately */
     iaq_prof_toc(IAQ_METRIC_WEB_API_SENSOR_ACTION, t0);
     return ESP_OK;
 }
@@ -854,8 +860,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
     return ret;
 }
 
-/* ===== Event hook to push health on link changes ===== */
-static void ws_push_health(void *arg) { (void)arg; ws_health_timer_cb(NULL); }
+/* No event-driven health push needed at 1 Hz */
 
 static void iaq_evt_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
 {
@@ -894,7 +899,7 @@ static void iaq_evt_handler(void *arg, esp_event_base_t base, int32_t id, void *
             }
         }
     }
-    if (s_server) (void)httpd_queue_work(s_server, ws_push_health, NULL);
+    /* With 1 Hz health periodic, no extra pushes needed */
 }
 
 /* ===== Public API ===== */

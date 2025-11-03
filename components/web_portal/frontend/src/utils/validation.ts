@@ -145,6 +145,16 @@ export function formatDuration(ms: number): string {
 }
 
 /**
+ * Formats seconds to an integer seconds string without decimals.
+ * Useful for countdowns like warmup remaining.
+ */
+export function formatSeconds(seconds: number): string {
+  if (!isFinite(seconds) || seconds <= 0) return '0s';
+  // Ceil to avoid prematurely showing 0 while still warming up
+  return `${Math.ceil(seconds)}s`;
+}
+
+/**
  * Gets WiFi signal strength category from RSSI
  * @param rssi - Received Signal Strength Indicator (dBm)
  * @returns Signal strength category

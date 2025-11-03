@@ -30,7 +30,7 @@ import { healthAtom, cadencesAtom } from '../../store/atoms';
 import { apiClient } from '../../api/client';
 import type { SensorId } from '../../api/types';
 import { getSensorStateColor } from '../../theme';
-import { formatRelativeTime, formatDuration } from '../../utils/validation';
+import { formatRelativeTime, formatDuration, formatSeconds } from '../../utils/validation';
 
 // Sensor metadata mapping
 const SENSOR_INFO: Record<SensorId, { name: string; icon: ReactElement; description: string }> = {
@@ -298,7 +298,7 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
           )}
           {sensorStatus.warmup_remaining_s !== undefined && sensorStatus.warmup_remaining_s > 0 && (
             <Typography variant="body2" color="warning.main" fontWeight={500}>
-              Warming up: {sensorStatus.warmup_remaining_s}s remaining
+              Warming up: {formatSeconds(sensorStatus.warmup_remaining_s)} remaining
             </Typography>
           )}
           {sensorStatus.errors > 0 && (
@@ -471,6 +471,11 @@ export function SensorControl() {
         <Typography variant="body2" color="text.secondary">
           Monitor and control individual sensors, adjust read cadences, and trigger manual operations
         </Typography>
+        {loadError && (
+          <Alert severity="error" sx={{ mt: 2 }}>
+            Failed to load sensor cadences: {loadError}
+          </Alert>
+        )}
       </Box>
 
       <Grid container spacing={3}>
