@@ -1,0 +1,223 @@
+import { useEffect, useMemo, useRef } from 'react';
+import { useAtomValue } from 'jotai';
+import uPlot from 'uplot';
+import 'uplot/dist/uPlot.min.css';
+import { Box, Card, CardContent, Chip, Typography, useTheme } from '@mui/material';
+import { getBuffers, getLatest } from '../../utils/streamBuffers';
+import { buffersVersionAtom } from '../../store/atoms';
+import type { RangeSeconds } from './ChartTile';
+
+/**
+ * Binary search to find first index where x[i] >= target
+ * O(log n) instead of O(n) linear scan
+ */
+function binarySearchStart(arr: number[], target: number): number {
+  let left = 0;
+  let right = arr.length;
+  while (left < right) {
+    const mid = (left + right) >>> 1;
+    if (arr[mid] < target) {
+      left = mid + 1;
+    } else {
+      right = mid;
+    }
+  }
+  return left;
+}
+
+interface PMChartTileProps {
+  range: RangeSeconds;
+  height?: number;
+  yMin?: number;
+  softYMax?: number; // expand if exceeded
+}
+
+export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTileProps) {
+  const theme = useTheme();
+  const buffersVersion = useAtomValue(buffersVersionAtom);
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const plotRef = useRef<uPlot | null>(null);
+  const yScaleRef = useRef<{ min?: number; max?: number }>({});
+  const prevRangeRef = useRef(range);
+
+  // Get buffers once on mount, refresh in update effect
+  const buffersRef = useRef({
+    x: getBuffers('pm25_ugm3').x,
+    pm1: getBuffers('pm1_ugm3').y,
+    pm25: getBuffers('pm25_ugm3').y,
+    pm10: getBuffers('pm10_ugm3').y,
+  });
+
+  const options = useMemo<uPlot.Options>(() => {
+    const axisGrid = { show: true, stroke: theme.palette.divider, width: 1 } as const;
+    // step by range
+    const step = range <= 90 ? 5 : range <= 600 ? 30 : 300;
+    return {
+      width: containerRef.current?.clientWidth || 800,
+      height,
+      cursor: { sync: { key: 'realtime' } },
+      scales: { x: {}, y: { auto: yMin === undefined && softYMax === undefined } },
+      series: [
+        { label: 'Time' },
+        { label: 'PM1.0', stroke: theme.palette.info.main, width: 2, points: { show: false }, paths: range >= 300 && uPlot.paths.spline ? uPlot.paths.spline() : undefined },
+        { label: 'PM2.5', stroke: theme.palette.error.main, width: 2, points: { show: false }, paths: range >= 300 && uPlot.paths.spline ? uPlot.paths.spline() : undefined },
+        { label: 'PM10', stroke: theme.palette.warning.main, width: 2, points: { show: false }, paths: range >= 300 && uPlot.paths.spline ? uPlot.paths.spline() : undefined },
+      ],
+      axes: [
+        {
+          grid: axisGrid,
+          splits: (_u, _axisIdx, _min, max) => {
+            const end = max as number; const start = end - range; const ticks: number[] = [];
+            for (let v = start; v <= end + 1e-6; v += step) ticks.push(v);
+            return ticks;
+          },
+          values: (u, values) => {
+            const end = (u.scales.x.max as number) ?? 0; const fmt = (d: number) => {
+              const s = Math.max(0, Math.round(d));
+              if (range <= 90) return `-${s}s`;
+              if (range <= 600) { const m = Math.floor(s / 60); const ss = String(s % 60).padStart(2, '0'); return `-${m}:${ss}`; }
+              const m = Math.round(s / 60); return `-${m}m`;
+            };
+            return values.map(v => fmt(end - (v as number)));
+          },
+        },
+        { scale: 'y', side: 3, grid: axisGrid, values: (_u, vals) => vals.map(v => (Number.isFinite(v) ? v.toFixed(0) : '')) },
+      ],
+      // Show uPlot legend (non-interactive by default)
+      legend: { show: true, live: false },
+    };
+  }, [theme.palette.divider, theme.palette.error.main, theme.palette.info.main, theme.palette.warning.main, range, height, yMin, softYMax]);
+
+  useEffect(() => {
+    if (!containerRef.current) return;
+
+    // Refresh buffers
+    buffersRef.current = {
+      x: getBuffers('pm25_ugm3').x,
+      pm1: getBuffers('pm1_ugm3').y,
+      pm25: getBuffers('pm25_ugm3').y,
+      pm10: getBuffers('pm10_ugm3').y,
+    };
+
+    const plot = new uPlot(
+      options,
+      [buffersRef.current.x, buffersRef.current.pm1, buffersRef.current.pm25, buffersRef.current.pm10],
+      containerRef.current
+    );
+    plotRef.current = plot;
+
+    if (yMin !== undefined || softYMax !== undefined) {
+      yScaleRef.current = { min: yMin, max: softYMax };
+      const init: any = {};
+      if (yMin !== undefined) init.min = yMin;
+      if (softYMax !== undefined) init.max = softYMax;
+      plot.setScale('y', init);
+    }
+
+    const ro = new ResizeObserver(entries => {
+      const w = entries[0].contentRect.width;
+      if (w && plotRef.current) {
+        plotRef.current.setSize({ width: Math.round(w), height: options.height! });
+      }
+    });
+    ro.observe(containerRef.current);
+
+    return () => {
+      ro.disconnect();
+      plot.destroy();
+      plotRef.current = null;
+    };
+  }, [options, yMin, softYMax]);
+
+  // Reset y scale expansion when range changes
+  useEffect(() => {
+    if (prevRangeRef.current !== range) {
+      yScaleRef.current = {};
+      prevRangeRef.current = range;
+    }
+  }, [range]);
+
+  // Event-driven update: only when data changes (buffersVersion) or range changes
+  useEffect(() => {
+    const plot = plotRef.current;
+    if (!plot) return;
+
+    // Refresh buffers
+    buffersRef.current = {
+      x: getBuffers('pm25_ugm3').x,
+      pm1: getBuffers('pm1_ugm3').y,
+      pm25: getBuffers('pm25_ugm3').y,
+      pm10: getBuffers('pm10_ugm3').y,
+    };
+
+    const xs = buffersRef.current.x;
+    if (xs.length === 0) return;
+
+    const end = xs[xs.length - 1];
+    const start = end - range;
+
+    // Binary search for window start (O(log n) instead of O(n))
+    const startIdx = binarySearchStart(xs, start);
+
+    // Pass full arrays to uPlot and constrain via scale
+    // No slice() allocations
+    plot.setData([xs, buffersRef.current.pm1, buffersRef.current.pm25, buffersRef.current.pm10], true);
+    plot.setScale('x', { min: start, max: end });
+
+    // Expand y max if needed across all 3 series
+    if (yMin !== undefined && softYMax !== undefined) {
+      let dataMax = -Infinity;
+
+      // Check max only over visible range
+      const check = (arr: (number | null)[]) => {
+        for (let k = startIdx; k < arr.length; k++) {
+          const v = arr[k];
+          if (v != null && !Number.isNaN(v) && v > dataMax) dataMax = v;
+        }
+      };
+
+      check(buffersRef.current.pm1);
+      check(buffersRef.current.pm25);
+      check(buffersRef.current.pm10);
+
+      const base = softYMax;
+      const targetMax = dataMax === -Infinity ? base : Math.max(base, dataMax);
+      const pad = Math.max(1, (targetMax - yMin) * 0.05);
+      const finalMax = targetMax + pad;
+
+      // Only expand, don't shrink
+      if (yScaleRef.current.max === undefined || finalMax > (yScaleRef.current.max ?? 0) + 0.1) {
+        plot.setScale('y', { min: yMin, max: finalMax });
+        yScaleRef.current = { min: yMin, max: finalMax };
+      }
+    }
+  }, [buffersVersion, range, yMin, softYMax]);
+
+  const latest = getLatest('pm25_ugm3');
+  const latestText = latest == null ? '--' : `${latest.toFixed(1)} µg/m³`;
+
+  // no external toggles; legend is display-only
+
+  return (
+    <Card>
+      <CardContent>
+        <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
+          <Typography variant="subtitle1">PM</Typography>
+          <Chip size="small" label={latestText} sx={{ bgcolor: theme.palette.action.hover }} />
+        </Box>
+        <Box
+          ref={containerRef}
+          sx={{
+            width: '100%',
+            height: height + 10,
+            '& .u-legend': {
+              pointerEvents: 'none',
+              cursor: 'default',
+            },
+          }}
+        />
+      </CardContent>
+    </Card>
+  );
+}

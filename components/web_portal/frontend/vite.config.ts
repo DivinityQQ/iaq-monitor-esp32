@@ -37,7 +37,8 @@ export default defineConfig({
             '@emotion/react',
             '@emotion/styled',
           ],
-          'vendor-charts': ['uplot', 'uplot-react'],
+          // Bundle only uPlot; we no longer use uplot-react
+          'vendor-charts': ['uplot'],
         },
       },
     },

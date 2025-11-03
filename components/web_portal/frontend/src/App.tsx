@@ -1,38 +1,61 @@
-import { ThemeProvider, CssBaseline, Box, Typography, Alert } from '@mui/material';
+import { ThemeProvider, CssBaseline, Box, Typography, Alert, CircularProgress } from '@mui/material';
 import { Provider as JotaiProvider, useSetAtom, useAtomValue } from 'jotai';
 import { Route, Switch } from 'wouter';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, lazy, Suspense } from 'react';
 import { theme } from './theme';
 import { AppBar } from './components/Layout/AppBar';
 import { NavDrawer } from './components/Layout/NavDrawer';
 import { Dashboard } from './components/Dashboard/Dashboard';
 import { ConfigView } from './components/Config/ConfigView';
 import { LoadingSpinner } from './components/Common/LoadingSkeleton';
+import { ErrorBoundary } from './components/Common/ErrorBoundary';
 import { useWebSocketConnection } from './hooks/useWebSocket';
 import { deviceInfoAtom, mqttStatusAtom, appReadyAtom } from './store/atoms';
 import { apiClient } from './api/client';
 import { SnackbarProvider } from './contexts/SnackbarContext';
+import { ChartBufferStream } from './components/Charts/ChartBufferStream';
 
-// Placeholder views - will be replaced in future weeks
+// Lazy-load chart component for better bundle splitting
+const ChartContainer = lazy(() =>
+  import('./components/Charts/ChartContainer').then(module => ({
+    default: module.ChartContainer,
+  }))
+);
+
+// Lazy-load HealthDashboard component
+const HealthDashboard = lazy(() =>
+  import('./components/Health/HealthDashboard').then(module => ({
+    default: module.HealthDashboard,
+  }))
+);
+
+// Lazy-loaded ChartsView with Suspense fallback
 const ChartsView = () => (
   <Box p={3}>
-    <Typography variant="h4" gutterBottom>
-      Charts
-    </Typography>
-    <Typography variant="body1" color="text.secondary">
-      Historical charts will be implemented in Week 4.
-    </Typography>
+    <Suspense
+      fallback={
+        <Box display="flex" justifyContent="center" alignItems="center" minHeight={400}>
+          <CircularProgress />
+        </Box>
+      }
+    >
+      <ChartContainer />
+    </Suspense>
   </Box>
 );
 
+// Lazy-loaded HealthView with Suspense fallback
 const HealthView = () => (
   <Box p={3}>
-    <Typography variant="h4" gutterBottom>
-      System Health
-    </Typography>
-    <Typography variant="body1" color="text.secondary">
-      System health and sensor status will be implemented in Week 4.
-    </Typography>
+    <Suspense
+      fallback={
+        <Box display="flex" justifyContent="center" alignItems="center" minHeight={400}>
+          <CircularProgress />
+        </Box>
+      }
+    >
+      <HealthDashboard />
+    </Suspense>
   </Box>
 );
 
@@ -150,14 +173,18 @@ function AppContent() {
 
 function App() {
   return (
-    <JotaiProvider>
-      <ThemeProvider theme={theme}>
-        <CssBaseline />
-        <SnackbarProvider>
-          <AppContent />
-        </SnackbarProvider>
-      </ThemeProvider>
-    </JotaiProvider>
+    <ErrorBoundary>
+      <JotaiProvider>
+        <ThemeProvider theme={theme}>
+          <CssBaseline />
+          <SnackbarProvider>
+            {/* Keep chart buffers in sync app-wide so history persists across routes */}
+            <ChartBufferStream />
+            <AppContent />
+          </SnackbarProvider>
+        </ThemeProvider>
+      </JotaiProvider>
+    </ErrorBoundary>
   );
 }
 

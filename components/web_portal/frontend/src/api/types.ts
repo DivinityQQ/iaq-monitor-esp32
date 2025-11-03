@@ -6,6 +6,12 @@ export type SensorId = 'mcu' | 'sht45' | 'bmp280' | 'sgp41' | 'pms5003' | 's8';
 export type SensorState = 'UNINIT' | 'INIT' | 'WARMING' | 'READY' | 'ERROR' | 'DISABLED';
 export type SensorAction = 'read' | 'reset' | 'enable' | 'disable' | 'cadence';
 
+/**
+ * Canonical ordered list of all sensor IDs in the system.
+ * Use this constant to ensure consistent sensor ordering across UI components.
+ */
+export const ALL_SENSOR_IDS: readonly SensorId[] = ['mcu', 'sht45', 'bmp280', 'sgp41', 'pms5003', 's8'] as const;
+
 export interface SensorStatus {
   state: SensorState;
   errors: number;

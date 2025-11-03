@@ -19,7 +19,6 @@
     "@emotion/react": "^11.13.5",
     "@emotion/styled": "^11.13.5",
     "uplot": "^1.6.31",
-    "uplot-react": "^1.2.2",
     "react-use-websocket": "^4.8.1",
     "wouter": "^3.5.0"
   },

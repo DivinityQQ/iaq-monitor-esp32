@@ -30,6 +30,7 @@ import { healthAtom, cadencesAtom } from '../../store/atoms';
 import { apiClient } from '../../api/client';
 import { useNotification } from '../../contexts/SnackbarContext';
 import type { SensorId } from '../../api/types';
+import { ALL_SENSOR_IDS } from '../../api/types';
 import { getSensorStateColor } from '../../theme';
 import { formatRelativeTime, formatDuration, formatSeconds } from '../../utils/validation';
 
@@ -469,8 +470,6 @@ export function SensorControl() {
     );
   }
 
-  const sensorIds: SensorId[] = ['mcu', 'sht45', 'bmp280', 'sgp41', 'pms5003', 's8'];
-
   return (
     <Box>
       <Box sx={{ mb: 4 }}>
@@ -488,7 +487,7 @@ export function SensorControl() {
       </Box>
 
       <Grid container spacing={3}>
-        {sensorIds.map((sensorId) => (
+        {ALL_SENSOR_IDS.map((sensorId) => (
           <Grid key={sensorId} size={{ xs: 12, md: 6, lg: 4 }}>
             <SensorCardControl sensorId={sensorId} />
           </Grid>

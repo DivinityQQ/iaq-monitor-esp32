@@ -155,15 +155,46 @@ export function formatSeconds(seconds: number): string {
 }
 
 /**
+ * Signal strength category type
+ */
+export type SignalStrength = 'excellent' | 'good' | 'fair' | 'weak';
+
+/**
  * Gets WiFi signal strength category from RSSI
  * @param rssi - Received Signal Strength Indicator (dBm)
  * @returns Signal strength category
  */
-export function getSignalStrength(rssi: number): 'excellent' | 'good' | 'fair' | 'weak' {
+export function getSignalStrength(rssi: number): SignalStrength {
   if (rssi >= -50) return 'excellent';
   if (rssi >= -60) return 'good';
   if (rssi >= -70) return 'fair';
   return 'weak';
+}
+
+/**
+ * Gets display label for signal strength category
+ * @param strength - Signal strength category
+ * @returns Human-readable label
+ */
+export function getSignalStrengthLabel(strength: SignalStrength): string {
+  const labels: Record<SignalStrength, string> = {
+    excellent: 'Excellent',
+    good: 'Good',
+    fair: 'Fair',
+    weak: 'Poor',
+  };
+  return labels[strength];
+}
+
+/**
+ * Gets MUI chip color for signal strength category
+ * @param strength - Signal strength category
+ * @returns MUI chip color
+ */
+export function getSignalStrengthColor(strength: SignalStrength): 'success' | 'warning' | 'error' {
+  if (strength === 'excellent' || strength === 'good') return 'success';
+  if (strength === 'fair') return 'warning';
+  return 'error';
 }
 
 /**

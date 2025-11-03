@@ -1,6 +1,7 @@
 import { atom } from 'jotai';
 import type { State, Metrics, Health, DeviceInfo, SensorId, SensorCadence, MQTTStatus } from '../api/types';
 import { getAQIColor, getComfortColor, getIAQColor } from '../theme';
+import { getBuffersVersion } from '../utils/streamBuffers';
 
 // ============================================================================
 // PRIMITIVE ATOMS - Raw Data Storage
@@ -16,7 +17,7 @@ export const wsReconnectingAtom = atom<boolean>(false);
  * Real-time data atoms (updated via WebSocket)
  * - State: 1Hz updates (sensor readings)
  * - Metrics: 5s updates (computed metrics like AQI, comfort)
- * - Health: 30s updates + WiFi events (system health, uptime, sensors)
+ * - Health: 1Hz updates while WS clients connected (system health, uptime, sensors)
  */
 export const stateAtom = atom<State | null>(null);
 export const metricsAtom = atom<Metrics | null>(null);
@@ -38,6 +39,17 @@ export const mqttStatusAtom = atom<MQTTStatus | null>(null);
  * Record of sensor -> { ms, from_nvs }
  */
 export const cadencesAtom = atom<Record<SensorId, SensorCadence> | null>(null);
+
+/**
+ * Chart buffers version atom - read-only derived atom
+ * Increments whenever new data is appended to chart buffers
+ * Charts subscribe to this for efficient update triggering
+ */
+export const buffersVersionAtom = atom((get) => {
+  // Also depend on stateAtom to trigger re-evaluation
+  get(stateAtom);
+  return getBuffersVersion();
+});
 
 // ============================================================================
 // DERIVED ATOMS - Computed Values
@@ -98,12 +110,13 @@ export const connectionStatusAtom = atom((get) => {
 
 /**
  * Data loading state atom - determines if initial data has loaded
- * Returns true if we have at least state or metrics data
+ * Returns true if we have at least state, metrics, or health data
  */
 export const dataLoadedAtom = atom((get) => {
   const state = get(stateAtom);
   const metrics = get(metricsAtom);
-  return state !== null || metrics !== null;
+  const health = get(healthAtom);
+  return state !== null || metrics !== null || health !== null;
 });
 
 /**
@@ -132,13 +145,13 @@ export const sensorStatusAtom = (sensorId: SensorId) =>
 
 /**
  * WiFi signal strength category atom
- * Categorizes WiFi signal strength: Excellent (>-50), Good (>-60), Fair (>-70), Poor (≤-70)
+ * Categorizes WiFi signal strength: Excellent (>=-50), Good (>=-60), Fair (>=-70), Poor (<-70)
  */
 export const wifiSignalCategoryAtom = atom((get) => {
   const status = get(connectionStatusAtom);
-  if (!status.rssi) return 'Unknown';
-  if (status.rssi > -50) return 'Excellent';
-  if (status.rssi > -60) return 'Good';
-  if (status.rssi > -70) return 'Fair';
+  if (status.rssi == null) return 'Unknown';
+  if (status.rssi >= -50) return 'Excellent';
+  if (status.rssi >= -60) return 'Good';
+  if (status.rssi >= -70) return 'Fair';
   return 'Poor';
 });
