@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
-import { Box, Card, CardContent, Chip, Typography, useTheme } from '@mui/material';
+import { Box, Card, CardContent, Chip, Typography, useTheme, useMediaQuery } from '@mui/material';
 import { getBuffers, getLatest, MetricKey } from '../../utils/streamBuffers';
 import { buffersVersionAtom } from '../../store/atoms';
 
@@ -58,6 +58,7 @@ export function ChartTile({
   decimals = 1,
 }: ChartTileProps) {
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const buffersVersion = useAtomValue(buffersVersionAtom);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -71,7 +72,6 @@ export function ChartTile({
   // Create plot
   const options = useMemo<uPlot.Options>(() => {
     const axisGrid = { show: true, stroke: theme.palette.divider, width: 1 } as const;
-    const step = range <= 90 ? 5 : range <= 600 ? 30 : 300; // 5s, 30s, 5m
     return {
       width: containerRef.current?.clientWidth || 800,
       height,
@@ -95,9 +95,22 @@ export function ChartTile({
       axes: [
         {
           grid: axisGrid,
-          // keep ticks anchored to the right edge ("now") so labels don't drift
-          splits: (_u, _axisIdx, _min, max) => {
-            const end = max as number; const start = end - range; const ticks: number[] = [];
+          // Let uPlot compute the increment from minSpace+incrs, then anchor ticks to "now" (end)
+          space: (_u, _axisIdx, _min, _max, _plotDim) => {
+            // Minimum pixel spacing per label by range (labels are longer in mm:ss)
+            return range <= 90 ? (isMobile ? 64 : 40) : range <= 600 ? (isMobile ? 80 : 56) : (isMobile ? 72 : 48);
+          },
+          incrs: range <= 90
+            ? [1, 2, 5, 10, 15, 20, 30]
+            : range <= 600
+            ? [5, 10, 15, 30, 60, 120, 300]
+            : [30, 60, 120, 300, 600, 900],
+          // keep ticks anchored to the right edge ("now"); choose step by inner width
+          splits: (_u, _axisIdx, _min, max, foundIncr) => {
+            const end = max as number;
+            const start = end - range;
+            const step = foundIncr || (range <= 90 ? 5 : range <= 600 ? 30 : 300);
+            const ticks: number[] = [];
             for (let v = end; v >= start - 1e-6; v -= step) ticks.push(v);
             return ticks.reverse();
           },
@@ -126,7 +139,7 @@ export function ChartTile({
       ],
       legend: { show: false },
     };
-  }, [theme.palette.divider, color, height, title, unitSuffix, yMin, yMax, softYMax, decimals, range]);
+  }, [theme.palette.divider, theme.breakpoints, isMobile, color, height, title, unitSuffix, yMin, yMax, softYMax, decimals, range]);
 
   useEffect(() => {
     if (!containerRef.current) return;

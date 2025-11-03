@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef } from 'react';
 import { useAtomValue } from 'jotai';
 import uPlot from 'uplot';
 import 'uplot/dist/uPlot.min.css';
-import { Box, Card, CardContent, Chip, Typography, useTheme } from '@mui/material';
+import { Box, Card, CardContent, Chip, Typography, useTheme, useMediaQuery } from '@mui/material';
 import { getBuffers, getLatest } from '../../utils/streamBuffers';
 import { buffersVersionAtom } from '../../store/atoms';
 import type { RangeSeconds } from './ChartTile';
@@ -34,6 +34,7 @@ interface PMChartTileProps {
 
 export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTileProps) {
   const theme = useTheme();
+  const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const buffersVersion = useAtomValue(buffersVersionAtom);
 
   const containerRef = useRef<HTMLDivElement>(null);
@@ -51,8 +52,6 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
 
   const options = useMemo<uPlot.Options>(() => {
     const axisGrid = { show: true, stroke: theme.palette.divider, width: 1 } as const;
-    // step by range
-    const step = range <= 90 ? 5 : range <= 600 ? 30 : 300;
     return {
       width: containerRef.current?.clientWidth || 800,
       height,
@@ -67,10 +66,19 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
       axes: [
         {
           grid: axisGrid,
-          splits: (_u, _axisIdx, _min, max) => {
-            const end = max as number; const start = end - range; const ticks: number[] = [];
-            for (let v = start; v <= end + 1e-6; v += step) ticks.push(v);
-            return ticks;
+          space: (_u, _axisIdx, _min, _max, _plotDim) => (range <= 90 ? (isMobile ? 64 : 40) : range <= 600 ? (isMobile ? 80 : 56) : (isMobile ? 72 : 48)),
+          incrs: range <= 90
+            ? [1, 2, 5, 10, 15, 20, 30]
+            : range <= 600
+            ? [5, 10, 15, 30, 60, 120, 300]
+            : [30, 60, 120, 300, 600, 900],
+          splits: (_u, _axisIdx, _min, max, foundIncr) => {
+            const end = max as number;
+            const start = end - range;
+            const step = foundIncr || (range <= 90 ? 5 : range <= 600 ? 30 : 300);
+            const ticks: number[] = [];
+            for (let v = end; v >= start - 1e-6; v -= step) ticks.push(v);
+            return ticks.reverse();
           },
           values: (u, values) => {
             const end = (u.scales.x.max as number) ?? 0; const fmt = (d: number) => {
@@ -87,7 +95,7 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
       // Show uPlot legend (non-interactive by default)
       legend: { show: true, live: false },
     };
-  }, [theme.palette.divider, theme.palette.error.main, theme.palette.info.main, theme.palette.warning.main, range, height, yMin, softYMax]);
+  }, [theme.palette.divider, theme.palette.error.main, theme.palette.info.main, theme.palette.warning.main, theme.breakpoints, isMobile, range, height, yMin, softYMax]);
 
   useEffect(() => {
     if (!containerRef.current) return;
