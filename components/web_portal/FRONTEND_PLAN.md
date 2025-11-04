@@ -1,9 +1,9 @@
 # Frontend Implementation Plan for IAQ Monitor Web Portal
 
-**Last Updated:** 2025-11-02
-**Status:** Week 3 Complete - Configuration UI Implemented
+**Last Updated:** 2025-11-04
+**Status:** Week 4 Complete — Real‑time Charts Implemented
 **Estimated Timeline:** 38-47 hours over 4 weeks
-**Progress:** Week 1 (100%) | Week 2 (100%) | Week 3 (100%) | Week 4 (0%)
+**Progress:** Week 1 (100%) | Week 2 (100%) | Week 3 (100%) | Week 4 (100%)
 
 ---
 
@@ -57,7 +57,6 @@ Build a high-performance real-time dashboard SPA using the latest 2025 web techn
     "@emotion/react": "^11.13.5",
     "@emotion/styled": "^11.13.5",
     "uplot": "^1.6.31",
-    "uplot-react": "^1.2.2",
     "react-use-websocket": "^4.8.1",
     "wouter": "^3.5.0"
   },
@@ -109,13 +108,11 @@ iaq-monitor-esp32/
 │       │   │
 │       │   ├── api/                # API layer
 │       │   │   ├── client.ts       # REST API wrapper (fetch)
-│       │   │   ├── websocket.ts    # WebSocket manager
+│       │   │   ├── (no websocket.ts — handled via hooks)
 │       │   │   └── types.ts        # TypeScript types from API.md
 │       │   │
 │       │   ├── store/              # Jotai state management
-│       │   │   ├── atoms.ts        # Base atoms (state/metrics/health)
-│       │   │   ├── derived.ts      # Derived atoms (calculations)
-│       │   │   └── actions.ts      # Async actions (API calls)
+│       │   │   └── atoms.ts        # Primitive + derived atoms (colors, status)
 │       │   │
 │       │   ├── components/         # React components
 │       │   │   ├── Layout/
@@ -131,9 +128,10 @@ iaq-monitor-esp32/
 │       │   │   │   └── MetricsGrid.tsx     # Grid layout for cards
 │       │   │   │
 │       │   │   ├── Charts/
-│       │   │   │   ├── RealtimeChart.tsx   # uPlot real-time chart
-│       │   │   │   ├── ChartContainer.tsx  # Chart wrapper with controls
-│       │   │   │   └── HistoryChart.tsx    # Historical data (future)
+│       │   │   │   ├── ChartContainer.tsx      # Wrapper with range selector
+│       │   │   │   ├── ChartTile.tsx           # Single‑series streaming tile (uPlot)
+│       │   │   │   ├── PMChartTile.tsx         # Multi‑series PM1/PM2.5/PM10
+│       │   │   │   └── ChartBufferStream.tsx   # Mirrors WS state → ring buffers
 │       │   │   │
 │       │   │   ├── Config/
 │       │   │   │   ├── WiFiConfig.tsx      # WiFi setup & scan
@@ -149,19 +147,17 @@ iaq-monitor-esp32/
 │       │   │   └── Common/
 │       │   │       ├── LoadingSkeleton.tsx # Loading states
 │       │   │       ├── ErrorBoundary.tsx   # Error handling
-│       │   │       └── StatusChip.tsx      # Status indicators
+│       │   │       └── ConfirmDialog.tsx   # Reusable confirmation dialog
 │       │   │
 │       │   ├── hooks/              # Custom React hooks
-│       │   │   ├── useWebSocket.ts         # WebSocket integration
-│       │   │   ├── useRealtimeData.ts      # Real-time data management
-│       │   │   ├── useApiClient.ts         # REST API client
-│       │   │   └── useLocalStorage.ts      # Persistent settings
+│       │   │   └── useWebSocket.ts         # WebSocket integration + auto‑reconnect
 │       │   │
 │       │   └── utils/              # Utility functions
 │       │       ├── formatting.ts           # Number/date formatters
-│       │       ├── colors.ts               # AQI color mapping
+│       │       ├── streamBuffers.ts        # 1h ring buffers for charts
 │       │       ├── constants.ts            # App constants
-│       │       └── validation.ts           # Form validation
+│       │       ├── logger.ts               # Dev‑only logging helpers
+│       │       └── validation.ts           # Form + signal helpers
 │       │
 │       ├── public/
 │       │   └── favicon.svg
@@ -198,6 +194,8 @@ iaq-monitor-esp32/
 // store/atoms.ts
 import { atom } from 'jotai';
 import { State, Metrics, Health } from '../api/types';
+import { getAQIColor } from '../theme';
+import { getBuffersVersion } from '../utils/streamBuffers';
 
 // WebSocket connection state
 export const wsConnectedAtom = atom(false);
@@ -212,31 +210,21 @@ export const healthAtom = atom<Health | null>(null);
 export const deviceInfoAtom = atom<DeviceInfo | null>(null);
 
 // Derived atoms (computed values)
-export const aqiColorAtom = atom((get) => {
-  const metrics = get(metricsAtom);
-  const aqi = metrics?.aqi?.value;
-  if (!aqi) return 'grey';
-  if (aqi <= 50) return 'green';
-  if (aqi <= 100) return 'yellow';
-  if (aqi <= 150) return 'orange';
-  if (aqi <= 200) return 'red';
-  return 'purple';
-});
+export const aqiColorAtom = atom((get) => getAQIColor(get(metricsAtom)?.aqi?.value));
 
 export const sensorStatusMapAtom = atom((get) => {
   const health = get(healthAtom);
   return health?.sensors || {};
 });
 
-export const connectionStatusAtom = atom((get) => {
-  const info = get(deviceInfoAtom);
-  const wsConnected = get(wsConnectedAtom);
-  return {
-    websocket: wsConnected,
-    wifi: info?.network?.wifi_connected || false,
-    mqtt: info?.network?.mqtt_connected || false,
-  };
-});
+export const connectionStatusAtom = atom((get) => ({
+  websocket: get(wsConnectedAtom),
+  wifi: get(deviceInfoAtom)?.network?.wifi_connected ?? false,
+  mqtt: get(deviceInfoAtom)?.network?.mqtt_connected ?? false,
+}));
+
+// Chart buffers version for efficient chart updates
+export const buffersVersionAtom = atom(() => getBuffersVersion());
 ```
 
 **Why Jotai:**
@@ -246,23 +234,22 @@ export const connectionStatusAtom = atom((get) => {
 - **TypeScript-first** → Excellent type inference
 - **7KB bundle** → Lightweight
 
-### WebSocket Data Flow
+### WebSocket + Streaming Data Flow
 
 ```
 ESP32 WebSocket (/ws)
-    ↓ (1Hz state, 5s metrics, 30s health)
-    ↓
-useWebSocket Hook
+    ↓ (1Hz state, 5s metrics, 1Hz health while connected)
+useWebSocketConnection hook (react-use-websocket)
     ↓
 Parse JSON envelope: { type, data }
     ↓
-useSetAtom(stateAtom/metricsAtom/healthAtom)
+Update Jotai atoms: stateAtom / metricsAtom / healthAtom
     ↓
-Jotai updates atoms
+ChartBufferStream mirrors stateAtom → 1h ring buffers
     ↓
-React components auto-update (atomic subscriptions)
+Charts subscribe to buffersVersionAtom and read getBuffers()
     ↓
-UI re-renders only affected components
+Only affected tiles re-render (atomic subscriptions)
 ```
 
 **Message Types:**
@@ -270,7 +257,7 @@ UI re-renders only affected components
 type WSMessage =
   | { type: 'state'; data: State }      // 1 Hz
   | { type: 'metrics'; data: Metrics }  // Every 5s
-  | { type: 'health'; data: Health };   // Every 30s + WiFi events
+  | { type: 'health'; data: Health };   // Every 1s while connected + WiFi events
 ```
 
 ### REST API Integration
@@ -326,16 +313,14 @@ App.tsx (Providers: Jotai, MUI Theme)
 │   │
 │   ├── Route: / → Dashboard
 │   │   ├── MetricsGrid
-│   │   │   ├── SensorCard (Temp)      [useAtomValue(stateAtom)]
-│   │   │   ├── SensorCard (Humidity)  [useAtomValue(stateAtom)]
-│   │   │   ├── SensorCard (CO2)       [useAtomValue(stateAtom)]
-│   │   │   ├── SensorCard (PM2.5)     [useAtomValue(stateAtom)]
-│   │   │   ├── AQICard                [useAtomValue(metricsAtom)]
-│   │   │   └── ComfortCard            [useAtomValue(metricsAtom)]
-│   │   └── RealtimeChart (lazy)       [useAtomValue(stateAtom)]
+│   │   │   ├── 8 SensorCard tiles: Temp, RH, CO₂, Pressure, PM2.5, PM10, PM1.0, VOC
+│   │   │   ├── AQICard, ComfortCard, IAQCard (featured)
+│   │   └── Charts section link → /charts
 │   │
-│   ├── Route: /charts → ChartsView
-│   │   └── Historical charts (future)
+│   ├── Route: /charts → ChartContainer (lazy)
+│   │   ├── Range: 60s / 5m / 1h
+│   │   ├── ChartTile: Temp, RH, CO₂ (single‑series)
+│   │   └── PMChartTile: PM1/PM2.5/PM10 (multi‑series)
 │   │
 │   ├── Route: /config → ConfigTabs
 │   │   ├── WiFiConfig                 [REST API]
@@ -372,90 +357,31 @@ App.tsx (Providers: Jotai, MUI Theme)
   - Nav items: Dashboard, Charts, Config, Health, System
 - **Responsive Grid** (MUI Grid2)
   - 12-column grid system
-  - Breakpoints: xs/sm/md/lg/xl
+  - Breakpoints: xs/sm/tablet/md/lg/xl (custom 'tablet' breakpoint)
 
 #### 1.2 Real-time Metrics Grid
-Six primary sensor cards with live updates:
+Eight primary sensor cards with live updates, plus three featured cards:
 
-1. **Temperature Card**
-   - Large reading: `24.5°C`
-   - Subtitle: "Comfortable" (green/yellow/red)
-   - Icon: ThermostatIcon
-   - Trend arrow (up/down/stable)
+1. **Temperature** — `24.5°C` (ThermostatIcon)
+2. **Humidity** — `45%` (WaterDropIcon)
+3. **CO₂** — `650 ppm` (Co2Icon)
+4. **Pressure** — `1012.3 hPa` (CloudIcon) with trend
+5. **PM2.5** — `12 µg/m³` (GrainIcon), spike indicator
+6. **PM10** — `24 µg/m³` (GrainIcon)
+7. **PM1.0** — `8 µg/m³` (GrainIcon)
+8. **VOC Index** — `120` (ScienceIcon) with category
+9. **AQI (featured)** — value, category, dominant pollutant, PM sub‑indices
+10. **Comfort (featured)** — score, category, heat index, abs humidity, dew point
+11. **IAQ (featured)** — overall IAQ score (0–100) with category
 
-2. **Humidity Card**
-   - Reading: `45%`
-   - Subtitle: "Optimal" / "Too dry" / "Too humid"
-   - Icon: OpacityIcon
-   - Dew point: `12.3°C`
+Notes
+- Trend arrows are scaffolded in the generic `SensorCard` but not computed for all cards yet.
+- CO₂ rate is exposed in metrics; UI currently shows CO₂ score on the card.
 
-3. **CO2 Card**
-   - Reading: `650 ppm`
-   - Subtitle: "Good" / "Moderate" / "Poor"
-   - Icon: Co2Icon
-   - Rate: `+5 ppm/hr`
-
-4. **PM2.5 Card**
-   - Reading: `12 µg/m³`
-   - Subtitle: "Good" / "Moderate" / "Unhealthy"
-   - Icon: AirIcon
-   - Spike indicator
-
-5. **AQI Card** (featured, larger)
-   - Large AQI value: `42`
-   - Category: "Good" (colored background)
-   - Dominant pollutant: "PM2.5"
-   - Sub-indices: PM2.5 (28), PM10 (15)
-
-6. **Comfort Score Card** (featured, larger)
-   - Score: `85/100`
-   - Category: "Comfortable"
-   - Heat index: `23.8°C`
-   - Absolute humidity: `7.8 g/m³`
-
-**Update Frequency:** 1Hz via WebSocket (state + metrics atoms)
+**Update Frequency:** 1Hz (state, health) and 5s (metrics) via WebSocket
 
 #### 1.3 WebSocket Connection
-```typescript
-// hooks/useWebSocket.ts
-export function useRealtimeData() {
-  const setState = useSetAtom(stateAtom);
-  const setMetrics = useSetAtom(metricsAtom);
-  const setHealth = useSetAtom(healthAtom);
-  const setConnected = useSetAtom(wsConnectedAtom);
-
-  const { readyState, lastMessage } = useWebSocket(
-    getWebSocketUrl(), // ws:// or wss:// based on protocol
-    {
-      onOpen: () => setConnected(true),
-      onClose: () => setConnected(false),
-      onError: (event) => console.error('WebSocket error:', event),
-      shouldReconnect: () => true,
-      reconnectInterval: 3000,
-      reconnectAttempts: Infinity,
-    }
-  );
-
-  useEffect(() => {
-    if (lastMessage) {
-      try {
-        const msg: WSMessage = JSON.parse(lastMessage.data);
-        switch (msg.type) {
-          case 'state': setState(msg.data); break;
-          case 'metrics': setMetrics(msg.data); break;
-          case 'health': setHealth(msg.data); break;
-        }
-      } catch (error) {
-        console.error('WebSocket message parse error:', error);
-      }
-    }
-  }, [lastMessage]);
-
-  return { connected: readyState === WebSocket.OPEN };
-}
-```
-
-Heartbeat: Server handles WebSocket protocol PING/PONG and prunes stale clients. The frontend does not send application-level heartbeats.
+Implemented via `react-use-websocket` (`hooks/useWebSocket.ts`) with exponential backoff reconnect, connection status atoms, and JSON envelope routing to `stateAtom`/`metricsAtom`/`healthAtom`.
 
 ### Phase 2: Configuration (Priority: HIGH)
 
@@ -510,57 +436,17 @@ Heartbeat: Server handles WebSocket protocol PING/PONG and prunes stale clients.
 
 ### Phase 3: Charts & Visualization (Priority: MEDIUM)
 
-#### 3.1 Real-time Chart (uPlot)
-- **Chart Configuration:**
-  - 60-second rolling window
-  - Multi-series: temp, humidity, CO2
-  - Dual Y-axes (left: temp/humidity, right: CO2)
-  - Time on X-axis (relative: -60s to 0s)
-  - Zoom/pan support
-  - Legend with current values
+#### 3.1 Real-time Charts (uPlot)
+- Chart tiles with 60s/5m/1h ranges (range selector)
+- Separate tiles for Temp, RH, CO₂; multi‑series tile for PM1/PM2.5/PM10
+- Time axis displays “time‑ago” labels; right‑aligned to “now”
+- Soft max expansion to avoid jitter; fixed min/max supported
+- Efficient updates via ring buffers + version counter; binary search to window start
+- Current value chip shown per tile; PM tile uses uPlot legend (non‑interactive)
 
-- **Implementation:**
-  ```typescript
-  // components/Charts/RealtimeChart.tsx
-  import uPlot from 'uplot';
-  import UplotReact from 'uplot-react';
-
-  export function RealtimeChart() {
-    const state = useAtomValue(stateAtom);
-    const [data, setData] = useState<uPlot.AlignedData>([[], [], [], []]);
-
-    useEffect(() => {
-      if (!state) return;
-
-      const now = Date.now() / 1000;
-      setData(prev => {
-        const [time, temp, rh, co2] = prev;
-        const newTime = [...time, now];
-        const newTemp = [...temp, state.temp_c];
-        const newRh = [...rh, state.rh_pct];
-        const newCo2 = [...co2, state.co2_ppm];
-
-        // Keep only last 60 seconds
-        const cutoff = now - 60;
-        const startIdx = newTime.findIndex(t => t >= cutoff);
-
-        return [
-          newTime.slice(startIdx),
-          newTemp.slice(startIdx),
-          newRh.slice(startIdx),
-          newCo2.slice(startIdx),
-        ];
-      });
-    }, [state]);
-
-    return (
-      <UplotReact
-        options={chartOptions}
-        data={data}
-      />
-    );
-  }
-  ```
+Interaction
+- Zoom/pan: not enabled yet (follow‑up improvement)
+- Charts lazy‑loaded at route level (`/charts`) to keep initial bundle lean
 
 #### 3.2 Historical Charts (Future)
 - Time range selector (1h, 6h, 24h, 7d)
@@ -661,7 +547,7 @@ export default defineConfig({
             '@emotion/react',
             '@emotion/styled',
           ],
-          'vendor-charts': ['uplot', 'uplot-react'],
+          'vendor-charts': ['uplot'],
         },
       },
     },
@@ -671,11 +557,11 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://192.168.4.1', // ESP32 AP mode IP
+        target: `http://${ESP32_HOST}`, // ESP32 IP (env‑configurable)
         changeOrigin: true,
       },
       '/ws': {
-        target: 'ws://192.168.4.1',
+        target: `ws://${ESP32_HOST}`,
         ws: true,
         changeOrigin: true,
       },
@@ -762,8 +648,7 @@ export default defineConfig({
     "build": "tsc && vite build",
     "build:prod": "tsc && vite build --mode production",
     "preview": "vite preview",
-    "type-check": "tsc --noEmit",
-    "lint": "eslint src --ext ts,tsx"
+    "type-check": "tsc --noEmit"
   }
 }
 ```
@@ -793,15 +678,12 @@ npm run dev
 - Source maps for debugging
 
 **Environment Variables:**
-```bash
-# .env.local (optional, for custom ESP32 IP)
-VITE_ESP32_HOST=192.168.1.100
-```
+To target a different ESP32 host during development, set `VITE_ESP32_HOST` when starting the dev server. Examples:
 
-Update vite.config.ts to use:
-```typescript
-const ESP32_HOST = process.env.VITE_ESP32_HOST || '192.168.4.1';
-```
+- macOS/Linux: `VITE_ESP32_HOST=192.168.1.100 npm run dev`
+- Windows (PowerShell): `$env:VITE_ESP32_HOST='192.168.1.100'; npm run dev`
+
+The Vite config reads `process.env.VITE_ESP32_HOST` (default `192.168.4.1`).
 
 ### Production Build & Flash
 
@@ -999,47 +881,49 @@ du -sh assets/* # Per-file sizes
 
 ---
 
-### Week 4: Charts & Polish (8-10 hours)
+### Week 4: Charts & Polish (8-10 hours) ✅ COMPLETE
 
-**Day 1-2: Real-time Charts (4h)**
-- ✅ Install uPlot and uPlot-React
-- ✅ Create RealtimeChart component
-- ✅ Implement 60-second rolling window
-- ✅ Add multi-series (temp, humidity, CO2)
-- ✅ Configure dual Y-axes
-- ✅ Add zoom/pan support
-- ✅ Style chart (colors, grid, legend)
-- ✅ Lazy load chart component
+**Day 1-2: Streaming infra + tiles (6h)**
+- ✅ Implement ring buffers for streaming (1h @ 1Hz + cushion)
+- ✅ Add `ChartBufferStream` to mirror `stateAtom` into buffers
+- ✅ Build `ChartTile` (Temp, RH, CO₂) with time‑ago axis + soft Y max
+- ✅ Build `PMChartTile` (PM1/PM2.5/PM10) multi‑series tile
 
-**Day 3: Health Dashboard (2h)**
-- ✅ Build SystemHealth component
-- ✅ Display uptime, heap, RSSI, time sync
-- ✅ Build SensorStatus component
-- ✅ Create sensor status grid
-- ✅ Add color-coded state indicators
+**Day 3: Container + lazy loading (3h)**
+- ✅ Build `ChartContainer` with 60s/5m/1h range selector
+- ✅ Lazy‑load charts route
 
-**Day 4: System Controls (1h)**
-- ✅ Add device restart button
-- ✅ Add confirmation dialog
-- ✅ Implement restart action
-- ✅ Add countdown/loading state
+**Day 4: Health/UI polish (1h)**
+- ✅ ConnectionStatus shows reconnecting chip
+- ✅ ErrorBoundary + SnackbarProvider already wired
 
-**Day 5: Polish & Testing (3h)**
-- ✅ Add loading skeletons everywhere
-- ✅ Create ErrorBoundary component
-- ✅ Add empty states (no data)
-- ✅ Improve mobile responsiveness
-- ✅ Add ConnectionStatus component to AppBar
-- ✅ Test on real hardware
-- ✅ Optimize bundle size
-- ✅ Test build pipeline (npm run build → idf.py flash)
-- ✅ Final QA pass
-
-**Deliverable:** Production-ready SPA with all features
+**Deliverable:** Charts route with four tiles streaming in real‑time; app polished
 
 ---
 
 ### Total Timeline: 38-47 hours (~1 month part-time)
+
+---
+
+## Differences vs. Original Plan (Reality Check)
+
+Better than plan
+- Implemented ring buffers + binary search for chart windows (O(1) append, O(log n) windowing).
+- Route‑level lazy loading for Charts and Health to keep initial bundle lean.
+- Added IAQ featured card with derived color mapping (`getIAQColor`).
+- Robust connection UX: reconnecting chip, ErrorBoundary, Snackbar notifications.
+- Custom `tablet` breakpoint in theme for improved responsiveness.
+
+Different choices (intentional)
+- Manual uPlot integration (no `uplot-react`) for control and smaller deps.
+- Separate tiles for Temp, RH, CO₂; PM remains multi‑series; simpler to read.
+- Single `atoms.ts` houses primitive + derived atoms (no separate `derived.ts`/`actions.ts`).
+
+Worse than plan / backlog
+- Zoom/pan interactions not enabled on charts yet.
+- Trend arrows on cards scaffolded but not computed across all metrics.
+- WiFi scan table is not virtualized (heavy AP lists could stutter).
+- Dev proxy host reads `process.env.VITE_ESP32_HOST`; `.env.local` isn’t auto‑loaded — set the env var when running.
 
 ---
 
@@ -1049,13 +933,13 @@ du -sh assets/* # Per-file sizes
 
 **1. Code Splitting**
 ```typescript
-// Lazy load charts
-const RealtimeChart = lazy(() => import('./components/Charts/RealtimeChart'));
+// Lazy load charts container route
+const ChartContainer = lazy(() => import('./components/Charts/ChartContainer'));
 
 function ChartsView() {
   return (
     <Suspense fallback={<CircularProgress />}>
-      <RealtimeChart />
+      <ChartContainer />
     </Suspense>
   );
 }
@@ -1145,7 +1029,7 @@ function WiFiScanResults({ aps }: Props) {
 **3. Lazy Loading**
 ```typescript
 // Load charts only when user navigates to charts page
-const ChartsView = lazy(() => import('./components/Charts/ChartsView'));
+const ChartContainer = lazy(() => import('./components/Charts/ChartContainer'));
 ```
 
 ---
@@ -1155,7 +1039,7 @@ const ChartsView = lazy(() => import('./components/Charts/ChartsView'));
 ### Manual Testing Checklist
 
 **Dashboard:**
-- [ ] All 6 cards display correct live data
+- [ ] Primary sensor cards display correct live data
 - [ ] WebSocket reconnects after disconnect
 - [ ] Cards show loading state on initial load
 - [ ] Cards show "No data" when sensor is disabled
@@ -1187,12 +1071,12 @@ const ChartsView = lazy(() => import('./components/Charts/ChartsView'));
 - [ ] Warmup countdown displays for WARMING state
 
 **Charts:**
-- [ ] Real-time chart updates at 1Hz
-- [ ] 60-second window scrolls correctly
-- [ ] Multi-series (temp, humidity, CO2) visible
-- [ ] Legend shows current values
-- [ ] Zoom/pan works
-- [ ] Chart lazy loads (check Network tab)
+- [ ] Real-time charts update at 1Hz
+- [ ] Range selector switches (60s/5m/1h) correctly
+- [ ] PM tile shows PM1/PM2.5/PM10
+- [ ] Current value chips show latest readings
+- [ ] Charts lazy-load on /charts route
+- [ ] (Backlog) Add zoom/pan interactions
 
 **Health:**
 - [ ] System info displays (uptime, heap, RSSI)
@@ -1400,7 +1284,7 @@ export interface Metrics {
 }
 
 // ============================================================================
-// HEALTH (30s WebSocket updates + WiFi events)
+// HEALTH (1 Hz WebSocket updates while a client is connected + WiFi events)
 // ============================================================================
 
 export interface Health {
@@ -1647,6 +1531,15 @@ export const getComfortColor = (score: number | null | undefined): string => {
   if (score >= 60) return '#ffeb3b';  // Yellow - Acceptable
   if (score >= 40) return '#ff9800';  // Orange - Uncomfortable
   return '#f44336';                   // Red - Very Uncomfortable
+};
+
+// IAQ score color mapping
+export const getIAQColor = (score: number | null | undefined): string => {
+  if (score === null || score === undefined) return '#9e9e9e';
+  if (score >= 80) return '#4caf50';  // Green - Excellent
+  if (score >= 60) return '#ffeb3b';  // Yellow - Good
+  if (score >= 40) return '#ff9800';  // Orange - Fair
+  return '#f44336';                   // Red - Poor/Very Poor
 };
 
 // Sensor state color mapping
