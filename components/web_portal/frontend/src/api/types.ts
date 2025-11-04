@@ -98,13 +98,23 @@ export interface Health {
 
 export interface DeviceInfo {
   device_id: string;
-  version: {
-    major: number;
-    minor: number;
-    patch: number;
+  device: {
+    name: string;
+    model: string;
+    manufacturer: string;
   };
-  uptime: number;
-  free_heap: number;
+  firmware: {
+    version: string;
+    build_date: string;
+    build_time: string;
+    idf_version: string;
+    license: string;
+  };
+  hardware: {
+    chip: string;
+    cores: number;
+    revision: number;
+  };
   network: {
     mode: string;
     wifi_connected: boolean;

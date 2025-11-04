@@ -9,6 +9,7 @@
 #include "esp_system.h"
 #include "esp_event.h"
 #include "esp_heap_caps.h"
+#include "esp_chip_info.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 #include "freertos/task.h"
@@ -517,13 +518,45 @@ static esp_err_t api_info_get(httpd_req_t *req)
     iaq_data_t snap = {0}; IAQ_DATA_WITH_LOCK() { snap = *iaq_data_get(); }
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "device_id", CONFIG_IAQ_DEVICE_ID);
-    cJSON *ver = cJSON_CreateObject();
-    cJSON_AddNumberToObject(ver, "major", IAQ_VERSION_MAJOR);
-    cJSON_AddNumberToObject(ver, "minor", IAQ_VERSION_MINOR);
-    cJSON_AddNumberToObject(ver, "patch", IAQ_VERSION_PATCH);
-    cJSON_AddItemToObject(root, "version", ver);
-    cJSON_AddNumberToObject(root, "uptime", snap.system.uptime_seconds);
-    cJSON_AddNumberToObject(root, "free_heap", esp_get_free_heap_size());
+
+    /* Device metadata */
+    cJSON *device = cJSON_CreateObject();
+    cJSON_AddStringToObject(device, "name", "IAQ Monitor");
+    cJSON_AddStringToObject(device, "model", "ESP32-S3 DIY");
+    cJSON_AddStringToObject(device, "manufacturer", "Homemade");
+    cJSON_AddItemToObject(root, "device", device);
+
+    /* Firmware information */
+    cJSON *firmware = cJSON_CreateObject();
+    char ver_str[16];
+    snprintf(ver_str, sizeof(ver_str), "%d.%d.%d", IAQ_VERSION_MAJOR, IAQ_VERSION_MINOR, IAQ_VERSION_PATCH);
+    cJSON_AddStringToObject(firmware, "version", ver_str);
+    cJSON_AddStringToObject(firmware, "build_date", __DATE__);
+    cJSON_AddStringToObject(firmware, "build_time", __TIME__);
+    cJSON_AddStringToObject(firmware, "idf_version", esp_get_idf_version());
+    cJSON_AddStringToObject(firmware, "license", "Apache-2.0");
+    cJSON_AddItemToObject(root, "firmware", firmware);
+
+    /* Hardware information */
+    esp_chip_info_t chip_info;
+    esp_chip_info(&chip_info);
+    cJSON *hardware = cJSON_CreateObject();
+    const char *chip_model = "Unknown";
+    switch (chip_info.model) {
+        case CHIP_ESP32: chip_model = "ESP32"; break;
+        case CHIP_ESP32S2: chip_model = "ESP32-S2"; break;
+        case CHIP_ESP32S3: chip_model = "ESP32-S3"; break;
+        case CHIP_ESP32C3: chip_model = "ESP32-C3"; break;
+        case CHIP_ESP32C2: chip_model = "ESP32-C2"; break;
+        case CHIP_ESP32C6: chip_model = "ESP32-C6"; break;
+        case CHIP_ESP32H2: chip_model = "ESP32-H2"; break;
+        default: break;
+    }
+    cJSON_AddStringToObject(hardware, "chip", chip_model);
+    cJSON_AddNumberToObject(hardware, "cores", chip_info.cores);
+    cJSON_AddNumberToObject(hardware, "revision", chip_info.revision);
+    cJSON_AddItemToObject(root, "hardware", hardware);
+
     /* Network summary */
     cJSON *net = cJSON_CreateObject();
     wifi_mode_t mode = wifi_manager_get_mode();

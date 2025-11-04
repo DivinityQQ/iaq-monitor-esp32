@@ -5,10 +5,31 @@ import { useAtomValue } from 'jotai';
 import WifiIcon from '@mui/icons-material/Wifi';
 import CloudIcon from '@mui/icons-material/Cloud';
 import CableIcon from '@mui/icons-material/Cable';
-import { connectionStatusAtom, wsReconnectingAtom } from '../../store/atoms';
+import { wsConnectedAtom, wsReconnectingAtom, wifiConnectedAtom, mqttConnectedAtom } from '../../store/atoms';
+import { memo } from 'react';
+
+const WSStatusChip = memo(function WSStatusChip() {
+  const wsConnected = useAtomValue(wsConnectedAtom);
+  return (
+    <Chip icon={<CableIcon />} label="WS" size="small" color={wsConnected ? 'success' : 'error'} variant={wsConnected ? 'filled' : 'outlined'} sx={{ display: { xs: 'none', tablet: 'flex' } }} />
+  );
+});
+
+const WiFiStatusChip = memo(function WiFiStatusChip() {
+  const wifiConnected = useAtomValue(wifiConnectedAtom);
+  return (
+    <Chip icon={<WifiIcon />} label="WiFi" size="small" color={wifiConnected ? 'success' : 'error'} variant={wifiConnected ? 'filled' : 'outlined'} sx={{ display: { xs: 'none', tablet: 'flex' } }} />
+  );
+});
+
+const MQTTStatusChip = memo(function MQTTStatusChip() {
+  const mqttConnected = useAtomValue(mqttConnectedAtom);
+  return (
+    <Chip icon={<CloudIcon />} label="MQTT" size="small" color={mqttConnected ? 'success' : 'error'} variant={mqttConnected ? 'filled' : 'outlined'} sx={{ display: { xs: 'none', tablet: 'flex' } }} />
+  );
+});
 
 export function ConnectionStatus() {
-  const connectionStatus = useAtomValue(connectionStatusAtom);
   const isReconnecting = useAtomValue(wsReconnectingAtom);
 
   return (
@@ -26,34 +47,13 @@ export function ConnectionStatus() {
       )}
 
       {/* WebSocket status */}
-      <Chip
-        icon={<CableIcon />}
-        label="WS"
-        size="small"
-        color={connectionStatus.websocket ? 'success' : 'error'}
-        variant={connectionStatus.websocket ? 'filled' : 'outlined'}
-        sx={{ display: { xs: 'none', tablet: 'flex' } }}
-      />
+      <WSStatusChip />
 
       {/* WiFi status */}
-      <Chip
-        icon={<WifiIcon />}
-        label="WiFi"
-        size="small"
-        color={connectionStatus.wifi ? 'success' : 'error'}
-        variant={connectionStatus.wifi ? 'filled' : 'outlined'}
-        sx={{ display: { xs: 'none', tablet: 'flex' } }}
-      />
+      <WiFiStatusChip />
 
       {/* MQTT status */}
-      <Chip
-        icon={<CloudIcon />}
-        label="MQTT"
-        size="small"
-        color={connectionStatus.mqtt ? 'success' : 'error'}
-        variant={connectionStatus.mqtt ? 'filled' : 'outlined'}
-        sx={{ display: { xs: 'none', tablet: 'flex' } }}
-      />
+      <MQTTStatusChip />
     </Box>
   );
 }

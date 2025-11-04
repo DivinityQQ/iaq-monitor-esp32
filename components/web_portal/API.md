@@ -17,7 +17,8 @@
 **Info**
 - GET `/api/v1/info`
   - Returns device info and network summary.
-  - Response: `{ device_id, version:{major,minor,patch}, uptime, free_heap, network:{ mode, wifi_connected, mqtt_connected, sta_ip?, ap_ip? } }`
+  - Response: `{ device_id, device:{ name, model, manufacturer }, firmware:{ version, build_date, build_time, idf_version, license }, hardware:{ chip, cores, revision }, network:{ mode, wifi_connected, mqtt_connected, sta_ip?, ap_ip? } }`
+  - Note: Dynamic runtime metrics (uptime, free_heap) are available in `/api/v1/health` and via WebSocket.
 
 **State**
 - GET `/api/v1/state`

@@ -1,7 +1,9 @@
 import { atom } from 'jotai';
+import { selectAtom } from 'jotai/utils';
 import type { State, Metrics, Health, DeviceInfo, SensorId, SensorCadence, MQTTStatus } from '../api/types';
 import { getAQIColor, getComfortColor, getIAQColor } from '../theme';
 import { getBuffersVersion } from '../utils/streamBuffers';
+import { apiClient } from '../api/client';
 
 // ============================================================================
 // PRIMITIVE ATOMS - Raw Data Storage
@@ -33,6 +35,11 @@ export const deviceInfoAtom = atom<DeviceInfo | null>(null);
  * MQTT status (fetched once via REST API on mount)
  */
 export const mqttStatusAtom = atom<MQTTStatus | null>(null);
+
+/**
+ * Global app error message (for connectivity and bootstrap errors)
+ */
+export const appErrorAtom = atom<string | null>(null);
 
 /**
  * Sensor cadences (fetched once on Sensors tab)
@@ -91,42 +98,72 @@ export const sensorStatusMapAtom = atom((get) => {
   return health?.sensors ?? null;
 });
 
-/**
- * Connection status atom - combines all connection indicators
- * Derives WebSocket, WiFi, and MQTT connection states
- */
-export const connectionStatusAtom = atom((get) => {
-  const wsConnected = get(wsConnectedAtom);
-  const deviceInfo = get(deviceInfoAtom);
-  const health = get(healthAtom);
-
-  return {
-    websocket: wsConnected,
-    wifi: deviceInfo?.network?.wifi_connected ?? false,
-    mqtt: deviceInfo?.network?.mqtt_connected ?? false,
-    rssi: health?.wifi_rssi ?? null,
-  };
-});
+// (Deprecated) Prior aggregate connection status has been replaced by fine‑grained atoms
 
 /**
  * Data loading state atom - determines if initial data has loaded
  * Returns true if we have at least state, metrics, or health data
+ * Optimized with selectAtom to prevent re-renders after value becomes true
  */
-export const dataLoadedAtom = atom((get) => {
+const _dataLoadedAtom = atom((get) => {
   const state = get(stateAtom);
   const metrics = get(metricsAtom);
   const health = get(healthAtom);
   return state !== null || metrics !== null || health !== null;
 });
 
+export const dataLoadedAtom = selectAtom(
+  _dataLoadedAtom,
+  (v) => v,
+  (a, b) => a === b  // Strict equality for boolean
+);
+
 /**
  * App ready state atom - determines if app is ready to display UI
  * Returns true if device info is loaded (indicates REST API is working)
+ * Optimized with selectAtom to prevent re-renders after value becomes true
  */
-export const appReadyAtom = atom((get) => {
+const _appReadyAtom = atom((get) => {
   const deviceInfo = get(deviceInfoAtom);
   const dataLoaded = get(dataLoadedAtom);
   return deviceInfo !== null || dataLoaded; // Render when either REST or WS data is available
+});
+
+export const appReadyAtom = selectAtom(
+  _appReadyAtom,
+  (v) => v,
+  (a, b) => a === b  // Strict equality for boolean
+);
+
+/**
+ * Individual connection atoms for finer-grained subscriptions
+ */
+export const wifiConnectedAtom = selectAtom(
+  deviceInfoAtom,
+  (info) => info?.network?.wifi_connected ?? false,
+  (a, b) => a === b
+);
+
+export const mqttConnectedAtom = selectAtom(
+  atom((get) => {
+    const mqtt = get(mqttStatusAtom);
+    if (mqtt) return mqtt.connected;
+    const info = get(deviceInfoAtom);
+    return info?.network?.mqtt_connected ?? false;
+  }),
+  (v) => v,
+  (a, b) => a === b
+);
+
+// Refresh actions
+export const refreshDeviceInfoAtom = atom(null, async (_get, set) => {
+  const info = await apiClient.getInfo();
+  set(deviceInfoAtom, info);
+});
+
+export const refreshMQTTStatusAtom = atom(null, async (_get, set) => {
+  const status = await apiClient.getMQTTStatus();
+  set(mqttStatusAtom, status);
 });
 
 // ============================================================================
@@ -148,10 +185,10 @@ export const sensorStatusAtom = (sensorId: SensorId) =>
  * Categorizes WiFi signal strength: Excellent (>=-50), Good (>=-60), Fair (>=-70), Poor (<-70)
  */
 export const wifiSignalCategoryAtom = atom((get) => {
-  const status = get(connectionStatusAtom);
-  if (status.rssi == null) return 'Unknown';
-  if (status.rssi >= -50) return 'Excellent';
-  if (status.rssi >= -60) return 'Good';
-  if (status.rssi >= -70) return 'Fair';
+  const rssi = get(healthAtom)?.wifi_rssi ?? null;
+  if (rssi == null) return 'Unknown';
+  if (rssi >= -50) return 'Excellent';
+  if (rssi >= -60) return 'Good';
+  if (rssi >= -70) return 'Fair';
   return 'Poor';
 });
