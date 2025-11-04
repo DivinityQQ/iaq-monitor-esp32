@@ -25,7 +25,7 @@ export function AppBar({ onMenuClick }: AppBarProps) {
           aria-label="open drawer"
           edge="start"
           onClick={onMenuClick}
-          sx={{ mr: 2, display: { sm: 'none' } }}
+          sx={{ mr: 2, display: { md: 'none' } }}
         >
           <MenuIcon />
         </IconButton>

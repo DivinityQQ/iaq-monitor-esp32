@@ -424,7 +424,7 @@ export function SensorControl() {
       <Box>
         <Grid container spacing={3}>
           {Array.from({ length: 6 }).map((_, i) => (
-            <Grid key={i} size={{ xs: 12, md: 6, lg: 4 }}>
+            <Grid key={i} size={{ xs: 12, tablet: 6, md: 6, lg: 4 }}>
               <Card sx={{ height: '100%' }}>
                 <CardContent>
                   {/* Header skeleton */}
@@ -487,7 +487,7 @@ export function SensorControl() {
 
       <Grid container spacing={3}>
         {ALL_SENSOR_IDS.map((sensorId) => (
-          <Grid key={sensorId} size={{ xs: 12, md: 6, lg: 4 }}>
+          <Grid key={sensorId} size={{ xs: 12, tablet: 6, md: 6, lg: 4 }}>
             <SensorCardControl sensorId={sensorId} />
           </Grid>
         ))}

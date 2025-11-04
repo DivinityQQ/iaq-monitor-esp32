@@ -1,6 +1,18 @@
 import { createTheme } from '@mui/material/styles';
 import type { SensorState } from './api/types';
 
+// Extend MUI theme to include custom 'tablet' breakpoint
+declare module '@mui/material/styles' {
+  interface BreakpointOverrides {
+    xs: true;
+    sm: true;
+    tablet: true; // adds the `tablet` breakpoint
+    md: true;
+    lg: true;
+    xl: true;
+  }
+}
+
 export const theme = createTheme({
   palette: {
     mode: 'light',
@@ -37,6 +49,17 @@ export const theme = createTheme({
     background: {
       default: '#f5f5f5',
       paper: '#ffffff',
+    },
+  },
+
+  breakpoints: {
+    values: {
+      xs: 0,       // Mobile portrait
+      sm: 600,     // Mobile landscape
+      tablet: 768, // Tablet portrait (iPad, Android tablets)
+      md: 1024,    // Tablet landscape / Small laptop
+      lg: 1280,    // Desktop
+      xl: 1920,    // Large screens
     },
   },
 

@@ -63,7 +63,7 @@ export function NavDrawer({ open, onClose }: NavDrawerProps) {
           keepMounted: true, // Better mobile performance
         }}
         sx={{
-          display: { xs: 'block', sm: 'none' },
+          display: { xs: 'block', md: 'none' },
           '& .MuiDrawer-paper': {
             boxSizing: 'border-box',
             width: drawerWidth,
@@ -77,7 +77,7 @@ export function NavDrawer({ open, onClose }: NavDrawerProps) {
       <Drawer
         variant="permanent"
         sx={{
-          display: { xs: 'none', sm: 'block' },
+          display: { xs: 'none', md: 'block' },
           '& .MuiDrawer-paper': {
             boxSizing: 'border-box',
             width: drawerWidth,

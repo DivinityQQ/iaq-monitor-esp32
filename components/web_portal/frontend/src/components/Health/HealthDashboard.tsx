@@ -74,16 +74,16 @@ export function HealthDashboard() {
 
       {/* Top row: System Health and MQTT Status */}
       <Grid container spacing={3}>
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, tablet: 12, md: 6 }}>
           <SystemHealth />
         </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, tablet: 12, md: 6 }}>
           <MQTTHealth />
         </Grid>
 
         {/* Sensor Status Grid */}
         {ALL_SENSOR_IDS.map((sensorId) => (
-          <Grid size={{ xs: 6, sm: 6, md: 4, lg: 3 }} key={sensorId}>
+          <Grid size={{ xs: 6, tablet: 4, md: 3 }} key={sensorId}>
             {sensorStatusMap?.[sensorId] ? (
               <SensorStatus sensorId={sensorId} status={sensorStatusMap[sensorId]} />
             ) : (

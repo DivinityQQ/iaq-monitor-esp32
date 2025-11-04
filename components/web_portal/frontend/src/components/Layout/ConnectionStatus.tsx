@@ -32,7 +32,7 @@ export function ConnectionStatus() {
         size="small"
         color={connectionStatus.websocket ? 'success' : 'error'}
         variant={connectionStatus.websocket ? 'filled' : 'outlined'}
-        sx={{ display: { xs: 'none', md: 'flex' } }}
+        sx={{ display: { xs: 'none', tablet: 'flex' } }}
       />
 
       {/* WiFi status */}
@@ -42,7 +42,7 @@ export function ConnectionStatus() {
         size="small"
         color={connectionStatus.wifi ? 'success' : 'error'}
         variant={connectionStatus.wifi ? 'filled' : 'outlined'}
-        sx={{ display: { xs: 'none', md: 'flex' } }}
+        sx={{ display: { xs: 'none', tablet: 'flex' } }}
       />
 
       {/* MQTT status */}
@@ -52,7 +52,7 @@ export function ConnectionStatus() {
         size="small"
         color={connectionStatus.mqtt ? 'success' : 'error'}
         variant={connectionStatus.mqtt ? 'filled' : 'outlined'}
-        sx={{ display: { xs: 'none', md: 'flex' } }}
+        sx={{ display: { xs: 'none', tablet: 'flex' } }}
       />
     </Box>
   );

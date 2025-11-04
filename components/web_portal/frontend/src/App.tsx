@@ -121,8 +121,8 @@ function AppContent() {
           sx={{
             flexGrow: 1,
             mt: 8,
-            ml: { sm: '240px' },
-            width: { xs: '100%', sm: `calc(100% - 240px)` },
+            ml: { md: '240px' },
+            width: { xs: '100%', md: `calc(100% - 240px)` },
           }}
         >
           {error ? (
@@ -147,8 +147,8 @@ function AppContent() {
         sx={{
           flexGrow: 1,
           mt: 8, // Account for AppBar height
-          ml: { sm: '240px' }, // Account for permanent drawer on desktop
-          width: { xs: '100%', sm: `calc(100% - 240px)` },
+          ml: { md: '240px' }, // Account for permanent drawer on desktop
+          width: { xs: '100%', md: `calc(100% - 240px)` },
         }}
       >
         {error && (

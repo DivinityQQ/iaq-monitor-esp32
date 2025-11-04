@@ -61,16 +61,19 @@ export function MetricsGridSkeleton() {
     <Grid container spacing={3}>
       {/* 8 sensor cards */}
       {Array.from({ length: 8 }).map((_, index) => (
-        <Grid key={index} size={{ xs: 12, sm: 6, md: 4, lg: 3 }}>
+        <Grid key={index} size={{ xs: 6, tablet: 4, md: 3 }}>
           <CardSkeleton />
         </Grid>
       ))}
 
-      {/* 2 featured cards */}
-      <Grid size={{ xs: 12, md: 6 }}>
+      {/* 3 featured cards */}
+      <Grid size={{ xs: 12, tablet: 6, md: 4 }}>
         <FeaturedCardSkeleton />
       </Grid>
-      <Grid size={{ xs: 12, md: 6 }}>
+      <Grid size={{ xs: 12, tablet: 6, md: 4 }}>
+        <FeaturedCardSkeleton />
+      </Grid>
+      <Grid size={{ xs: 12, tablet: 6, md: 4 }}>
         <FeaturedCardSkeleton />
       </Grid>
     </Grid>

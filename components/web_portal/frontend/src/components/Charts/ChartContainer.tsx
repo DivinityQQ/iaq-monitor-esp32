@@ -43,7 +43,7 @@ export function ChartContainer() {
       </Box>
 
       <Grid container spacing={2}>
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, tablet: 12, md: 6 }}>
           <ChartTile
             title="Temperature"
             color={colors.temp}
@@ -55,7 +55,7 @@ export function ChartContainer() {
             decimals={1}
           />
         </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, tablet: 12, md: 6 }}>
           <ChartTile
             title="Humidity"
             color={colors.rh}
@@ -67,7 +67,7 @@ export function ChartContainer() {
             decimals={1}
           />
         </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, tablet: 12, md: 6 }}>
           <ChartTile
             title="CO2"
             color={colors.co2}
@@ -79,7 +79,7 @@ export function ChartContainer() {
             decimals={0}
           />
         </Grid>
-        <Grid size={{ xs: 12, md: 6 }}>
+        <Grid size={{ xs: 12, tablet: 12, md: 6 }}>
           <PMChartTile range={range} yMin={0} softYMax={50} />
         </Grid>
       </Grid>

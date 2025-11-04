@@ -94,7 +94,7 @@ export function SensorCard({
             component="div"
             sx={{
               fontWeight: 600,
-              fontSize: { xs: '2rem', sm: '2.25rem', md: '2.5rem' },
+              fontSize: { xs: '2rem', sm: '2.25rem', tablet: '2.25rem', md: '2.5rem' },
               fontVariantNumeric: 'tabular-nums',
             }}
           >
@@ -103,7 +103,7 @@ export function SensorCard({
           <Typography
             variant="h5"
             color="text.secondary"
-            sx={{ fontSize: { xs: '1rem', sm: '1.125rem' } }}
+            sx={{ fontSize: { xs: '1rem', sm: '1.125rem', tablet: '1.125rem' } }}
           >
             {unit}
           </Typography>

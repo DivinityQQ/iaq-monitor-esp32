@@ -29,7 +29,7 @@ export function MetricsGrid() {
   return (
     <Grid container spacing={3}>
       {/* Row 1: Temperature, Humidity, CO2, Pressure */}
-      <Grid size={{ xs: 6, sm: 6, md: 4, lg: 3 }}>
+      <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.temp_c ?? null}
           unit="°C"
@@ -39,7 +39,7 @@ export function MetricsGrid() {
         />
       </Grid>
 
-      <Grid size={{ xs: 6, sm: 6, md: 4, lg: 3 }}>
+      <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.rh_pct ?? null}
           unit="%"
@@ -49,7 +49,7 @@ export function MetricsGrid() {
         />
       </Grid>
 
-      <Grid size={{ xs: 6, sm: 6, md: 4, lg: 3 }}>
+      <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.co2_ppm ?? null}
           unit="ppm"
@@ -61,7 +61,7 @@ export function MetricsGrid() {
         />
       </Grid>
 
-      <Grid size={{ xs: 6, sm: 6, md: 4, lg: 3 }}>
+      <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.pressure_hpa ?? null}
           unit="hPa"
@@ -73,7 +73,7 @@ export function MetricsGrid() {
       </Grid>
 
       {/* Row 2: PM2.5, PM10, PM1.0, VOC Index */}
-      <Grid size={{ xs: 6, sm: 6, md: 4, lg: 3 }}>
+      <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.pm25_ugm3 ?? null}
           unit="µg/m³"
@@ -84,7 +84,7 @@ export function MetricsGrid() {
         />
       </Grid>
 
-      <Grid size={{ xs: 6, sm: 6, md: 4, lg: 3 }}>
+      <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.pm10_ugm3 ?? null}
           unit="µg/m³"
@@ -94,7 +94,7 @@ export function MetricsGrid() {
         />
       </Grid>
 
-      <Grid size={{ xs: 6, sm: 6, md: 4, lg: 3 }}>
+      <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.pm1_ugm3 ?? null}
           unit="µg/m³"
@@ -104,7 +104,7 @@ export function MetricsGrid() {
         />
       </Grid>
 
-      <Grid size={{ xs: 6, sm: 6, md: 4, lg: 3 }}>
+      <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.voc_index ?? null}
           unit="index"
@@ -118,13 +118,13 @@ export function MetricsGrid() {
 
       {/* Featured row as a full-width nested container item */}
       <Grid container size={{ xs: 12 }} spacing={3} alignItems="start">
-        <Grid size={{ xs: 12, md: 4 }}>
+        <Grid size={{ xs: 12, tablet: 6, md: 4 }}>
           <AQICard />
         </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
+        <Grid size={{ xs: 12, tablet: 6, md: 4 }}>
           <ComfortCard />
         </Grid>
-        <Grid size={{ xs: 12, md: 4 }}>
+        <Grid size={{ xs: 12, tablet: 6, md: 4 }}>
           <IAQCard />
         </Grid>
       </Grid>
