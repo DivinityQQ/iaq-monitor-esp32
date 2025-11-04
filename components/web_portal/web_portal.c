@@ -81,16 +81,18 @@ static void ws_clients_init(void)
     }
 }
 
-static void ws_clients_add(int sock)
+static bool ws_clients_add(int sock)
 {
-    if (!s_ws_mutex) return;
+    if (!s_ws_mutex) return false;
     xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     bool need_start = false;
+    bool added = false;
     for (int i = 0; i < MAX_WS_CLIENTS; ++i) {
         if (!s_ws_clients[i].active) {
             s_ws_clients[i].sock = sock;
             s_ws_clients[i].active = true;
             s_ws_clients[i].last_pong_us = esp_timer_get_time();
+            added = true;
             break;
         }
     }
@@ -109,6 +111,7 @@ static void ws_clients_add(int sock)
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_start_periodic(s_ws_metrics_timer, 5 * 1000 * 1000));
         ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_start_periodic(s_ws_health_timer, 1 * 1000 * 1000));
     }
+    return added;
 }
 
 static void ws_clients_remove(int sock)
@@ -120,6 +123,10 @@ static void ws_clients_remove(int sock)
             s_ws_clients[i].active = false;
             s_ws_clients[i].sock = -1;
             s_ws_clients[i].last_pong_us = 0;
+            /* Ask httpd to close the session (safe from any task) */
+            if (s_server && sock >= 0) {
+                httpd_sess_trigger_close(s_server, sock);
+            }
             break;
         }
     }
@@ -158,9 +165,14 @@ static void ws_broadcast_json(const char *type, cJSON *payload)
         int sock = s_ws_clients[i].sock;
         if (httpd_ws_get_fd_info(s_server, sock) != HTTPD_WS_CLIENT_WEBSOCKET) {
             ESP_LOGD(TAG, "WS fd %d not in WEBSOCKET state during broadcast; removing", sock);
+            int old = s_ws_clients[i].sock;
             s_ws_clients[i].active = false;
             s_ws_clients[i].sock = -1;
             s_ws_clients[i].last_pong_us = 0;
+            /* Proactively close the underlying HTTPD session to free socket */
+            if (s_server && old >= 0) {
+                httpd_sess_trigger_close(s_server, old);
+            }
             continue;
         }
         httpd_ws_frame_t frame = { 0 };
@@ -221,6 +233,10 @@ static void ws_ping_and_prune(void)
             s_ws_clients[i].active = false;
             s_ws_clients[i].sock = -1;
             s_ws_clients[i].last_pong_us = 0;
+            /* Also close the HTTPD session to reclaim socket */
+            if (s_server && sock >= 0) {
+                httpd_sess_trigger_close(s_server, sock);
+            }
             continue;
         }
         int64_t last = s_ws_clients[i].last_pong_us;
@@ -229,6 +245,10 @@ static void ws_ping_and_prune(void)
             s_ws_clients[i].active = false;
             s_ws_clients[i].sock = -1;
             s_ws_clients[i].last_pong_us = 0;
+            /* Close the underlying session so resources are freed promptly */
+            if (s_server && sock >= 0) {
+                httpd_sess_trigger_close(s_server, sock);
+            }
             continue;
         }
         httpd_ws_frame_t ping = { 0 };
@@ -811,12 +831,22 @@ static esp_err_t ws_handler(httpd_req_t *req)
     if (req->method == HTTP_GET) {
         /* Handshake -> add client */
         int sock = httpd_req_to_sockfd(req);
-        ws_clients_add(sock);
+        bool added = ws_clients_add(sock);
+        if (!added) {
+            ESP_LOGW(TAG, "WS client rejected (capacity reached): %d", sock);
+            /* Politely close: send CLOSE then drop session */
+            httpd_ws_frame_t closefrm = { 0 };
+            closefrm.type = HTTPD_WS_TYPE_CLOSE;
+            (void)httpd_ws_send_frame(req, &closefrm);
+            if (s_server) httpd_sess_trigger_close(s_server, sock);
+            return ESP_OK;
+        }
         ESP_LOGI(TAG, "WS client connected: %d", sock);
         /* Push an immediate snapshot targeted to this client so the UI can
          * render without waiting for the periodic timers. */
         iaq_data_t snap = (iaq_data_t){0};
         IAQ_DATA_WITH_LOCK(){ snap = *iaq_data_get(); }
+        /* Use async sends to avoid blocking the httpd thread */
         ws_send_json_to_fd(sock, "state", iaq_json_build_state(&snap));
         ws_send_json_to_fd(sock, "metrics", iaq_json_build_metrics(&snap));
         ws_send_json_to_fd(sock, "health", iaq_json_build_health(&snap));
@@ -1003,6 +1033,10 @@ esp_err_t web_portal_start(void)
         /* Default LRU purge behavior */
         scfg.httpd.lru_purge_enable = true;
         scfg.httpd.max_uri_handlers = 20;
+        /* Moderate simultaneous handshake pressure */
+        scfg.httpd.backlog_conn = 3;
+        /* Cap HTTPD sockets so other services (MQTT/SNTP/DNS) keep room */
+        scfg.httpd.max_open_sockets = MAX_WS_CLIENTS + 4; /* WS clients + few HTTP fetches */
         scfg.httpd.stack_size = TASK_STACK_WEB_SERVER;
         scfg.httpd.core_id = TASK_CORE_WEB_SERVER;
         if (scfg.httpd.stack_size < 6144) scfg.httpd.stack_size = 6144;
@@ -1081,6 +1115,10 @@ esp_err_t web_portal_start(void)
         /* Default LRU purge behavior */
         cfg.lru_purge_enable = true;
         cfg.max_uri_handlers = 20;
+        /* Moderate simultaneous pending connects to limit spikes */
+        cfg.backlog_conn = 3;
+        /* Cap HTTPD sockets so other services (MQTT/SNTP/DNS) keep room */
+        cfg.max_open_sockets = MAX_WS_CLIENTS + 4; /* WS clients + few HTTP fetches */
         cfg.stack_size = TASK_STACK_WEB_SERVER;
         cfg.core_id = TASK_CORE_WEB_SERVER;
         if (cfg.stack_size < 6144) cfg.stack_size = 6144;

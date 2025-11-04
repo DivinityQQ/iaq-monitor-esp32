@@ -22,7 +22,10 @@ CONFIG_ESP_WIFI_TASK_PINNED_TO_CORE_1=y
 
 # LWIP
 CONFIG_LWIP_LOCAL_HOSTNAME="iaq-monitor"
-CONFIG_LWIP_MAX_SOCKETS=10
+# Increase available sockets to avoid EMFILE/ENFILE when HTTPS+WS+MQTT+DNS are active.
+# Typical usage: httpd listen + ctrl (2), 2–4 WS clients, MQTT, SNTP, DNS.
+# 16 provides headroom without excessive RAM cost.
+CONFIG_LWIP_MAX_SOCKETS=16
 CONFIG_LWIP_TCPIP_TASK_AFFINITY_CPU1=y
 
 # HTTP Server (portal)
