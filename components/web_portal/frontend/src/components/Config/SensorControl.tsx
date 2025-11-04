@@ -1,19 +1,17 @@
 import { useState, useEffect } from 'react';
 import type { ReactElement } from 'react';
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  Button,
-  Chip,
-  Badge,
-  Slider,
-  CircularProgress,
-  Skeleton,
-  Alert,
-} from '@mui/material';
+import Alert from '@mui/material/Alert';
+import Badge from '@mui/material/Badge';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
 import Grid from '@mui/material/Grid';
+import Skeleton from '@mui/material/Skeleton';
+import Slider from '@mui/material/Slider';
+import Typography from '@mui/material/Typography';
 import {
   Thermostat as ThermostatIcon,
   Cloud as CloudIcon,
@@ -33,6 +31,7 @@ import type { SensorId } from '../../api/types';
 import { ALL_SENSOR_IDS } from '../../api/types';
 import { getSensorStateColor } from '../../theme';
 import { formatRelativeTime, formatDuration, formatSeconds } from '../../utils/validation';
+import { logger } from '../../utils/logger';
 
 // Sensor metadata mapping
 const SENSOR_INFO: Record<SensorId, { name: string; icon: ReactElement; description: string }> = {
@@ -138,7 +137,7 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
         severity: 'success',
       });
     } catch (error) {
-      console.error(`Failed to update cadence for ${sensorId}:`, error);
+      logger.error(`Failed to update cadence for ${sensorId}:`, error);
       showNotification({
         message: error instanceof Error ? error.message : 'Failed to update cadence',
         severity: 'error',
@@ -161,7 +160,7 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
         severity: 'success',
       });
     } catch (error) {
-      console.error(`Failed to read sensor ${sensorId}:`, error);
+      logger.error(`Failed to read sensor ${sensorId}:`, error);
       showNotification({
         message: error instanceof Error ? error.message : 'Failed to read sensor',
         severity: 'error',
@@ -180,7 +179,7 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
         severity: 'success',
       });
     } catch (error) {
-      console.error(`Failed to reset sensor ${sensorId}:`, error);
+      logger.error(`Failed to reset sensor ${sensorId}:`, error);
       showNotification({
         message: error instanceof Error ? error.message : 'Failed to reset sensor',
         severity: 'error',
@@ -209,7 +208,7 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
         });
       }
     } catch (error) {
-      console.error(`Failed to toggle sensor ${sensorId}:`, error);
+      logger.error(`Failed to toggle sensor ${sensorId}:`, error);
       showNotification({
         message: error instanceof Error ? error.message : 'Failed to toggle sensor',
         severity: 'error',
@@ -410,7 +409,7 @@ export function SensorControl() {
         const response = await apiClient.getSensorCadences();
         if (!cancelled) setCadences(response.cadences);
       } catch (err) {
-        console.error('Failed to load sensor cadences:', err);
+        logger.error('Failed to load sensor cadences:', err);
         if (!cancelled) setLoadError(err instanceof Error ? err.message : 'Failed to load cadences');
       }
     };

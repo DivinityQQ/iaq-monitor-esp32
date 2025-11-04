@@ -1,4 +1,11 @@
-import { Card, CardContent, Typography, Box, Chip, Grid, Skeleton, Collapse } from '@mui/material';
+import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Chip from '@mui/material/Chip';
+import Collapse from '@mui/material/Collapse';
+import Grid from '@mui/material/Grid';
+import Skeleton from '@mui/material/Skeleton';
+import Typography from '@mui/material/Typography';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';

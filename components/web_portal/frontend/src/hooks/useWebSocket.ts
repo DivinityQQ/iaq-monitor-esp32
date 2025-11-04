@@ -9,6 +9,7 @@ import {
   metricsAtom,
   healthAtom,
 } from '../store/atoms';
+import { logger } from '../utils/logger';
 
 /**
  * Get WebSocket URL based on current protocol and environment
@@ -56,23 +57,23 @@ export function useWebSocketConnection() {
 
       // Connection lifecycle callbacks
       onOpen: () => {
-        console.log('[WebSocket] Connected to ESP32');
+        logger.log('[WebSocket] Connected to ESP32');
         setWsConnected(true);
         setWsReconnecting(false);
       },
 
       onClose: () => {
-        console.log('[WebSocket] Disconnected from ESP32');
+        logger.log('[WebSocket] Disconnected from ESP32');
         setWsConnected(false);
       },
 
       onError: (event) => {
-        console.error('[WebSocket] Connection error:', event);
+        logger.error('[WebSocket] Connection error:', event);
         setWsReconnecting(true);
       },
 
       onReconnectStop: (numAttempts) => {
-        console.error(`[WebSocket] Failed to reconnect after ${numAttempts} attempts`);
+        logger.error(`[WebSocket] Failed to reconnect after ${numAttempts} attempts`);
         setWsReconnecting(false);
       },
 
@@ -82,7 +83,7 @@ export function useWebSocketConnection() {
           const message = JSON.parse(event.data) as WSMessage;
           handleMessage(message);
         } catch (error) {
-          console.error('[WebSocket] Failed to parse message:', error, event.data);
+          logger.error('[WebSocket] Failed to parse message:', error, event.data);
         }
       },
 
@@ -109,7 +110,7 @@ export function useWebSocketConnection() {
         setHealth(message.data);
         break;
       default:
-        console.warn('[WebSocket] Unknown message type:', message);
+        logger.warn('[WebSocket] Unknown message type:', message);
     }
   };
 

@@ -1,5 +1,9 @@
 import { useState } from 'react';
-import { Box, Container, Typography, Tabs, Tab } from '@mui/material';
+import Box from '@mui/material/Box';
+import Container from '@mui/material/Container';
+import Tab from '@mui/material/Tab';
+import Tabs from '@mui/material/Tabs';
+import Typography from '@mui/material/Typography';
 import {
   Wifi as WifiIcon,
   CloudQueue as MQTTIcon,

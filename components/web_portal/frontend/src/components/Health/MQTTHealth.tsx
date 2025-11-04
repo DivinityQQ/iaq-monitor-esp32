@@ -1,15 +1,13 @@
 import { useState } from 'react';
 import { useAtomValue, useSetAtom } from 'jotai';
-import {
-  Card,
-  CardContent,
-  Typography,
-  Box,
-  Chip,
-  Skeleton,
-  IconButton,
-  Tooltip,
-} from '@mui/material';
+import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Chip from '@mui/material/Chip';
+import IconButton from '@mui/material/IconButton';
+import Skeleton from '@mui/material/Skeleton';
+import Tooltip from '@mui/material/Tooltip';
+import Typography from '@mui/material/Typography';
 import {
   Cloud as CloudIcon,
   CloudOff as CloudOffIcon,
@@ -18,6 +16,7 @@ import {
 import { mqttStatusAtom } from '../../store/atoms';
 import { apiClient } from '../../api/client';
 import { useNotification } from '../../contexts/SnackbarContext';
+import { logger } from '../../utils/logger';
 
 /**
  * MQTT status card displaying broker connection information
@@ -35,7 +34,7 @@ export function MQTTHealth() {
       setMqttStatus(status);
       showNotification({ message: 'MQTT status refreshed', severity: 'success' });
     } catch (error) {
-      console.error('Failed to refresh MQTT status:', error);
+      logger.error('Failed to refresh MQTT status:', error);
       showNotification({
         message: 'Failed to refresh MQTT status',
         severity: 'error',

@@ -1,4 +1,9 @@
-import { ThemeProvider, CssBaseline, Box, Typography, Alert, CircularProgress } from '@mui/material';
+import Alert from '@mui/material/Alert';
+import Box from '@mui/material/Box';
+import CircularProgress from '@mui/material/CircularProgress';
+import CssBaseline from '@mui/material/CssBaseline';
+import { ThemeProvider } from '@mui/material/styles';
+import Typography from '@mui/material/Typography';
 import { Provider as JotaiProvider, useSetAtom, useAtomValue } from 'jotai';
 import { Route, Switch } from 'wouter';
 import { useState, useEffect, lazy, Suspense } from 'react';
@@ -14,6 +19,7 @@ import { deviceInfoAtom, mqttStatusAtom, appReadyAtom } from './store/atoms';
 import { apiClient } from './api/client';
 import { SnackbarProvider } from './contexts/SnackbarContext';
 import { ChartBufferStream } from './components/Charts/ChartBufferStream';
+import { logger } from './utils/logger';
 
 // Lazy-load chart component for better bundle splitting
 const ChartContainer = lazy(() =>
@@ -85,7 +91,7 @@ function AppContent() {
         setDeviceInfo(info);
         setMqttStatus(mqttStatus);
       } catch (err) {
-        console.error('Failed to fetch initial data:', err);
+        logger.error('Failed to fetch initial data:', err);
         setError('Failed to connect to device. Please check your connection.');
       }
     };

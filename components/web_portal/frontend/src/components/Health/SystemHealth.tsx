@@ -1,14 +1,12 @@
 import { useAtomValue } from 'jotai';
-import {
-  Card,
-  CardContent,
-  Typography,
-  Box,
-  Chip,
-  LinearProgress,
-  Skeleton,
-} from '@mui/material';
+import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Chip from '@mui/material/Chip';
 import Grid from '@mui/material/Grid';
+import LinearProgress from '@mui/material/LinearProgress';
+import Skeleton from '@mui/material/Skeleton';
+import Typography from '@mui/material/Typography';
 import {
   Memory as MemoryIcon,
   Thermostat as ThermostatIcon,

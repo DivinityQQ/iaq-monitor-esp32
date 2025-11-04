@@ -1,7 +1,9 @@
 import { useState, useEffect } from 'react';
 import { useAtomValue } from 'jotai';
-import { Box, Typography, Button } from '@mui/material';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
 import Grid from '@mui/material/Grid';
+import Typography from '@mui/material/Typography';
 import { RestartAlt as RestartIcon } from '@mui/icons-material';
 import { sensorStatusMapAtom } from '../../store/atoms';
 import { SystemHealth } from './SystemHealth';
@@ -11,6 +13,7 @@ import { ConfirmDialog } from '../Common/ConfirmDialog';
 import { useNotification } from '../../contexts/SnackbarContext';
 import { apiClient } from '../../api/client';
 import { ALL_SENSOR_IDS } from '../../api/types';
+import { logger } from '../../utils/logger';
 
 /**
  * Health dashboard displaying system health, MQTT status, and sensor statuses
@@ -33,7 +36,7 @@ export function HealthDashboard() {
       // Note: WebSocket auto-reconnect will handle reconnection
       // No need for hard reload - let the connection restore naturally
     } catch (error) {
-      console.error('Failed to restart device:', error);
+      logger.error('Failed to restart device:', error);
       showNotification({
         message: 'Failed to initiate device restart',
         severity: 'error',

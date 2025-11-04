@@ -1,4 +1,6 @@
-import { Box, Chip, CircularProgress } from '@mui/material';
+import Box from '@mui/material/Box';
+import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
 import { useAtomValue } from 'jotai';
 import WifiIcon from '@mui/icons-material/Wifi';
 import CloudIcon from '@mui/icons-material/Cloud';

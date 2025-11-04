@@ -1,26 +1,24 @@
-import { useState } from 'react';
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  Button,
-  TextField,
-  Switch,
-  FormControlLabel,
-  Table,
-  TableBody,
-  TableCell,
-  TableContainer,
-  TableHead,
-  TableRow,
-  Paper,
-  Chip,
-  IconButton,
-  InputAdornment,
-  CircularProgress,
-  Skeleton,
-} from '@mui/material';
+import { useState, useRef } from 'react';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import IconButton from '@mui/material/IconButton';
+import InputAdornment from '@mui/material/InputAdornment';
+import Paper from '@mui/material/Paper';
+import Skeleton from '@mui/material/Skeleton';
+import Switch from '@mui/material/Switch';
+import Table from '@mui/material/Table';
+import TableBody from '@mui/material/TableBody';
+import TableCell from '@mui/material/TableCell';
+import TableContainer from '@mui/material/TableContainer';
+import TableHead from '@mui/material/TableHead';
+import TableRow from '@mui/material/TableRow';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import {
   Wifi as WifiIcon,
   WifiOff as WifiOffIcon,
@@ -35,6 +33,7 @@ import { apiClient } from '../../api/client';
 import type { WiFiAP } from '../../api/types';
 import { validateSSID, validatePassword, getSignalBars } from '../../utils/validation';
 import { useNotification } from '../../contexts/SnackbarContext';
+import { logger } from '../../utils/logger';
 
 export function WiFiConfig() {
   const deviceInfo = useAtomValue(deviceInfoAtom);
@@ -49,6 +48,7 @@ export function WiFiConfig() {
   // Scanner state
   const [scanResults, setScanResults] = useState<WiFiAP[]>([]);
   const [scanning, setScanning] = useState(false);
+  const scanAbortController = useRef<AbortController | null>(null);
 
   // Connection state
   const [connecting, setConnecting] = useState(false);
@@ -63,24 +63,39 @@ export function WiFiConfig() {
   const wifiConnected = deviceInfo?.network?.wifi_connected || false;
 
   const handleScan = async () => {
+    // Cancel any ongoing scan
+    if (scanAbortController.current) {
+      scanAbortController.current.abort();
+    }
+
+    // Create new abort controller for this scan
+    const controller = new AbortController();
+    scanAbortController.current = controller;
+
     setScanning(true);
     setScanResults([]);
 
     try {
-      const result = await apiClient.scanWiFi(20);
+      const result = await apiClient.scanWiFi(20, controller.signal);
       setScanResults(result.aps);
       showNotification({
         message: `Found ${result.aps.length} network${result.aps.length !== 1 ? 's' : ''}`,
         severity: 'success',
       });
     } catch (error) {
-      console.error('WiFi scan failed:', error);
+      // Don't show error if request was cancelled
+      if (error instanceof Error && error.name === 'AbortError') {
+        logger.log('WiFi scan cancelled');
+        return;
+      }
+      logger.error('WiFi scan failed:', error);
       showNotification({
         message: error instanceof Error ? error.message : 'Failed to scan networks',
         severity: 'error',
       });
     } finally {
       setScanning(false);
+      scanAbortController.current = null;
     }
   };
 
@@ -132,7 +147,7 @@ export function WiFiConfig() {
         });
       }
     } catch (error) {
-      console.error('WiFi connection failed:', error);
+      logger.error('WiFi connection failed:', error);
       showNotification({
         message: error instanceof Error ? error.message : 'Failed to connect to WiFi',
         severity: 'error',
@@ -153,7 +168,7 @@ export function WiFiConfig() {
         duration: 4000,
       });
     } catch (error) {
-      console.error('WiFi restart failed:', error);
+      logger.error('WiFi restart failed:', error);
       showNotification({
         message: error instanceof Error ? error.message : 'Failed to restart WiFi',
         severity: 'error',

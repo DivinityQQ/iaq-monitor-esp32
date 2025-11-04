@@ -1,4 +1,8 @@
-import { Card, CardContent, Typography, Box, Skeleton } from '@mui/material';
+import Box from '@mui/material/Box';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Skeleton from '@mui/material/Skeleton';
+import Typography from '@mui/material/Typography';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import type { ReactNode } from 'react';

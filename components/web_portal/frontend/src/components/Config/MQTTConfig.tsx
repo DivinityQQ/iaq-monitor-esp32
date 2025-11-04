@@ -1,19 +1,17 @@
 import { useState, useEffect } from 'react';
-import {
-  Box,
-  Card,
-  CardContent,
-  Typography,
-  Button,
-  TextField,
-  Switch,
-  FormControlLabel,
-  Chip,
-  IconButton,
-  InputAdornment,
-  CircularProgress,
-  Skeleton,
-} from '@mui/material';
+import Box from '@mui/material/Box';
+import Button from '@mui/material/Button';
+import Card from '@mui/material/Card';
+import CardContent from '@mui/material/CardContent';
+import Chip from '@mui/material/Chip';
+import CircularProgress from '@mui/material/CircularProgress';
+import FormControlLabel from '@mui/material/FormControlLabel';
+import IconButton from '@mui/material/IconButton';
+import InputAdornment from '@mui/material/InputAdornment';
+import Skeleton from '@mui/material/Skeleton';
+import Switch from '@mui/material/Switch';
+import TextField from '@mui/material/TextField';
+import Typography from '@mui/material/Typography';
 import {
   CloudQueue as MQTTIcon,
   CloudOff as MQTTOffIcon,
@@ -26,6 +24,7 @@ import { deviceInfoAtom, mqttStatusAtom } from '../../store/atoms';
 import { apiClient } from '../../api/client';
 import { validateMQTTUrl } from '../../utils/validation';
 import { useNotification } from '../../contexts/SnackbarContext';
+import { logger } from '../../utils/logger';
 
 export function MQTTConfig() {
   const deviceInfo = useAtomValue(deviceInfoAtom);
@@ -63,7 +62,7 @@ export function MQTTConfig() {
       const status = await apiClient.getMQTTStatus();
       setMqttStatus(status);
     } catch (error) {
-      console.error('Failed to refresh MQTT status:', error);
+      logger.error('Failed to refresh MQTT status:', error);
     }
   };
 
@@ -108,7 +107,7 @@ export function MQTTConfig() {
         });
       }
     } catch (error) {
-      console.error('Failed to save MQTT config:', error);
+      logger.error('Failed to save MQTT config:', error);
       showNotification({
         message: error instanceof Error ? error.message : 'Failed to save MQTT configuration',
         severity: 'error',
@@ -134,7 +133,7 @@ export function MQTTConfig() {
         refreshStatus();
       }, 2000);
     } catch (error) {
-      console.error('MQTT restart failed:', error);
+      logger.error('MQTT restart failed:', error);
       showNotification({
         message: error instanceof Error ? error.message : 'Failed to restart MQTT',
         severity: 'error',

@@ -53,9 +53,9 @@ class ApiClient {
     return this.fetch('/wifi');
   }
 
-  async scanWiFi(limit?: number): Promise<WiFiScanResult> {
+  async scanWiFi(limit?: number, signal?: AbortSignal): Promise<WiFiScanResult> {
     const query = limit ? `?limit=${limit}` : '';
-    return this.fetch(`/wifi/scan${query}`);
+    return this.fetch(`/wifi/scan${query}`, { signal });
   }
 
   async setWiFi(config: WiFiConfig): Promise<ApiSuccess> {
@@ -133,6 +133,7 @@ class ApiClient {
         ...options?.headers,
       },
       body: options?.body ? JSON.stringify(options.body) : undefined,
+      signal: options?.signal,
     });
 
     if (!response.ok) {

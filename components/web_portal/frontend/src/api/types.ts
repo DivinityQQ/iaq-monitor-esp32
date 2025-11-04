@@ -80,7 +80,7 @@ export interface Metrics {
 }
 
 // ============================================================================
-// HEALTH (30s WebSocket updates + WiFi events)
+// HEALTH (1 Hz WebSocket updates while connected + WiFi events)
 // ============================================================================
 
 export interface Health {

@@ -1,9 +1,8 @@
 import type { State } from '../api/types';
+import { logger } from './logger';
+import { STREAM_BUFFER_CAPACITY } from './constants';
 
 export type MetricKey = 'temp_c' | 'rh_pct' | 'co2_ppm' | 'pm25_ugm3' | 'pm1_ugm3' | 'pm10_ugm3';
-
-// 1 hour buffer @ 1 Hz (+cushion)
-const CAP = 3700;
 
 /**
  * Ring buffer implementation for O(1) append/trim operations
@@ -62,14 +61,14 @@ class RingBuffer {
 }
 
 // Ring buffers for time and each metric
-const timesRing = new RingBuffer(CAP);
+const timesRing = new RingBuffer(STREAM_BUFFER_CAPACITY);
 const seriesRings: Record<MetricKey, RingBuffer> = {
-  temp_c: new RingBuffer(CAP),
-  rh_pct: new RingBuffer(CAP),
-  co2_ppm: new RingBuffer(CAP),
-  pm25_ugm3: new RingBuffer(CAP),
-  pm1_ugm3: new RingBuffer(CAP),
-  pm10_ugm3: new RingBuffer(CAP),
+  temp_c: new RingBuffer(STREAM_BUFFER_CAPACITY),
+  rh_pct: new RingBuffer(STREAM_BUFFER_CAPACITY),
+  co2_ppm: new RingBuffer(STREAM_BUFFER_CAPACITY),
+  pm25_ugm3: new RingBuffer(STREAM_BUFFER_CAPACITY),
+  pm1_ugm3: new RingBuffer(STREAM_BUFFER_CAPACITY),
+  pm10_ugm3: new RingBuffer(STREAM_BUFFER_CAPACITY),
 };
 
 /** Version counter that increments on each append - for signaling chart updates */
@@ -84,7 +83,7 @@ export function appendStateToBuffers(s: State): void {
   // Input validation - prevent NaN/Infinity from poisoning buffers
   const now = Date.now() / 1000;
   if (!Number.isFinite(now)) {
-    console.warn('[streamBuffers] Invalid timestamp, skipping append');
+    logger.warn('[streamBuffers] Invalid timestamp, skipping append');
     return;
   }
 
@@ -92,7 +91,7 @@ export function appendStateToBuffers(s: State): void {
   const sanitize = (val: number | null | undefined): number | null => {
     if (val == null) return null;
     if (!Number.isFinite(val)) {
-      console.warn('[streamBuffers] Non-finite value detected:', val);
+      logger.warn('[streamBuffers] Non-finite value detected:', val);
       return null;
     }
     return val;
