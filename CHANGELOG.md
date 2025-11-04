@@ -4,6 +4,36 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog, and the project adheres to Semantic Versioning.
 
+## [0.8.0] - 2025-11-04
+
+Major release introducing the on-device Web Portal with a secure HTTP/S backend, live WebSocket updates, and a real-time single‑page dashboard. Includes a new LittleFS partition for serving static assets and a full configuration UI.
+
+Added:
+- HTTP/S web server backend with REST API (`/api/v1`) and WebSocket at `/ws`.
+- SPA-based web portal (served from LittleFS `www`), including:
+  - Dashboard cards for State, Metrics, and Health with live updates.
+  - Charts with client-side history.
+  - Configuration panel for Wi‑Fi, MQTT, and per-sensor enable/cadence.
+  - Info dialog showing device, firmware and network summary.
+- HTTPS support with built-in dev self‑signed cert; override via `/www/cert.pem` and `/www/key.pem`.
+- Gzip static file serving and SPA fallback for client-side routing.
+- Captive portal behavior in AP‑only mode (DNS redirect, HTTP redirect to `/`).
+- HTTP/S server profiling hooks and expanded system profiling.
+
+Changed:
+- Switched static content storage to LittleFS; new `www` partition integrated into the build (auto‑packs `www/` if present).
+- WebSocket cadence adjustments: `health` pushed at 1 Hz; improved PING/PONG handling and initial snapshot on connect.
+- Optimized HTTPD task and socket handling; reduced UI redraws; layout and skeleton sizing tweaks; mobile chart label spacing; tablet portrait tuning.
+- Unified format and handling of invalid sensor data across API and MQTT payloads.
+
+Fixed:
+- Resolved MQTT bad state after MQTT restart when Wi‑Fi was not connected.
+- Moved Wi‑Fi RSSI acquisition out of lock to avoid contention.
+
+Upgrade notes:
+- Ensure the partition table includes the `www` LittleFS partition (see `partitions.csv`).
+- If serving HTTPS with your own cert, place `cert.pem` and `key.pem` in `/www`; a helper script exists at `components/web_portal/certs/generate_cert.sh`.
+
 ## [0.7.6] - 2025-10-31
 
 - Added: Ability to disable individual sensors.
@@ -137,4 +167,3 @@ Documentation:
 - Per-sensor configurable cadences and warm-up periods
 - Console commands for sensor control and diagnostics
 - Basic MQTT integration with Home Assistant discovery
-

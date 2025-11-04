@@ -1,6 +1,6 @@
 # IAQ Monitor (ESP32-S3, ESP-IDF)
-Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, robust defaults, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery.
-Current version: 0.7.6
+Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, robust defaults, a built‑in web portal, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery.
+Current version: 0.8.0
 ## Features
 - Wi‑Fi station mode with NVS‑stored credentials (console configurable)
 - MQTT 5.0 client, retained LWT/status, HA auto‑discovery
@@ -11,6 +11,8 @@ Current version: 0.7.6
 - **Simulation mode**: Complete MQTT/HA integration testing without physical sensors
 - **Time sync (SNTP)**: Local time via NTP with configurable TZ; event bit set when time is valid
 - **OLED display (SH1106)**: 6 screens (Overview, Environment, Air Quality, CO₂ Detail, Particulate, System) with button navigation, night mode, and idle auto-off
+- **On‑device Web Portal**: Single‑Page App served from LittleFS `www` with real‑time dashboard (state/metrics/health), charts, notifications, and configuration for Wi‑Fi, MQTT, and sensors
+- **HTTP/S API + WebSocket**: REST at `/api/v1/*` and live updates at `/ws`; gzip static serving and SPA fallback
 - Sensor coordinator with state machine (UNINIT → INIT → WARMING → READY → ERROR)
 - Per‑sensor cadences (configurable via Kconfig/console, persisted in NVS)
 - Per‑sensor warm‑up periods with observable countdown
@@ -67,6 +69,30 @@ mqtt restart
   - Insecure: disable verification (testing only).
 - Mutual TLS (client certs) is supported: place `client.crt.pem` and `client.key.pem` in `components/connectivity/certs/` and enable mTLS in menuconfig.
 - For AWS IoT over 443, enable AWS IoT ALPN option and use endpoint `mqtts://<your-endpoint>:443`.
+
+## Web Portal (Dashboard + API)
+- Access: open `http://<device-ip>/` (AP‑only mode) or `https://<device-ip>/` (STA or AP+STA when HTTPS is enabled).
+- Live data: the UI connects to `/ws` for `state`, `metrics`, and `health` updates.
+- API: REST endpoints under `/api/v1` (see `components/web_portal/API.md`). Quick tests:
+  - `curl http://<ip>/api/v1/info`
+  - `curl http://<ip>/api/v1/state`
+  - `curl http://<ip>/api/v1/metrics`
+  - `curl http://<ip>/api/v1/health`
+
+HTTPS & certificates
+- Default: a built‑in self‑signed development certificate is used.
+- Override: place `cert.pem` and `key.pem` in the LittleFS `www/` image to serve your own cert.
+- Helper: use `components/web_portal/certs/generate_cert.sh` to create an ECDSA P‑256 cert with SANs for local access. Example: `./components/web_portal/certs/generate_cert.sh --embed` to write embedded defaults.
+- Self‑signed testing: add `-k` to curl (e.g., `curl -k https://<ip>/api/v1/info`).
+
+Captive portal (AP‑only)
+- DNS redirects all hostnames to the SoftAP IP; HTTP 404s redirect to `/` for a smoother setup flow.
+
+LittleFS packaging
+- The build automatically packs the `www/` directory (if present) into the `www` LittleFS partition and flashes it along with the app.
+- Partition table includes `www` (see `partitions.csv`).
+- Tip: keep certs when syncing frontend outputs to `www/`:
+  - `rsync -a --delete --exclude=cert.pem --exclude=key.pem dist/ www/`
 ## Console Commands (Cheat Sheet)
 ```
 status
@@ -216,7 +242,7 @@ sensor cadence set <sensor> <ms>
 - For new settings, consider Kconfig defaults and NVS persistence
 - Follow CONTRIBUTING.md for coding and component guidelines
 ## Development Status
-**Current Status (v0.7.6)**
+**Current Status (v0.8.0)**
 - ✅ Core infrastructure (Wi‑Fi, MQTT 5.0, Home Assistant auto‑discovery)
 - ✅ 6 sensor drivers with real hardware support (MCU, SHT45, BMP280, SGP41, PMS5003, S8)
 - ✅ Full simulation mode for testing without hardware
@@ -230,7 +256,8 @@ sensor cadence set <sensor> <ms>
 - ✅ SNTP time sync with TZ support
 - ✅ OLED display (SH1106) with 6 screens, button navigation, night mode
 - ✅ Enhanced MQTT TLS (custom CA, mutual TLS, AWS IoT support)
-- 📋 Future: LED status indicators, web configuration interface
+- ✅ Web Portal: HTTPS‑capable SPA with dashboard, charts, and configuration (Wi‑Fi/MQTT/Sensors)
+- 📋 Future: LED status indicators
 ## Changelog
 
 Changelog has moved to a dedicated file: see CHANGELOG.md

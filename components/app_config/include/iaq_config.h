@@ -15,10 +15,10 @@
 #define IAQ_VERSION_MAJOR  0
 #endif
 #ifndef IAQ_VERSION_MINOR
-#define IAQ_VERSION_MINOR  7
+#define IAQ_VERSION_MINOR  8
 #endif
 #ifndef IAQ_VERSION_PATCH
-#define IAQ_VERSION_PATCH  6
+#define IAQ_VERSION_PATCH  0
 #endif
 
 /**
