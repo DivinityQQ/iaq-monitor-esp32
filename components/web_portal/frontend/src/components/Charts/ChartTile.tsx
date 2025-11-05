@@ -82,8 +82,26 @@ export function ChartTile({
       height,
       cursor: { sync: { key: 'realtime' } },
       scales: {
-        x: {}, // numeric axis; we'll label as time-ago
-        y: { auto: yMin === undefined || (yMax === undefined && softYMax === undefined) },
+        x: {
+          range(_u, dataMin, dataMax) {
+            // Provide default range when no data
+            if (dataMin == null || dataMax == null) {
+              const now = Date.now() / 1000;
+              return [now - range, now];
+            }
+            return [dataMin, dataMax];
+          },
+        },
+        y: {
+          auto: yMin === undefined || (yMax === undefined && softYMax === undefined),
+          range(_u, dataMin, dataMax) {
+            // Provide default range when no data
+            if (dataMin == null || dataMax == null) {
+              return [yMin ?? 0, yMax ?? softYMax ?? 100];
+            }
+            return [dataMin, dataMax];
+          },
+        },
       },
       series: [
         { label: 'Time' },
@@ -190,7 +208,14 @@ export function ChartTile({
     const xs = buffersRef.current.x;
     const ys = buffersRef.current.y;
 
-    if (xs.length === 0) return;
+    // Even with empty data, set scales to show axes
+    if (xs.length === 0) {
+      const now = Date.now() / 1000;
+      plot.setData([[], []], true);
+      plot.setScale('x', { min: now - range, max: now });
+      plot.setScale('y', { min: yMin ?? 0, max: yMax ?? softYMax ?? 100 });
+      return;
+    }
 
     const end = xs[xs.length - 1];
     const start = end - range;
@@ -233,6 +258,9 @@ export function ChartTile({
     ? '--'
     : `${(latest as number).toFixed(decimals)} ${unitSuffix}`;
 
+  const buffers = getBuffers(metric);
+  const hasData = buffers.x.length > 0;
+
   return (
     <Card>
       <CardContent>
@@ -240,7 +268,24 @@ export function ChartTile({
           <Typography variant="subtitle1">{title}</Typography>
           <Chip size="small" label={latestText} sx={{ bgcolor: theme.palette.action.hover }} />
         </Box>
-        <Box ref={containerRef} sx={{ width: '100%', height: height + 10 }} />
+        <Box sx={{ width: '100%', height: height + 10, position: 'relative' }}>
+          <Box ref={containerRef} sx={{ width: '100%', height: '100%' }} />
+          {!hasData && (
+            <Box
+              sx={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                color: 'text.disabled',
+                fontSize: '0.875rem',
+                pointerEvents: 'none',
+              }}
+            >
+              No data available
+            </Box>
+          )}
+        </Box>
       </CardContent>
     </Card>
   );

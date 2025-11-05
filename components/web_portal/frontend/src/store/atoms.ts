@@ -37,11 +37,6 @@ export const deviceInfoAtom = atom<DeviceInfo | null>(null);
 export const mqttStatusAtom = atom<MQTTStatus | null>(null);
 
 /**
- * Global app error message (for connectivity and bootstrap errors)
- */
-export const appErrorAtom = atom<string | null>(null);
-
-/**
  * Sensor cadences (fetched once on Sensors tab)
  * Record of sensor -> { ms, from_nvs }
  */

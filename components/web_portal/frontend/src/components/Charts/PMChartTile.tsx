@@ -61,7 +61,28 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
       width: containerRef.current?.clientWidth || 800,
       height,
       cursor: { sync: { key: 'realtime' } },
-      scales: { x: {}, y: { auto: yMin === undefined && softYMax === undefined } },
+      scales: {
+        x: {
+          range(_u, dataMin, dataMax) {
+            // Provide default range when no data
+            if (dataMin == null || dataMax == null) {
+              const now = Date.now() / 1000;
+              return [now - range, now];
+            }
+            return [dataMin, dataMax];
+          },
+        },
+        y: {
+          auto: yMin === undefined && softYMax === undefined,
+          range(_u, dataMin, dataMax) {
+            // Provide default range when no data
+            if (dataMin == null || dataMax == null) {
+              return [yMin ?? 0, yMax ?? softYMax ?? 50];
+            }
+            return [dataMin, dataMax];
+          },
+        },
+      },
       series: [
         { label: 'Time' },
         { label: 'PM1.0', stroke: theme.palette.info.main, width: 2, points: { show: false }, paths: range >= 300 && uPlot.paths.spline ? uPlot.paths.spline() : undefined },
@@ -165,7 +186,15 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
     };
 
     const xs = buffersRef.current.x;
-    if (xs.length === 0) return;
+
+    // Even with empty data, set scales to show axes
+    if (xs.length === 0) {
+      const now = Date.now() / 1000;
+      plot.setData([[], [], [], []], true);
+      plot.setScale('x', { min: now - range, max: now });
+      plot.setScale('y', { min: yMin ?? 0, max: softYMax ?? 50 });
+      return;
+    }
 
     const end = xs[xs.length - 1];
     const start = end - range;
@@ -210,6 +239,9 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
   const latest = getLatest('pm25_ugm3');
   const latestText = latest == null ? '--' : `${latest.toFixed(1)} µg/m³`;
 
+  const buffers = getBuffers('pm25_ugm3');
+  const hasData = buffers.x.length > 0;
+
   // no external toggles; legend is display-only
 
   return (
@@ -219,17 +251,34 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
           <Typography variant="subtitle1">PM</Typography>
           <Chip size="small" label={latestText} sx={{ bgcolor: theme.palette.action.hover }} />
         </Box>
-        <Box
-          ref={containerRef}
-          sx={{
-            width: '100%',
-            height: height + 10,
-            '& .u-legend': {
-              pointerEvents: 'none',
-              cursor: 'default',
-            },
-          }}
-        />
+        <Box sx={{ width: '100%', height: height + 10, position: 'relative' }}>
+          <Box
+            ref={containerRef}
+            sx={{
+              width: '100%',
+              height: '100%',
+              '& .u-legend': {
+                pointerEvents: 'none',
+                cursor: 'default',
+              },
+            }}
+          />
+          {!hasData && (
+            <Box
+              sx={{
+                position: 'absolute',
+                top: '50%',
+                left: '50%',
+                transform: 'translate(-50%, -50%)',
+                color: 'text.disabled',
+                fontSize: '0.875rem',
+                pointerEvents: 'none',
+              }}
+            >
+              No data available
+            </Box>
+          )}
+        </Box>
       </CardContent>
     </Card>
   );

@@ -59,8 +59,15 @@ export function HealthDashboard() {
   return (
     <Box>
       {/* Header with restart button */}
-      <Box display="flex" justifyContent="space-between" alignItems="center" mb={3}>
-        <Typography variant="h4">System Health</Typography>
+      <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={3}>
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="h4" component="h1" fontWeight={600} gutterBottom>
+            System Health
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Monitor system status, MQTT connection, and sensor health
+          </Typography>
+        </Box>
         <Button
           variant="outlined"
           color="error"
@@ -84,15 +91,11 @@ export function HealthDashboard() {
         {/* Sensor Status Grid */}
         {ALL_SENSOR_IDS.map((sensorId) => (
           <Grid size={{ xs: 6, tablet: 4, md: 3 }} key={sensorId}>
-            {sensorStatusMap?.[sensorId] ? (
-              <SensorStatus sensorId={sensorId} status={sensorStatusMap[sensorId]} />
-            ) : (
-              <Box p={2}>
-                <Typography variant="caption" color="text.secondary">
-                  Loading {sensorId}...
-                </Typography>
-              </Box>
-            )}
+            <SensorStatus
+              sensorId={sensorId}
+              status={sensorStatusMap?.[sensorId]}
+              loading={!sensorStatusMap?.[sensorId]}
+            />
           </Grid>
         ))}
       </Grid>

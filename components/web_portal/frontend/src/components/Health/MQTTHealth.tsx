@@ -48,11 +48,37 @@ export function MQTTHealth() {
     return (
       <Card sx={{ height: '100%' }}>
         <CardContent>
-          <Typography variant="h6" gutterBottom>
-            MQTT Status
-          </Typography>
-          <Box mt={2}>
-            <Skeleton variant="rectangular" height={150} />
+          <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+            <Typography variant="h6">MQTT Status</Typography>
+            <Skeleton variant="circular" width={32} height={32} />
+          </Box>
+
+          <Box display="flex" flexDirection="column" gap={2}>
+            {/* Connection Status Skeleton */}
+            <Box>
+              <Skeleton variant="text" width={80} height={16} sx={{ mb: 1 }} />
+              <Box display="flex" alignItems="center" gap={1}>
+                <Skeleton variant="circular" width={36} height={36} />
+                <Skeleton variant="rounded" width={100} height={24} />
+              </Box>
+            </Box>
+
+            {/* Configuration Status Skeleton */}
+            <Box>
+              <Skeleton variant="rounded" width={120} height={24} />
+              <Skeleton variant="text" width="80%" height={16} sx={{ mt: 1 }} />
+            </Box>
+
+            {/* Broker URL Skeleton */}
+            <Box>
+              <Skeleton variant="text" width={60} height={16} sx={{ mb: 0.5 }} />
+              <Skeleton variant="text" width="90%" height={20} />
+            </Box>
+
+            {/* Info message Skeleton */}
+            <Box mt={1}>
+              <Skeleton variant="text" width="95%" height={16} />
+            </Box>
           </Box>
         </CardContent>
       </Card>

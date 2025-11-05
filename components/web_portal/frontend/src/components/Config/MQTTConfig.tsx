@@ -147,8 +147,47 @@ export function MQTTConfig() {
   if (!deviceInfo || !mqttStatus) {
     return (
       <Box>
-        <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 3, mb: 3 }} />
-        <Skeleton variant="rectangular" height={400} sx={{ borderRadius: 3 }} />
+        {/* MQTT Status Card Skeleton */}
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Skeleton variant="circular" width={24} height={24} />
+                <Skeleton variant="text" width={130} height={32} />
+              </Box>
+              <Skeleton variant="rounded" width={100} height={24} />
+            </Box>
+            <Box sx={{ mb: 2 }}>
+              <Skeleton variant="text" width={80} height={20} />
+              <Skeleton variant="text" width="60%" height={24} />
+            </Box>
+            <Box sx={{ mb: 2 }}>
+              <Skeleton variant="text" width={140} height={20} />
+              <Skeleton variant="rounded" width={120} height={24} />
+            </Box>
+            <Box sx={{ display: 'flex', gap: 2 }}>
+              <Skeleton variant="rounded" width={130} height={36} />
+              <Skeleton variant="rounded" width={140} height={36} />
+            </Box>
+          </CardContent>
+        </Card>
+
+        {/* MQTT Configuration Form Card Skeleton */}
+        <Card>
+          <CardContent>
+            <Skeleton variant="text" width={180} height={32} sx={{ mb: 2 }} />
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Skeleton variant="rounded" height={56} />
+              <Skeleton variant="rounded" height={56} />
+              <Skeleton variant="rounded" height={56} />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Skeleton variant="rounded" width={38} height={20} />
+                <Skeleton variant="text" width={220} />
+              </Box>
+              <Skeleton variant="rounded" height={42} />
+            </Box>
+          </CardContent>
+        </Card>
       </Box>
     );
   }

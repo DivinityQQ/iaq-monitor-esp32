@@ -4,6 +4,7 @@ import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import LinearProgress from '@mui/material/LinearProgress';
+import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
 import {
   Memory as MemoryIcon,
@@ -18,7 +19,8 @@ import { formatRelativeTime, formatSeconds } from '../../utils/validation';
 
 interface SensorStatusProps {
   sensorId: SensorId;
-  status: SensorStatusType;
+  status?: SensorStatusType;
+  loading?: boolean;
 }
 
 const sensorConfig = {
@@ -60,9 +62,49 @@ const stateColors = {
 /**
  * Individual sensor status card component
  */
-export function SensorStatus({ sensorId, status }: SensorStatusProps) {
+export function SensorStatus({ sensorId, status, loading = false }: SensorStatusProps) {
   const config = sensorConfig[sensorId];
   const Icon = config.icon;
+
+  // Show loading skeleton
+  if (loading || !status) {
+    return (
+      <Card
+        sx={{
+          height: '100%',
+          minHeight: 200,
+        }}
+      >
+        <CardContent>
+          {/* Header Skeleton */}
+          <Box display="flex" alignItems="center" justifyContent="space-between" mb={2}>
+            <Box display="flex" alignItems="center" gap={1}>
+              <Skeleton variant="circular" width={24} height={24} />
+              <Skeleton variant="text" width={80} height={24} />
+            </Box>
+            <Skeleton variant="circular" width={24} height={24} />
+          </Box>
+
+          {/* State Chip Skeleton */}
+          <Box mb={2}>
+            <Skeleton variant="rounded" height={32} sx={{ borderRadius: 2 }} />
+          </Box>
+
+          {/* Last Read Skeleton */}
+          <Box mb={2}>
+            <Skeleton variant="text" width={70} height={16} />
+            <Skeleton variant="text" width={100} height={20} />
+          </Box>
+
+          {/* Additional message Skeleton */}
+          <Box mt={1}>
+            <Skeleton variant="text" width="80%" height={16} />
+          </Box>
+        </CardContent>
+      </Card>
+    );
+  }
+
   const stateColor = stateColors[status.state];
 
   // Calculate warmup progress percentage

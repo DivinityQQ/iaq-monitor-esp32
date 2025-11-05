@@ -1,15 +1,12 @@
-import Alert from '@mui/material/Alert';
 import Box from '@mui/material/Box';
 import CircularProgress from '@mui/material/CircularProgress';
 import Typography from '@mui/material/Typography';
 import { Route, Switch } from 'wouter';
 import { lazy, Suspense, useCallback, useState } from 'react';
-import { useAtomValue } from 'jotai';
 import { AppBar } from './AppBar';
 import { NavDrawer } from './NavDrawer';
 import { Dashboard } from '../Dashboard/Dashboard';
 import { ConfigView } from '../Config/ConfigView';
-import { appErrorAtom } from '../../store/atoms';
 
 // Lazy-load chart and health containers
 const ChartContainer = lazy(() =>
@@ -38,7 +35,6 @@ const HealthView = () => (
 
 export function AppShell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const error = useAtomValue(appErrorAtom);
 
   const toggleDrawer = useCallback(() => setDrawerOpen(v => !v), []);
   const handleDrawerClose = useCallback(() => setDrawerOpen(false), []);
@@ -48,9 +44,6 @@ export function AppShell() {
       <AppBar onMenuClick={toggleDrawer} />
       <NavDrawer open={drawerOpen} onClose={handleDrawerClose} />
       <Box component="main" sx={{ flexGrow: 1, mt: 8, ml: { md: '240px' }, width: { xs: '100%', md: `calc(100% - 240px)` } }}>
-        {error && (
-          <Box p={3}><Alert severity="warning">{error}</Alert></Box>
-        )}
         <Switch>
           <Route path="/" component={Dashboard} />
           <Route path="/charts" component={ChartsView} />

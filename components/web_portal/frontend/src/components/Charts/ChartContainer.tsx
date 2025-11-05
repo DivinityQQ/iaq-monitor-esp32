@@ -2,6 +2,7 @@ import Box from '@mui/material/Box';
 import Grid from '@mui/material/Grid';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
+import Typography from '@mui/material/Typography';
 import { useMemo, useState } from 'react';
 import { useTheme } from '@mui/material/styles';
 import { ChartTile, RangeSeconds } from './ChartTile';
@@ -34,7 +35,16 @@ export function ChartContainer() {
 
   return (
     <Box>
-      <Box display="flex" justifyContent="flex-end" mb={2}>
+      {/* Page Header with Time Range Controls */}
+      <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={3}>
+        <Box sx={{ mb: 4 }}>
+          <Typography variant="h4" component="h1" fontWeight={600} gutterBottom>
+            Charts
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Historical sensor data visualization
+          </Typography>
+        </Box>
         <ToggleButtonGroup size="small" exclusive value={range} onChange={handleRange}>
           <ToggleButton value={60}>60s</ToggleButton>
           <ToggleButton value={300}>5m</ToggleButton>

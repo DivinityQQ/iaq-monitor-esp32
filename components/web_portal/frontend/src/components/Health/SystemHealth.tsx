@@ -34,9 +34,84 @@ export function SystemHealth() {
           <Typography variant="h6" gutterBottom>
             System Health
           </Typography>
-          <Box mt={2}>
-            <Skeleton variant="rectangular" height={200} />
-          </Box>
+          <Grid container spacing={2} mt={1}>
+            {/* Uptime Skeleton */}
+            <Grid size={{ xs: 6 }}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <Skeleton variant="circular" width={20} height={20} />
+                <Box>
+                  <Skeleton variant="text" width={60} height={16} />
+                  <Skeleton variant="text" width={80} height={20} />
+                </Box>
+              </Box>
+            </Grid>
+
+            {/* Free Heap Skeleton */}
+            <Grid size={{ xs: 6 }}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <Skeleton variant="circular" width={20} height={20} />
+                <Box flex={1}>
+                  <Skeleton variant="text" width={70} height={16} />
+                  <Skeleton variant="text" width={100} height={20} />
+                  <Skeleton variant="rounded" height={4} sx={{ mt: 0.5, borderRadius: 2 }} />
+                </Box>
+              </Box>
+            </Grid>
+
+            {/* MCU Temperature Skeleton */}
+            <Grid size={{ xs: 6 }}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <Skeleton variant="circular" width={20} height={20} />
+                <Box>
+                  <Skeleton variant="text" width={70} height={16} />
+                  <Skeleton variant="text" width={60} height={20} />
+                </Box>
+              </Box>
+            </Grid>
+
+            {/* WiFi Signal Skeleton */}
+            <Grid size={{ xs: 6 }}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <Skeleton variant="circular" width={20} height={20} />
+                <Box>
+                  <Skeleton variant="text" width={80} height={16} />
+                  <Box display="flex" alignItems="center" gap={1}>
+                    <Skeleton variant="text" width={60} height={20} />
+                    <Skeleton variant="rounded" width={50} height={20} />
+                  </Box>
+                </Box>
+              </Box>
+            </Grid>
+
+            {/* Time Sync Skeleton */}
+            <Grid size={{ xs: 12 }}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <Skeleton variant="circular" width={20} height={20} />
+                <Box flex={1}>
+                  <Skeleton variant="text" width={80} height={16} />
+                  <Box display="flex" alignItems="center" gap={1} mt={0.5}>
+                    <Skeleton variant="rounded" width={70} height={24} />
+                    <Skeleton variant="text" width={120} height={16} />
+                  </Box>
+                </Box>
+              </Box>
+            </Grid>
+
+            {/* Network Info Skeleton */}
+            <Grid size={{ xs: 12 }}>
+              <Box display="flex" alignItems="flex-start" gap={1}>
+                <Skeleton variant="circular" width={20} height={20} />
+                <Box flex={1}>
+                  <Skeleton variant="text" width={60} height={16} />
+                  <Box display="flex" flexDirection="column" gap={0.5} mt={0.5}>
+                    <Skeleton variant="text" width="70%" height={20} />
+                    <Skeleton variant="text" width="60%" height={18} />
+                    <Skeleton variant="text" width="55%" height={18} />
+                  </Box>
+                </Box>
+              </Box>
+            </Grid>
+          </Grid>
         </CardContent>
       </Card>
     );

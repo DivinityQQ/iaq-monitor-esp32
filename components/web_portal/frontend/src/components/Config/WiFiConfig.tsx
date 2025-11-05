@@ -198,9 +198,82 @@ export function WiFiConfig() {
   if (!deviceInfo) {
     return (
       <Box>
-        <Skeleton variant="rectangular" height={200} sx={{ borderRadius: 3, mb: 3 }} />
-        <Skeleton variant="rectangular" height={300} sx={{ borderRadius: 3, mb: 3 }} />
-        <Skeleton variant="rectangular" height={400} sx={{ borderRadius: 3 }} />
+        {/* WiFi Status Card Skeleton */}
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Skeleton variant="circular" width={24} height={24} />
+                <Skeleton variant="text" width={120} height={32} />
+              </Box>
+              <Skeleton variant="rounded" width={90} height={24} />
+            </Box>
+            <Box sx={{ mb: 2 }}>
+              <Skeleton variant="text" width={80} height={20} />
+              <Skeleton variant="text" width={140} height={24} />
+            </Box>
+            <Skeleton variant="rounded" width={130} height={36} />
+          </CardContent>
+        </Card>
+
+        {/* Network Scanner Card Skeleton */}
+        <Card sx={{ mb: 3 }}>
+          <CardContent>
+            <Box sx={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', mb: 2 }}>
+              <Skeleton variant="text" width={160} height={32} />
+              <Skeleton variant="rounded" width={150} height={36} />
+            </Box>
+            <TableContainer component={Paper} variant="outlined">
+              <Table size="small">
+                <TableHead>
+                  <TableRow>
+                    <TableCell><Skeleton variant="text" width={60} /></TableCell>
+                    <TableCell><Skeleton variant="text" width={60} /></TableCell>
+                    <TableCell><Skeleton variant="text" width={70} /></TableCell>
+                    <TableCell><Skeleton variant="text" width={70} /></TableCell>
+                  </TableRow>
+                </TableHead>
+                <TableBody>
+                  {[...Array(4)].map((_, index) => (
+                    <TableRow key={index}>
+                      <TableCell>
+                        <Skeleton variant="text" width="80%" />
+                      </TableCell>
+                      <TableCell>
+                        <Box sx={{ display: 'flex', alignItems: 'center', gap: 0.5 }}>
+                          <Skeleton variant="circular" width={20} height={20} />
+                          <Skeleton variant="text" width={50} />
+                        </Box>
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton variant="text" width={30} />
+                      </TableCell>
+                      <TableCell>
+                        <Skeleton variant="rounded" width={70} height={24} />
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </TableContainer>
+          </CardContent>
+        </Card>
+
+        {/* Connection Form Card Skeleton */}
+        <Card>
+          <CardContent>
+            <Skeleton variant="text" width={180} height={32} sx={{ mb: 2 }} />
+            <Box sx={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+              <Skeleton variant="rounded" height={56} />
+              <Skeleton variant="rounded" height={56} />
+              <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
+                <Skeleton variant="rounded" width={38} height={20} />
+                <Skeleton variant="text" width={200} />
+              </Box>
+              <Skeleton variant="rounded" height={42} />
+            </Box>
+          </CardContent>
+        </Card>
       </Box>
     );
   }
