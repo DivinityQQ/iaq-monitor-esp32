@@ -6,15 +6,18 @@ import { lazy, Suspense, useCallback, useState } from 'react';
 import { AppBar } from './AppBar';
 import { NavDrawer } from './NavDrawer';
 import { Dashboard } from '../Dashboard/Dashboard';
-import { ConfigView } from '../Config/ConfigView';
 
-// Lazy-load chart and health containers
+// Lazy-load chart, health, and config containers
 const ChartContainer = lazy(() =>
   import('../Charts/ChartContainer').then(module => ({ default: module.ChartContainer }))
 );
 
 const HealthDashboard = lazy(() =>
   import('../Health/HealthDashboard').then(module => ({ default: module.HealthDashboard }))
+);
+
+const ConfigView = lazy(() =>
+  import('../Config/ConfigView').then(module => ({ default: module.ConfigView }))
 );
 
 const ChartsView = () => (
@@ -33,6 +36,14 @@ const HealthView = () => (
   </Box>
 );
 
+const ConfigViewRoute = () => (
+  <Box p={3}>
+    <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={400}><CircularProgress /></Box>}>
+      <ConfigView />
+    </Suspense>
+  </Box>
+);
+
 export function AppShell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -47,7 +58,7 @@ export function AppShell() {
         <Switch>
           <Route path="/" component={Dashboard} />
           <Route path="/charts" component={ChartsView} />
-          <Route path="/config" component={ConfigView} />
+          <Route path="/config" component={ConfigViewRoute} />
           <Route path="/health" component={HealthView} />
           <Route>
             <Box p={3}>
