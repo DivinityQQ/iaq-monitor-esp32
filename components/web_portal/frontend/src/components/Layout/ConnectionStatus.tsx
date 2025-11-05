@@ -11,21 +11,72 @@ import { memo } from 'react';
 const WSStatusChip = memo(function WSStatusChip() {
   const wsConnected = useAtomValue(wsConnectedAtom);
   return (
-    <Chip icon={<CableIcon />} label="WS" size="small" color={wsConnected ? 'success' : 'error'} variant={wsConnected ? 'filled' : 'outlined'} sx={{ display: { xs: 'none', tablet: 'flex' } }} />
+    <Chip
+      icon={<CableIcon />}
+      label="WS"
+      size="small"
+      color={wsConnected ? 'success' : 'error'}
+      variant={wsConnected ? 'filled' : 'outlined'}
+      sx={{
+        display: { xs: 'none', tablet: 'flex' },
+        transition: 'all 0.2s ease-in-out',
+        fontWeight: 500,
+        '& .MuiChip-icon': {
+          transition: 'transform 0.2s ease-in-out',
+        },
+        '&:hover .MuiChip-icon': {
+          transform: 'scale(1.1)',
+        },
+      }}
+    />
   );
 });
 
 const WiFiStatusChip = memo(function WiFiStatusChip() {
   const wifiConnected = useAtomValue(wifiConnectedAtom);
   return (
-    <Chip icon={<WifiIcon />} label="WiFi" size="small" color={wifiConnected ? 'success' : 'error'} variant={wifiConnected ? 'filled' : 'outlined'} sx={{ display: { xs: 'none', tablet: 'flex' } }} />
+    <Chip
+      icon={<WifiIcon />}
+      label="WiFi"
+      size="small"
+      color={wifiConnected ? 'success' : 'error'}
+      variant={wifiConnected ? 'filled' : 'outlined'}
+      sx={{
+        display: { xs: 'none', tablet: 'flex' },
+        transition: 'all 0.2s ease-in-out',
+        fontWeight: 500,
+        '& .MuiChip-icon': {
+          transition: 'transform 0.2s ease-in-out',
+        },
+        '&:hover .MuiChip-icon': {
+          transform: 'scale(1.1)',
+        },
+      }}
+    />
   );
 });
 
 const MQTTStatusChip = memo(function MQTTStatusChip() {
   const mqttConnected = useAtomValue(mqttConnectedAtom);
   return (
-    <Chip icon={<CloudIcon />} label="MQTT" size="small" color={mqttConnected ? 'success' : 'error'} variant={mqttConnected ? 'filled' : 'outlined'} sx={{ display: { xs: 'none', tablet: 'flex' } }} />
+    <Chip
+      icon={<CloudIcon />}
+      label="MQTT"
+      size="small"
+      color={mqttConnected ? 'success' : 'error'}
+      variant={mqttConnected ? 'filled' : 'outlined'}
+      sx={{
+        display: { xs: 'none', tablet: 'flex' },
+        transition: 'all 0.2s ease-in-out',
+        fontWeight: 500,
+        '& .MuiChip-icon': {
+          transition: 'transform 0.2s ease-in-out',
+        },
+        '&:hover .MuiChip-icon': {
+          transform: 'scale(1.1)',
+        },
+      }}
+    />
   );
 });
 
@@ -42,7 +93,15 @@ export function ConnectionStatus() {
           size="small"
           color="warning"
           variant="outlined"
-          sx={{ display: { xs: 'none', sm: 'flex' } }}
+          sx={{
+            display: { xs: 'none', sm: 'flex' },
+            animation: 'pulse 1.5s ease-in-out infinite',
+            '@keyframes pulse': {
+              '0%, 100%': { opacity: 1 },
+              '50%': { opacity: 0.7 },
+            },
+            fontWeight: 500,
+          }}
         />
       )}
 

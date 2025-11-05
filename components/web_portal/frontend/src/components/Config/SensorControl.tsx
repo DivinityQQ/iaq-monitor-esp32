@@ -12,6 +12,7 @@ import Grid from '@mui/material/Grid';
 import Skeleton from '@mui/material/Skeleton';
 import Slider from '@mui/material/Slider';
 import Typography from '@mui/material/Typography';
+import { useTheme } from '@mui/material/styles';
 import {
   Thermostat as ThermostatIcon,
   Cloud as CloudIcon,
@@ -82,6 +83,7 @@ interface SensorCardControlProps {
 }
 
 function SensorCardControl({ sensorId }: SensorCardControlProps) {
+  const theme = useTheme();
   const health = useAtomValue(healthAtom);
   const sensorStatus = health?.sensors[sensorId];
   const { showNotification } = useNotification();
@@ -260,7 +262,7 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
     );
   }
 
-  const stateColor = getSensorStateColor(sensorStatus.state);
+  const stateColor = getSensorStateColor(sensorStatus.state, theme);
   const isEnabled = sensorStatus.state !== 'DISABLED';
 
   return (
@@ -301,9 +303,10 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
               label={sensorStatus.state}
               sx={{
                 backgroundColor: stateColor,
-                color: '#fff',
+                color: theme.palette.getContrastText(stateColor),
                 fontWeight: 600,
                 width: '100%',
+                transition: 'all 0.2s ease-in-out',
               }}
             />
           </Badge>

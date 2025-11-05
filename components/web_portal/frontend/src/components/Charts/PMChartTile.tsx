@@ -77,7 +77,7 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
           range(_u, dataMin, dataMax) {
             // Provide default range when no data
             if (dataMin == null || dataMax == null) {
-              return [yMin ?? 0, yMax ?? softYMax ?? 50];
+              return [yMin ?? 0, softYMax ?? 50];
             }
             return [dataMin, dataMax];
           },
