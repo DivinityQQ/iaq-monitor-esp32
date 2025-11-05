@@ -18,23 +18,41 @@ export function DataLayer() {
   const setAppError = useSetAtom(appErrorAtom);
   const appReady = useAtomValue(appReadyAtom);
 
-  // Initial REST fetch
+  // Initial REST fetch (independent calls so one failure doesn't block the other)
   useEffect(() => {
     let cancelled = false;
     const fetchInitial = async () => {
+      let infoOk = false;
+      let mqttOk = false;
+
+      // Fetch device info
       try {
-        const [info, mqtt] = await Promise.all([
-          apiClient.getInfo(),
-          apiClient.getMQTTStatus(),
-        ]);
-        if (cancelled) return;
-        setDeviceInfo(info);
-        setMqttStatus(mqtt);
+        const info = await apiClient.getInfo();
+        if (!cancelled) {
+          setDeviceInfo(info);
+          infoOk = true;
+        }
       } catch (err) {
-        logger.error('Failed to fetch initial data:', err);
-        if (!cancelled) setAppError('Failed to connect to device. Please check your connection.');
+        logger.error('Failed to fetch device info:', err);
+      }
+
+      // Fetch MQTT status
+      try {
+        const mqtt = await apiClient.getMQTTStatus();
+        if (!cancelled) {
+          setMqttStatus(mqtt);
+          mqttOk = true;
+        }
+      } catch (err) {
+        logger.error('Failed to fetch MQTT status:', err);
+      }
+
+      // Set an error banner only if both failed
+      if (!cancelled && !infoOk && !mqttOk) {
+        setAppError('Unable to reach device. UI will remain in offline mode.');
       }
     };
+
     fetchInitial();
     return () => { cancelled = true; };
   }, [setDeviceInfo, setMqttStatus, setAppError]);

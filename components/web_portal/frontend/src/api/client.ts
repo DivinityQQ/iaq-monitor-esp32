@@ -16,6 +16,7 @@ import type {
 
 class ApiClient {
   private baseUrl = '/api/v1';
+  private defaultTimeoutMs = Number((import.meta as any).env?.VITE_API_TIMEOUT_MS) || 4000;
 
   // ============================================================================
   // DEVICE INFO
@@ -125,30 +126,49 @@ class ApiClient {
     path: string,
     options?: Omit<RequestInit, 'body'> & { body?: unknown }
   ): Promise<any> {
-    const response = await window.fetch(this.baseUrl + path, {
-      ...options,
-      headers: {
-        ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
-        'Accept': 'application/json',
-        ...options?.headers,
-      },
-      body: options?.body ? JSON.stringify(options.body) : undefined,
-      signal: options?.signal,
-    });
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), this.defaultTimeoutMs);
 
-    if (!response.ok) {
-      let errorMessage = 'API request failed';
-      try {
-        const error = await response.json();
-        errorMessage = error.error?.message || error.message || errorMessage;
-      } catch {
-        // If JSON parsing fails, use status text
-        errorMessage = response.statusText || errorMessage;
-      }
-      throw new Error(errorMessage);
+    // If caller provided a signal, chain it
+    if (options?.signal) {
+      const ext = options.signal;
+      if (ext.aborted) controller.abort();
+      else ext.addEventListener('abort', () => controller.abort(), { once: true });
     }
 
-    return response.json();
+    try {
+      const response = await window.fetch(this.baseUrl + path, {
+        ...options,
+        headers: {
+          ...(options?.body ? { 'Content-Type': 'application/json' } : {}),
+          'Accept': 'application/json',
+          ...options?.headers,
+        },
+        body: options?.body ? JSON.stringify(options.body) : undefined,
+        signal: controller.signal,
+      });
+
+      if (!response.ok) {
+        let errorMessage = 'API request failed';
+        try {
+          const error = await response.json();
+          errorMessage = error.error?.message || error.message || errorMessage;
+        } catch {
+          // If JSON parsing fails, use status text
+          errorMessage = response.statusText || errorMessage;
+        }
+        throw new Error(errorMessage);
+      }
+
+      return response.json();
+    } catch (err: any) {
+      if (err?.name === 'AbortError') {
+        throw new Error('Request timed out');
+      }
+      throw err;
+    } finally {
+      window.clearTimeout(timeout);
+    }
   }
 }
 

@@ -9,8 +9,7 @@ import { AppBar } from './AppBar';
 import { NavDrawer } from './NavDrawer';
 import { Dashboard } from '../Dashboard/Dashboard';
 import { ConfigView } from '../Config/ConfigView';
-import { LoadingSpinner } from '../Common/LoadingSkeleton';
-import { appReadyAtom, appErrorAtom } from '../../store/atoms';
+import { appErrorAtom } from '../../store/atoms';
 
 // Lazy-load chart and health containers
 const ChartContainer = lazy(() =>
@@ -39,27 +38,10 @@ const HealthView = () => (
 
 export function AppShell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
-  const appReady = useAtomValue(appReadyAtom);
   const error = useAtomValue(appErrorAtom);
 
   const toggleDrawer = useCallback(() => setDrawerOpen(v => !v), []);
   const handleDrawerClose = useCallback(() => setDrawerOpen(false), []);
-
-  if (!appReady) {
-    return (
-      <Box sx={{ display: 'flex', minHeight: '100vh' }}>
-        <AppBar onMenuClick={toggleDrawer} />
-        <NavDrawer open={drawerOpen} onClose={handleDrawerClose} />
-        <Box component="main" sx={{ flexGrow: 1, mt: 8, ml: { md: '240px' }, width: { xs: '100%', md: `calc(100% - 240px)` } }}>
-          {error ? (
-            <Box p={3}><Alert severity="error">{error}</Alert></Box>
-          ) : (
-            <LoadingSpinner />
-          )}
-        </Box>
-      </Box>
-    );
-  }
 
   return (
     <Box sx={{ display: 'flex', minHeight: '100vh' }}>
