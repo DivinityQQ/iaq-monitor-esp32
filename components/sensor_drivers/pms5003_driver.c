@@ -407,21 +407,21 @@ esp_err_t pms5003_driver_deinit(void)
         return ESP_OK;
     }
 
+#ifdef CONFIG_IAQ_PMS5003_BG_READER
+    if (s_rx_task) {
+        /* Stop background RX task before tearing down UART/queue */
+        s_initialized = false;
+        /* Ensure the task is not left blocked on the queue */
+        vTaskDelete(s_rx_task);
+        s_rx_task = NULL;
+    }
+#endif
+
     esp_err_t ret = uart_bus_deinit(s_uart_port);
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to deinitialize UART: %s", esp_err_to_name(ret));
         return ret;
     }
-
-#ifdef CONFIG_IAQ_PMS5003_BG_READER
-    if (s_rx_task) {
-        /* Signal end and let task exit */
-        s_initialized = false;
-        /* Give task a moment to notice flag */
-        vTaskDelay(pdMS_TO_TICKS(10));
-        s_rx_task = NULL;
-    }
-#endif
 
     s_initialized = false;
     ESP_LOGI(TAG, "PMS5003 driver deinitialized");

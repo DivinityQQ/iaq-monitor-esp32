@@ -277,16 +277,17 @@ static esp_err_t bmp280_trigger_forced_and_wait(int expected_ms)
     int timeout_ms = expected_ms + CONFIG_IAQ_BMP280_MEAS_DELAY_MARGIN_MS;
     if (timeout_ms < 5) timeout_ms = 5;
     const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
+    bool timed_out = false;
     /* Poll measuring bit with small sleeps */
     while (1) {
         uint8_t status = 0;
         ret = i2c_read_regs(BMP280_REG_STATUS, &status, 1);
         if (ret != ESP_OK) return ret;
         if ((status & BMP280_STATUS_MEASURING) == 0) break;
-        if (xTaskGetTickCount() >= deadline) break;
+        if (xTaskGetTickCount() >= deadline) { timed_out = true; break; }
         vTaskDelay(1);
     }
-    return ESP_OK;
+    return timed_out ? ESP_ERR_TIMEOUT : ESP_OK;
 }
 
 static float bmp280_compensate_temperature_c(int32_t adc_T)
