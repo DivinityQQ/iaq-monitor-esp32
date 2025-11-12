@@ -1,7 +1,7 @@
 import { atom } from 'jotai';
 import { selectAtom } from 'jotai/utils';
 import type { State, Metrics, Health, DeviceInfo, SensorId, SensorCadence, MQTTStatus } from '../api/types';
-import { getAQIColor, getComfortColor, getIAQColor } from '../theme';
+// Color derivations moved to components using theme CSS variables for live updates
 import { getBuffersVersion } from '../utils/streamBuffers';
 import { apiClient } from '../api/client';
 
@@ -57,32 +57,8 @@ export const buffersVersionAtom = atom((get) => {
 // DERIVED ATOMS - Computed Values
 // ============================================================================
 
-/**
- * AQI color atom - derives color from current AQI value
- * Uses getAQIColor helper from theme.ts
- */
-export const aqiColorAtom = atom((get) => {
-  const metrics = get(metricsAtom);
-  return getAQIColor(metrics?.aqi?.value);
-});
-
-/**
- * Comfort color atom - derives color from current comfort score
- * Uses getComfortColor helper from theme.ts
- */
-export const comfortColorAtom = atom((get) => {
-  const metrics = get(metricsAtom);
-  return getComfortColor(metrics?.comfort?.score);
-});
-
-/**
- * IAQ color atom - derives color from current overall IAQ score
- * Uses getIAQColor helper from theme.ts
- */
-export const iaqColorAtom = atom((get) => {
-  const metrics = get(metricsAtom);
-  return getIAQColor(metrics?.overall_iaq_score);
-});
+// Removed derived color atoms (aqiColorAtom, comfortColorAtom, iaqColorAtom)
+// Colors now derive in components with theme.vars to react instantly to mode changes.
 
 /**
  * Sensor status map atom - extracts sensor status map from health data

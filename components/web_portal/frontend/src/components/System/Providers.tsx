@@ -7,10 +7,18 @@ import { SnackbarProvider } from '../../contexts/SnackbarContext';
 
 interface ProvidersProps { children: ReactNode }
 
+/**
+ * Application providers wrapper
+ *
+ * MUI v7 colorSchemes API handles theme switching automatically:
+ * - System preference detection built-in
+ * - localStorage persistence built-in
+ * - No manual theme state management needed
+ */
 export function Providers({ children }: ProvidersProps) {
   return (
     <JotaiProvider>
-      <ThemeProvider theme={theme}>
+      <ThemeProvider theme={theme} disableTransitionOnChange>
         <CssBaseline />
         <SnackbarProvider>
           {children}
@@ -19,4 +27,3 @@ export function Providers({ children }: ProvidersProps) {
     </JotaiProvider>
   );
 }
-

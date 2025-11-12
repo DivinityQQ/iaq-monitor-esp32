@@ -10,7 +10,8 @@ import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
-import { metricsAtom, iaqColorAtom } from '../../store/atoms';
+import { metricsAtom } from '../../store/atoms';
+import { getIAQColorVar } from '../../theme';
 
 /**
  * Featured IAQ (Indoor Air Quality) score card component
@@ -28,7 +29,6 @@ import { metricsAtom, iaqColorAtom } from '../../store/atoms';
 export function IAQCard() {
   const theme = useTheme();
   const metrics = useAtomValue(metricsAtom);
-  const iaqColor = useAtomValue(iaqColorAtom);
   const [expanded, setExpanded] = useState(false);
 
   // Show loading skeleton if metrics not available or incomplete
@@ -63,6 +63,7 @@ export function IAQCard() {
   }
 
   const iaqScore = metrics.overall_iaq_score;
+  const iaqColor = getIAQColorVar(iaqScore, theme);
 
   // Determine IAQ category based on score
   const getCategory = (score: number): string => {
@@ -83,8 +84,8 @@ export function IAQCard() {
       sx={{
         height: '100%',
         minHeight: 280,
-        background: `linear-gradient(135deg, ${iaqColor}15 0%, ${iaqColor}05 100%)`,
-        border: `2px solid ${iaqColor}40`,
+        background: `linear-gradient(135deg, color-mix(in srgb, ${iaqColor} 15%, transparent) 0%, color-mix(in srgb, ${iaqColor} 5%, transparent) 100%)`,
+        border: `2px solid color-mix(in srgb, ${iaqColor} 25%, transparent)`,
         transition: 'transform 0.2s, box-shadow 0.2s',
         cursor: 'pointer',
         '&:hover': {
@@ -128,7 +129,7 @@ export function IAQCard() {
             label={getCategory(iaqScore)}
             sx={{
               bgcolor: iaqColor,
-              color: theme.palette.common.white,
+              color: (theme) => (theme as any).vars?.palette?.common?.white || '#fff',
               fontWeight: 600,
               fontSize: '0.875rem',
               px: 1,

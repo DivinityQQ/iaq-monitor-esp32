@@ -10,7 +10,8 @@ import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import SentimentSatisfiedAltIcon from '@mui/icons-material/SentimentSatisfiedAlt';
-import { metricsAtom, comfortColorAtom } from '../../store/atoms';
+import { metricsAtom } from '../../store/atoms';
+import { getComfortColorVar } from '../../theme';
 
 /**
  * Featured Comfort Score card component
@@ -27,7 +28,6 @@ import { metricsAtom, comfortColorAtom } from '../../store/atoms';
 export function ComfortCard() {
   const theme = useTheme();
   const metrics = useAtomValue(metricsAtom);
-  const comfortColor = useAtomValue(comfortColorAtom);
   const [expanded, setExpanded] = useState(false);
 
   // Show loading skeleton if metrics not available or incomplete
@@ -62,6 +62,7 @@ export function ComfortCard() {
   }
 
   const { score, category, heat_index_c, abs_humidity_gm3, dew_point_c } = metrics.comfort;
+  const comfortColor = getComfortColorVar(score, theme);
 
   return (
     <Card
@@ -69,8 +70,8 @@ export function ComfortCard() {
       sx={{
         height: '100%',
         minHeight: 280,
-        background: `linear-gradient(135deg, ${comfortColor}15 0%, ${comfortColor}05 100%)`,
-        border: `2px solid ${comfortColor}40`,
+        background: `linear-gradient(135deg, color-mix(in srgb, ${comfortColor} 15%, transparent) 0%, color-mix(in srgb, ${comfortColor} 5%, transparent) 100%)`,
+        border: `2px solid color-mix(in srgb, ${comfortColor} 25%, transparent)`,
         transition: 'transform 0.2s, box-shadow 0.2s',
         cursor: 'pointer',
         '&:hover': {
@@ -114,7 +115,7 @@ export function ComfortCard() {
             label={category}
             sx={{
               bgcolor: comfortColor,
-              color: theme.palette.common.white,
+              color: (theme) => (theme as any).vars?.palette?.common?.white || '#fff',
               fontWeight: 600,
               fontSize: '0.875rem',
               px: 1,

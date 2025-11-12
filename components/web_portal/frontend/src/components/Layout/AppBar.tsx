@@ -7,6 +7,7 @@ import Typography from '@mui/material/Typography';
 import MenuIcon from '@mui/icons-material/Menu';
 import InfoIcon from '@mui/icons-material/Info';
 import { ConnectionStatus } from './ConnectionStatus';
+import { ThemeToggle } from './ThemeToggle';
 import { InfoDialog } from '../Common/InfoDialog';
 
 interface AppBarProps {
@@ -24,6 +25,7 @@ function AppBarComponent({ onMenuClick }: AppBarProps) {
     <>
       <MuiAppBar
         position="fixed"
+        color="primary"
         sx={{
           zIndex: (theme) => theme.zIndex.drawer + 1,
         }}
@@ -45,6 +47,7 @@ function AppBarComponent({ onMenuClick }: AppBarProps) {
 
           <Box sx={{ display: 'flex', alignItems: 'center', gap: 2 }}>
             <ConnectionStatus />
+            <ThemeToggle />
             <IconButton color="inherit" aria-label="device info" onClick={handleInfoOpen}>
               <InfoIcon />
             </IconButton>

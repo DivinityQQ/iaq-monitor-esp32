@@ -10,7 +10,8 @@ import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import AirIcon from '@mui/icons-material/Air';
-import { metricsAtom, aqiColorAtom } from '../../store/atoms';
+import { metricsAtom } from '../../store/atoms';
+import { getAQIColorVar } from '../../theme';
 
 /**
  * Featured AQI (Air Quality Index) card component
@@ -26,7 +27,6 @@ import { metricsAtom, aqiColorAtom } from '../../store/atoms';
 export function AQICard() {
   const theme = useTheme();
   const metrics = useAtomValue(metricsAtom);
-  const aqiColor = useAtomValue(aqiColorAtom);
   const [expanded, setExpanded] = useState(false);
 
   // Show loading skeleton if metrics not available or incomplete
@@ -60,6 +60,7 @@ export function AQICard() {
   }
 
   const { value, category, dominant, pm25_subindex, pm10_subindex } = metrics.aqi;
+  const aqiColor = getAQIColorVar(value, theme);
 
   const formatDominant = (dominant: string): string => {
     if (dominant === 'pm25') return 'PM2.5';
@@ -73,8 +74,8 @@ export function AQICard() {
       sx={{
         height: '100%',
         minHeight: 280,
-        background: `linear-gradient(135deg, ${aqiColor}15 0%, ${aqiColor}05 100%)`,
-        border: `2px solid ${aqiColor}40`,
+        background: `linear-gradient(135deg, color-mix(in srgb, ${aqiColor} 15%, transparent) 0%, color-mix(in srgb, ${aqiColor} 5%, transparent) 100%)`,
+        border: `2px solid color-mix(in srgb, ${aqiColor} 25%, transparent)`,
         transition: 'transform 0.2s, box-shadow 0.2s',
         cursor: 'pointer',
         '&:hover': {
@@ -114,7 +115,7 @@ export function AQICard() {
             label={category}
             sx={{
               bgcolor: aqiColor,
-              color: theme.palette.common.white,
+              color: (theme) => (theme as any).vars?.palette?.common?.white || '#fff',
               fontWeight: 600,
               fontSize: '0.875rem',
               px: 1,

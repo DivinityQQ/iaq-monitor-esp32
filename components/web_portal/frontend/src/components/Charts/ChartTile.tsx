@@ -8,6 +8,7 @@ import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
 import { useMediaQuery, useTheme } from '@mui/material';
+import { useColorScheme } from '@mui/material/styles';
 import { getBuffers, getLatest, MetricKey } from '../../utils/streamBuffers';
 import { buffersVersionAtom } from '../../store/atoms';
 
@@ -65,6 +66,8 @@ export function ChartTile({
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const buffersVersion = useAtomValue(buffersVersionAtom);
+  const { mode, systemMode } = useColorScheme();
+  const resolvedMode = mode === 'system' ? systemMode : mode;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
@@ -76,7 +79,12 @@ export function ChartTile({
 
   // Create plot
   const options = useMemo<uPlot.Options>(() => {
-    const axisGrid = { show: true, stroke: theme.palette.divider, width: 1 } as const;
+    // Read CSS variables from the container (inherits current scheme)
+    const css = getComputedStyle(containerRef.current || document.documentElement);
+    const read = (name: string, fallback: string) => (css.getPropertyValue(name).trim() || fallback);
+    const textPrimary = read('--mui-palette-text-primary', '#111');
+    const divider = read('--mui-palette-divider', 'rgba(0,0,0,0.12)');
+    const axisGrid = { show: true, stroke: divider, width: 1 } as const;
     return {
       width: containerRef.current?.clientWidth || 800,
       height,
@@ -117,6 +125,7 @@ export function ChartTile({
       ],
       axes: [
         {
+          stroke: textPrimary,
           grid: axisGrid,
           // Let uPlot compute the increment from minSpace+incrs, then anchor ticks to "now" (end)
           space: (_u, _axisIdx, _min, _max, _plotDim) => {
@@ -154,6 +163,7 @@ export function ChartTile({
           },
         },
         {
+          stroke: textPrimary,
           scale: 'y',
           side: 3,
           grid: axisGrid,
@@ -162,7 +172,7 @@ export function ChartTile({
       ],
       legend: { show: false },
     };
-  }, [theme.palette.divider, theme.breakpoints, isMobile, color, height, title, unitSuffix, yMin, yMax, softYMax, decimals, range]);
+  }, [resolvedMode, theme.breakpoints, isMobile, color, height, title, unitSuffix, yMin, yMax, softYMax, decimals, range]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -266,7 +276,7 @@ export function ChartTile({
       <CardContent>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
           <Typography variant="subtitle1">{title}</Typography>
-          <Chip size="small" label={latestText} sx={{ bgcolor: theme.palette.action.hover }} />
+          <Chip size="small" label={latestText} sx={{ bgcolor: (theme as any).vars?.palette?.action?.hover || 'rgba(0,0,0,0.04)' }} />
         </Box>
         <Box sx={{ width: '100%', height: height + 10, position: 'relative' }}>
           <Box ref={containerRef} sx={{ width: '100%', height: '100%' }} />

@@ -8,6 +8,7 @@ import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import Typography from '@mui/material/Typography';
 import { useMediaQuery, useTheme } from '@mui/material';
+import { useColorScheme } from '@mui/material/styles';
 import { getBuffers, getLatest } from '../../utils/streamBuffers';
 import { buffersVersionAtom } from '../../store/atoms';
 import type { RangeSeconds } from './ChartTile';
@@ -41,6 +42,8 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('sm'));
   const buffersVersion = useAtomValue(buffersVersionAtom);
+  const { mode, systemMode } = useColorScheme();
+  const resolvedMode = mode === 'system' ? systemMode : mode;
 
   const containerRef = useRef<HTMLDivElement>(null);
   const plotRef = useRef<uPlot | null>(null);
@@ -56,7 +59,14 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
   });
 
   const options = useMemo<uPlot.Options>(() => {
-    const axisGrid = { show: true, stroke: theme.palette.divider, width: 1 } as const;
+    const css = getComputedStyle(containerRef.current || document.documentElement);
+    const read = (name: string, fallback: string) => (css.getPropertyValue(name).trim() || fallback);
+    const textPrimary = read('--mui-palette-text-primary', '#111');
+    const divider = read('--mui-palette-divider', 'rgba(0,0,0,0.12)');
+    const info = read('--mui-palette-info-main', '#0288d1');
+    const error = read('--mui-palette-error-main', '#d32f2f');
+    const warning = read('--mui-palette-warning-main', '#ed6c02');
+    const axisGrid = { show: true, stroke: divider, width: 1 } as const;
     return {
       width: containerRef.current?.clientWidth || 800,
       height,
@@ -85,12 +95,13 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
       },
       series: [
         { label: 'Time' },
-        { label: 'PM1.0', stroke: theme.palette.info.main, width: 2, points: { show: false }, paths: range >= 300 && uPlot.paths.spline ? uPlot.paths.spline() : undefined },
-        { label: 'PM2.5', stroke: theme.palette.error.main, width: 2, points: { show: false }, paths: range >= 300 && uPlot.paths.spline ? uPlot.paths.spline() : undefined },
-        { label: 'PM10', stroke: theme.palette.warning.main, width: 2, points: { show: false }, paths: range >= 300 && uPlot.paths.spline ? uPlot.paths.spline() : undefined },
+        { label: 'PM1.0', stroke: info, width: 2, points: { show: false }, paths: range >= 300 && uPlot.paths.spline ? uPlot.paths.spline() : undefined },
+        { label: 'PM2.5', stroke: error, width: 2, points: { show: false }, paths: range >= 300 && uPlot.paths.spline ? uPlot.paths.spline() : undefined },
+        { label: 'PM10', stroke: warning, width: 2, points: { show: false }, paths: range >= 300 && uPlot.paths.spline ? uPlot.paths.spline() : undefined },
       ],
       axes: [
         {
+          stroke: textPrimary,
           grid: axisGrid,
           space: (_u, _axisIdx, _min, _max, _plotDim) => (range <= 90 ? (isMobile ? 64 : 40) : range <= 600 ? (isMobile ? 80 : 56) : (isMobile ? 72 : 48)),
           incrs: range <= 90
@@ -116,12 +127,12 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
             return values.map(v => fmt(end - (v as number)));
           },
         },
-        { scale: 'y', side: 3, grid: axisGrid, values: (_u, vals) => vals.map(v => (Number.isFinite(v) ? v.toFixed(0) : '')) },
+{ stroke: textPrimary, scale: 'y', side: 3, grid: axisGrid, values: (_u, vals) => vals.map(v => (Number.isFinite(v) ? v.toFixed(0) : '')) },
       ],
       // Show uPlot legend (non-interactive by default)
       legend: { show: true, live: false },
     };
-  }, [theme.palette.divider, theme.palette.error.main, theme.palette.info.main, theme.palette.warning.main, theme.breakpoints, isMobile, range, height, yMin, softYMax]);
+  }, [resolvedMode, theme.breakpoints, isMobile, range, height, yMin, softYMax]);
 
   useEffect(() => {
     if (!containerRef.current) return;
@@ -249,7 +260,7 @@ export function PMChartTile({ range, height = 220, yMin, softYMax }: PMChartTile
       <CardContent>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
           <Typography variant="subtitle1">PM</Typography>
-          <Chip size="small" label={latestText} sx={{ bgcolor: theme.palette.action.hover }} />
+          <Chip size="small" label={latestText} sx={{ bgcolor: (theme as any).vars?.palette?.action?.hover || 'rgba(0,0,0,0.04)' }} />
         </Box>
         <Box sx={{ width: '100%', height: height + 10, position: 'relative' }}>
           <Box

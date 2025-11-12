@@ -6,7 +6,6 @@ import Chip from '@mui/material/Chip';
 import LinearProgress from '@mui/material/LinearProgress';
 import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
-import { useTheme } from '@mui/material/styles';
 import {
   Memory as MemoryIcon,
   Thermostat as ThermostatIcon,
@@ -56,7 +55,6 @@ const sensorConfig = {
  * Individual sensor status card component
  */
 export function SensorStatus({ sensorId, status, loading = false }: SensorStatusProps) {
-  const theme = useTheme();
   const config = sensorConfig[sensorId];
   const Icon = config.icon;
 
@@ -99,7 +97,7 @@ export function SensorStatus({ sensorId, status, loading = false }: SensorStatus
     );
   }
 
-  const stateColor = getSensorStateColor(status.state, theme);
+  const stateColor = getSensorStateColor(status.state);
 
   // Calculate warmup progress percentage
   const warmupProgress =
@@ -141,7 +139,7 @@ export function SensorStatus({ sensorId, status, loading = false }: SensorStatus
             label={status.state}
             sx={{
               backgroundColor: stateColor,
-              color: theme.palette.getContrastText(stateColor),
+              color: (theme) => (theme as any).vars?.palette?.common?.white || '#fff',
               width: '100%',
               fontWeight: 600,
               fontSize: '0.9rem',
