@@ -71,6 +71,8 @@ static bool s_initialized = false;
 static i2c_master_dev_handle_t s_dev = NULL;
 static uint8_t s_addr = 0;
 static bmp280_calib_t s_calib;
+static bool s_have_saved_ctrl = false;  /* Saved ctrl_meas for disable/enable */
+static uint8_t s_ctrl_meas_saved = 0;
 
 /* Utility: decode oversampling code to numeric factor */
 static inline int osrs_code_to_factor(int code)
@@ -396,6 +398,8 @@ esp_err_t bmp280_driver_deinit(void)
         s_dev = NULL;
     }
     memset(&s_calib, 0, sizeof(s_calib));
+    s_have_saved_ctrl = false;
+    s_ctrl_meas_saved = 0;
     s_initialized = false;
     ESP_LOGI(TAG, "BMP280 driver deinitialized");
     return ESP_OK;
@@ -403,14 +407,35 @@ esp_err_t bmp280_driver_deinit(void)
 
 esp_err_t bmp280_driver_disable(void)
 {
-    /* Stub implementation - BMP280 has no hardware sleep mode */
-    ESP_LOGI(TAG, "BMP280 disabled (no hardware sleep mode)");
-    return ESP_OK;
+    if (!s_initialized || s_dev == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    uint8_t ctrl = 0;
+    esp_err_t ret = i2c_read_regs(BMP280_REG_CTRL_MEAS, &ctrl, 1);
+    if (ret != ESP_OK) return ret;
+    s_ctrl_meas_saved = ctrl;
+    s_have_saved_ctrl = true;
+    uint8_t ctrl_sleep = (uint8_t)((ctrl & 0xFC) | BMP280_MODE_SLEEP);
+    ret = i2c_write_reg8(BMP280_REG_CTRL_MEAS, ctrl_sleep);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "BMP280 disabled (mode=SLEEP)");
+    }
+    return ret;
 }
 
 esp_err_t bmp280_driver_enable(void)
 {
-    /* Stub implementation - BMP280 has no hardware sleep mode */
-    ESP_LOGI(TAG, "BMP280 enabled (no hardware sleep mode)");
-    return ESP_OK;
+    if (!s_initialized || s_dev == NULL) {
+        return ESP_ERR_INVALID_STATE;
+    }
+    if (!s_have_saved_ctrl) {
+        ESP_LOGW(TAG, "BMP280 enable called without prior disable; nothing to restore");
+        return ESP_ERR_INVALID_STATE;
+    }
+    esp_err_t ret = i2c_write_reg8(BMP280_REG_CTRL_MEAS, s_ctrl_meas_saved);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "BMP280 enabled (ctrl_meas restored=0x%02X)", s_ctrl_meas_saved);
+        s_have_saved_ctrl = false;
+    }
+    return ret;
 }
