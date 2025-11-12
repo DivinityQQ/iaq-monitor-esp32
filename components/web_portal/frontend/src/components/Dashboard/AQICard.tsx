@@ -6,6 +6,7 @@ import Collapse from '@mui/material/Collapse';
 import Grid from '@mui/material/Grid';
 import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
+import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import AirIcon from '@mui/icons-material/Air';
@@ -23,6 +24,7 @@ import { metricsAtom, aqiColorAtom } from '../../store/atoms';
  * - Loading skeleton support
  */
 export function AQICard() {
+  const theme = useTheme();
   const metrics = useAtomValue(metricsAtom);
   const aqiColor = useAtomValue(aqiColorAtom);
   const [expanded, setExpanded] = useState(false);
@@ -112,7 +114,7 @@ export function AQICard() {
             label={category}
             sx={{
               bgcolor: aqiColor,
-              color: 'white',
+              color: theme.palette.common.white,
               fontWeight: 600,
               fontSize: '0.875rem',
               px: 1,

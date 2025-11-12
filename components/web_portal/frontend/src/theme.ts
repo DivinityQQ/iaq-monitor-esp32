@@ -1,7 +1,7 @@
-import { createTheme, type Theme } from '@mui/material/styles';
+import { createTheme, type Theme, type PaletteColor, type PaletteColorOptions } from '@mui/material/styles';
 import type { SensorState } from './api/types';
 
-// Extend MUI theme to include custom 'tablet' breakpoint
+// Extend MUI theme to include custom 'tablet' breakpoint and custom colors
 declare module '@mui/material/styles' {
   interface BreakpointOverrides {
     xs: true;
@@ -10,6 +10,20 @@ declare module '@mui/material/styles' {
     md: true;
     lg: true;
     xl: true;
+  }
+
+  interface Palette {
+    custom: {
+      yellow: PaletteColor;
+      purple: PaletteColor;
+    };
+  }
+
+  interface PaletteOptions {
+    custom?: {
+      yellow?: PaletteColorOptions;
+      purple?: PaletteColorOptions;
+    };
   }
 }
 
@@ -49,6 +63,18 @@ export const theme = createTheme({
     background: {
       default: '#f5f5f5',
       paper: '#ffffff',
+    },
+    custom: {
+      yellow: {
+        main: '#ffeb3b',
+        light: '#ffee58',
+        dark: '#fbc02d',
+      },
+      purple: {
+        main: '#9c27b0',
+        light: '#ab47bc',
+        dark: '#7b1fa2',
+      },
     },
   },
 
@@ -139,19 +165,19 @@ export const theme = createTheme({
 // AQI color mapping - uses theme palette for consistency and dark mode support
 export const getAQIColor = (aqi: number | null | undefined, currentTheme: Theme = theme): string => {
   if (aqi === null || aqi === undefined) return currentTheme.palette.grey[500];
-  if (aqi <= 50) return currentTheme.palette.success.light;         // Green - Good
-  if (aqi <= 100) return '#ffeb3b';                                  // Yellow - Moderate (no theme equivalent)
+  if (aqi <= 50) return currentTheme.palette.success.light;          // Green - Good
+  if (aqi <= 100) return currentTheme.palette.custom.yellow.main;   // Yellow - Moderate
   if (aqi <= 150) return currentTheme.palette.warning.light;        // Orange - Unhealthy for Sensitive
   if (aqi <= 200) return currentTheme.palette.error.main;           // Red - Unhealthy
-  if (aqi <= 300) return '#9c27b0';                                  // Purple - Very Unhealthy (no theme equivalent)
-  return '#7b1fa2';                                                  // Dark Purple - Hazardous
+  if (aqi <= 300) return currentTheme.palette.custom.purple.main;   // Purple - Very Unhealthy
+  return currentTheme.palette.custom.purple.dark;                    // Dark Purple - Hazardous
 };
 
 // Comfort score color mapping - uses theme palette
 export const getComfortColor = (score: number | null | undefined, currentTheme: Theme = theme): string => {
   if (score === null || score === undefined) return currentTheme.palette.grey[500];
-  if (score >= 80) return currentTheme.palette.success.light;       // Green - Comfortable
-  if (score >= 60) return '#ffeb3b';                                 // Yellow - Acceptable (no theme equivalent)
+  if (score >= 80) return currentTheme.palette.success.light;        // Green - Comfortable
+  if (score >= 60) return currentTheme.palette.custom.yellow.main;  // Yellow - Acceptable
   if (score >= 40) return currentTheme.palette.warning.light;       // Orange - Uncomfortable
   return currentTheme.palette.error.main;                            // Red - Very Uncomfortable
 };
@@ -159,8 +185,8 @@ export const getComfortColor = (score: number | null | undefined, currentTheme: 
 // IAQ score color mapping (0-100 scale, higher is better) - uses theme palette
 export const getIAQColor = (score: number | null | undefined, currentTheme: Theme = theme): string => {
   if (score === null || score === undefined) return currentTheme.palette.grey[500];
-  if (score >= 80) return currentTheme.palette.success.light;       // Green - Excellent
-  if (score >= 60) return '#ffeb3b';                                 // Yellow - Good (no theme equivalent)
+  if (score >= 80) return currentTheme.palette.success.light;        // Green - Excellent
+  if (score >= 60) return currentTheme.palette.custom.yellow.main;  // Yellow - Good
   if (score >= 40) return currentTheme.palette.warning.light;       // Orange - Fair
   return currentTheme.palette.error.main;                            // Red - Poor/Very Poor
 };
@@ -168,7 +194,7 @@ export const getIAQColor = (score: number | null | undefined, currentTheme: Them
 // Sensor state color mapping - uses theme palette
 export const getSensorStateColor = (state: SensorState, currentTheme: Theme = theme): string => {
   switch (state) {
-    case 'READY': return currentTheme.palette.success.light;        // Green
+    case 'READY': return currentTheme.palette.success.main;         // Green
     case 'WARMING': return currentTheme.palette.warning.light;      // Orange
     case 'INIT': return currentTheme.palette.info.light;            // Blue
     case 'ERROR': return currentTheme.palette.error.main;           // Red

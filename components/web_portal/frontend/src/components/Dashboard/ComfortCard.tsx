@@ -6,6 +6,7 @@ import Collapse from '@mui/material/Collapse';
 import Grid from '@mui/material/Grid';
 import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
+import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import SentimentSatisfiedAltIcon from '@mui/icons-material/SentimentSatisfiedAlt';
@@ -24,6 +25,7 @@ import { metricsAtom, comfortColorAtom } from '../../store/atoms';
  * - Loading skeleton support
  */
 export function ComfortCard() {
+  const theme = useTheme();
   const metrics = useAtomValue(metricsAtom);
   const comfortColor = useAtomValue(comfortColorAtom);
   const [expanded, setExpanded] = useState(false);
@@ -112,7 +114,7 @@ export function ComfortCard() {
             label={category}
             sx={{
               bgcolor: comfortColor,
-              color: 'white',
+              color: theme.palette.common.white,
               fontWeight: 600,
               fontSize: '0.875rem',
               px: 1,

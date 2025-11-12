@@ -6,6 +6,7 @@ import Collapse from '@mui/material/Collapse';
 import Grid from '@mui/material/Grid';
 import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
+import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
@@ -25,6 +26,7 @@ import { metricsAtom, iaqColorAtom } from '../../store/atoms';
  * - Loading skeleton support
  */
 export function IAQCard() {
+  const theme = useTheme();
   const metrics = useAtomValue(metricsAtom);
   const iaqColor = useAtomValue(iaqColorAtom);
   const [expanded, setExpanded] = useState(false);
@@ -126,7 +128,7 @@ export function IAQCard() {
             label={getCategory(iaqScore)}
             sx={{
               bgcolor: iaqColor,
-              color: 'white',
+              color: theme.palette.common.white,
               fontWeight: 600,
               fontSize: '0.875rem',
               px: 1,
