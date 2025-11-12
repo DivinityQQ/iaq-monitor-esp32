@@ -10,6 +10,6 @@ factory,    app,  factory,  0x20000,  0x180000,
 # Storage for configuration and sensor data
 storage,    data, nvs,      0x1A0000, 0x40000,
 # Filesystem for web server files (LittleFS)
-www,        data, littlefs, 0x1E0000, 0x100000,
+www,        data, littlefs, 0x1E0000, 0x200000,
 # Core dump partition
-coredump,   data, coredump, 0x2E0000, 0x40000,
+coredump,   data, coredump, 0x3E0000, 0x40000,
