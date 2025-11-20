@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog, and the project adheres to Semantic Versioning.
 
+## [0.8.3] - 2025-11-20
+
+Added:
+- Stale data reporting from backend to dashboard cards to surface when sensor values stop updating.
+- BMP280 hardware sleep support to reduce power/heat when idle.
+
+Changed:
+- Web portal theming overhauled with native MUI v7, unified palette, theme toggle, improved skeletons, and faster initial load (lazy `/config`, lighter data flow, package refresh).
+- Expanded `www` LittleFS partition to fit the updated portal bundle.
+
+Fixed:
+- Correct Senseair S8 Modbus error parsing.
+- Make BMP280 timeouts explicit and stop PMS5003 RX task before tearing down UART/queue to avoid races.
+
 ## [0.8.0] - 2025-11-04
 
 Major release introducing the on-device Web Portal with a secure HTTP/S backend, live WebSocket updates, and a real-time single‑page dashboard. Includes a new LittleFS partition for serving static assets and a full configuration UI.
