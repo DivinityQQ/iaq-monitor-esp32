@@ -61,6 +61,79 @@ cJSON* iaq_json_build_state(const iaq_data_t *data)
     if (data->metrics.comfort_score != UINT8_MAX) cJSON_AddNumberToObject(root, "comfort_score", data->metrics.comfort_score);
     else cJSON_AddNullToObject(root, "comfort_score");
 
+    /* Last known valid fused values (for stale display in frontend) */
+    cJSON *last = cJSON_CreateObject();
+
+    /* Temperature & humidity from SHT45 */
+    if (data->updated_at.sht45 > 0 && !isnan(data->fused.temp_c)) {
+        cJSON_AddNumberToObject(last, "temp_c", round_to_1dp(data->fused.temp_c));
+    } else {
+        cJSON_AddNullToObject(last, "temp_c");
+    }
+
+    if (data->updated_at.sht45 > 0 && !isnan(data->fused.rh_pct)) {
+        cJSON_AddNumberToObject(last, "rh_pct", round_to_1dp(data->fused.rh_pct));
+    } else {
+        cJSON_AddNullToObject(last, "rh_pct");
+    }
+
+    /* Pressure from BMP280 */
+    if (data->updated_at.bmp280 > 0 && !isnan(data->fused.pressure_pa)) {
+        cJSON_AddNumberToObject(last, "pressure_hpa", round_to_1dp(data->fused.pressure_pa / 100.0));
+    } else {
+        cJSON_AddNullToObject(last, "pressure_hpa");
+    }
+
+    /* PM from PMS5003 */
+    if (data->updated_at.pms5003 > 0 && !isnan(data->fused.pm25_ugm3)) {
+        cJSON_AddNumberToObject(last, "pm25_ugm3", round_to_1dp(data->fused.pm25_ugm3));
+    } else {
+        cJSON_AddNullToObject(last, "pm25_ugm3");
+    }
+
+    if (data->updated_at.pms5003 > 0 && !isnan(data->fused.pm10_ugm3)) {
+        cJSON_AddNumberToObject(last, "pm10_ugm3", round_to_1dp(data->fused.pm10_ugm3));
+    } else {
+        cJSON_AddNullToObject(last, "pm10_ugm3");
+    }
+
+#ifdef CONFIG_MQTT_PUBLISH_PM1
+    if (data->updated_at.pms5003 > 0 && !isnan(data->fused.pm1_ugm3)) {
+        cJSON_AddNumberToObject(last, "pm1_ugm3", round_to_1dp(data->fused.pm1_ugm3));
+    } else {
+        cJSON_AddNullToObject(last, "pm1_ugm3");
+    }
+#endif
+
+    /* CO2 from S8 */
+    if (data->updated_at.s8 > 0 && !isnan(data->fused.co2_ppm)) {
+        cJSON_AddNumberToObject(last, "co2_ppm", round(data->fused.co2_ppm));
+    } else {
+        cJSON_AddNullToObject(last, "co2_ppm");
+    }
+
+    /* VOC/NOx indices from SGP41 */
+    if (data->updated_at.sgp41 > 0 && data->raw.voc_index != UINT16_MAX) {
+        cJSON_AddNumberToObject(last, "voc_index", data->raw.voc_index);
+    } else {
+        cJSON_AddNullToObject(last, "voc_index");
+    }
+
+    if (data->updated_at.sgp41 > 0 && data->raw.nox_index != UINT16_MAX) {
+        cJSON_AddNumberToObject(last, "nox_index", data->raw.nox_index);
+    } else {
+        cJSON_AddNullToObject(last, "nox_index");
+    }
+
+    /* MCU temperature */
+    if (data->updated_at.mcu > 0 && !isnan(data->raw.mcu_temp_c)) {
+        cJSON_AddNumberToObject(last, "mcu_temp_c", round_to_1dp(data->raw.mcu_temp_c));
+    } else {
+        cJSON_AddNullToObject(last, "mcu_temp_c");
+    }
+
+    cJSON_AddItemToObject(root, "last", last);
+
     return root;
 }
 
@@ -153,6 +226,10 @@ cJSON* iaq_json_build_health(const iaq_data_t *data)
 
     /* Sensors */
     cJSON *sensors = cJSON_CreateObject();
+    uint32_t cad_ms[SENSOR_ID_MAX] = {0};
+    if (sensor_coordinator_get_cadences(cad_ms, NULL) != ESP_OK) {
+        for (int i = 0; i < SENSOR_ID_MAX; ++i) cad_ms[i] = 0;
+    }
     for (int i = 0; i < SENSOR_ID_MAX; ++i) {
         sensor_runtime_info_t info;
         if (sensor_coordinator_get_runtime_info((sensor_id_t)i, &info) != ESP_OK) continue;
@@ -160,14 +237,33 @@ cJSON* iaq_json_build_health(const iaq_data_t *data)
         cJSON_AddStringToObject(sj, "state", sensor_coordinator_state_to_string(info.state));
         cJSON_AddNumberToObject(sj, "errors", info.error_count);
         int64_t now_us = esp_timer_get_time();
+        bool has_age = false;
+        double age_s = 0.0;
         if (info.last_read_us > 0) {
-            int64_t age_s = (now_us - info.last_read_us) / 1000000LL;
-            cJSON_AddNumberToObject(sj, "last_read_s", (double)age_s);
+            int64_t age_whole_s = (now_us - info.last_read_us) / 1000000LL;
+            age_s = (double)age_whole_s;
+            has_age = true;
+            cJSON_AddNumberToObject(sj, "last_read_s", (double)age_whole_s);
         }
         if (info.state == SENSOR_STATE_WARMING) {
             int64_t remaining_us = info.warmup_deadline_us - now_us;
             if (remaining_us > 0) cJSON_AddNumberToObject(sj, "warmup_remaining_s", remaining_us / 1e6);
         }
+
+        /* Backend-derived staleness: true when we have a prior reading and it is overdue
+         * based on configured cadence (with a safety factor). */
+        bool stale = false;
+        uint32_t interval_ms = cad_ms[i];
+        if (has_age && interval_ms > 0) {
+            double expected_s = (double)interval_ms / 1000.0;
+            double threshold_s = expected_s * 2.5;  /* 2.5x cadence as reserve */
+            if (threshold_s < 10.0) threshold_s = 10.0; /* minimum grace */
+            if (age_s > threshold_s) {
+                stale = true;
+            }
+        }
+        cJSON_AddBoolToObject(sj, "stale", stale);
+
         cJSON_AddItemToObject(sensors, sensor_coordinator_id_to_name((sensor_id_t)i), sj);
     }
     cJSON_AddItemToObject(root, "sensors", sensors);

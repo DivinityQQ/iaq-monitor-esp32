@@ -10,7 +10,7 @@ import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import AirIcon from '@mui/icons-material/Air';
-import { metricsAtom } from '../../store/atoms';
+import { metricsAtom, sensorStatusMapAtom } from '../../store/atoms';
 import { getAQIColorVar } from '../../theme';
 
 /**
@@ -27,9 +27,9 @@ import { getAQIColorVar } from '../../theme';
 export function AQICard() {
   const theme = useTheme();
   const metrics = useAtomValue(metricsAtom);
+  const sensorStatusMap = useAtomValue(sensorStatusMapAtom);
   const [expanded, setExpanded] = useState(false);
-
-  // Show loading skeleton if metrics not available or incomplete
+  // Show loading skeleton until we have a complete AQI snapshot
   if (!metrics?.aqi ||
       typeof metrics.aqi.value !== 'number' ||
       typeof metrics.aqi.pm25_subindex !== 'number' ||
@@ -62,6 +62,13 @@ export function AQICard() {
   const { value, category, dominant, pm25_subindex, pm10_subindex } = metrics.aqi;
   const aqiColor = getAQIColorVar(value, theme);
 
+  // AQI depends primarily on PM sensors; derive stale status
+  const staleSensors: string[] = [];
+  const pms = sensorStatusMap?.pms5003;
+  if (pms?.stale || pms?.state === 'ERROR' || pms?.state === 'DISABLED') staleSensors.push('PM sensors');
+  const isStale = staleSensors.length > 0;
+  const staleReason = isStale ? `Stale • ${staleSensors.join(', ')}` : '';
+
   const formatDominant = (dominant: string): string => {
     if (dominant === 'pm25') return 'PM2.5';
     if (dominant === 'pm10') return 'PM10';
@@ -88,9 +95,16 @@ export function AQICard() {
         {/* Header */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <AirIcon sx={{ fontSize: 32, color: aqiColor }} />
-          <Typography variant="h5" fontWeight={600}>
-            Air Quality Index
-          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+            <Typography variant="h5" fontWeight={600}>
+              Air Quality Index
+            </Typography>
+            {isStale && (
+              <Typography variant="caption" color="text.secondary">
+                {staleReason}
+              </Typography>
+            )}
+          </Box>
         </Box>
 
         {/* Main AQI Value */}

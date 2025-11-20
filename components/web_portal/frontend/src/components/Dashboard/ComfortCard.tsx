@@ -10,7 +10,7 @@ import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import SentimentSatisfiedAltIcon from '@mui/icons-material/SentimentSatisfiedAlt';
-import { metricsAtom } from '../../store/atoms';
+import { metricsAtom, sensorStatusMapAtom } from '../../store/atoms';
 import { getComfortColorVar } from '../../theme';
 
 /**
@@ -28,9 +28,9 @@ import { getComfortColorVar } from '../../theme';
 export function ComfortCard() {
   const theme = useTheme();
   const metrics = useAtomValue(metricsAtom);
+  const sensorStatusMap = useAtomValue(sensorStatusMapAtom);
   const [expanded, setExpanded] = useState(false);
-
-  // Show loading skeleton if metrics not available or incomplete
+  // Show loading skeleton until we have a complete comfort snapshot
   if (!metrics?.comfort ||
       typeof metrics.comfort.score !== 'number' ||
       typeof metrics.comfort.heat_index_c !== 'number' ||
@@ -64,6 +64,13 @@ export function ComfortCard() {
   const { score, category, heat_index_c, abs_humidity_gm3, dew_point_c } = metrics.comfort;
   const comfortColor = getComfortColorVar(score, theme);
 
+  // Comfort depends on temperature & humidity (SHT45); derive stale status
+  const staleSensors: string[] = [];
+  const sht = sensorStatusMap?.sht45;
+  if (sht?.stale || sht?.state === 'ERROR' || sht?.state === 'DISABLED') staleSensors.push('Temp/Humidity');
+  const isStale = staleSensors.length > 0;
+  const staleReason = isStale ? `Stale • ${staleSensors.join(', ')} sensor` : '';
+
   return (
     <Card
       onClick={() => setExpanded(!expanded)}
@@ -84,9 +91,16 @@ export function ComfortCard() {
         {/* Header */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <SentimentSatisfiedAltIcon sx={{ fontSize: 32, color: comfortColor }} />
-          <Typography variant="h5" fontWeight={600}>
-            Comfort Score
-          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+            <Typography variant="h5" fontWeight={600}>
+              Comfort Score
+            </Typography>
+            {isStale && (
+              <Typography variant="caption" color="text.secondary">
+                {staleReason}
+              </Typography>
+            )}
+          </Box>
         </Box>
 
         {/* Main Comfort Score */}

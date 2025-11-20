@@ -6,10 +6,15 @@ import Typography from '@mui/material/Typography';
 import TrendingUpIcon from '@mui/icons-material/TrendingUp';
 import TrendingDownIcon from '@mui/icons-material/TrendingDown';
 import type { ReactNode } from 'react';
+import { useAtomValue } from 'jotai';
+import type { SensorId } from '../../api/types';
+import { sensorStatusAtom } from '../../store/atoms';
 
 interface SensorCardProps {
   /** Main sensor value to display */
   value: number | null;
+  /** Last known valid value (for stale display) */
+  lastValue?: number | null;
   /** Unit of measurement (e.g., "°C", "%", "ppm") */
   unit: string;
   /** Label/title for the sensor (e.g., "Temperature", "Humidity") */
@@ -22,6 +27,8 @@ interface SensorCardProps {
   trend?: number | null;
   /** Optional subtitle/secondary text */
   subtitle?: string;
+  /** Optional sensor id for stale/health metadata */
+  sensorId?: SensorId;
   /** Show loading skeleton */
   loading?: boolean;
   /** Number of decimals to display for the value (default: 1) */
@@ -41,17 +48,32 @@ interface SensorCardProps {
  */
 export function SensorCard({
   value,
+  lastValue,
   unit,
   label,
   icon,
   color = 'primary.main',
   trend,
   subtitle,
+  sensorId,
   loading = false,
   precision = 1,
 }: SensorCardProps) {
-  // Show loading skeleton if loading or value is null
-  if (loading || value === null) {
+  const hasCurrent = typeof value === 'number' && !Number.isNaN(value);
+  const hasLast = typeof lastValue === 'number' && !Number.isNaN(lastValue as number);
+
+  const status = sensorId ? useAtomValue(sensorStatusAtom(sensorId)) : null;
+  const sensorState = status?.state;
+  const lastReadSeconds = status?.last_read_s;
+
+  const isBackendStale = status?.stale === true;
+  const isErrorLike = sensorState === 'ERROR' || sensorState === 'DISABLED';
+
+  const displayValue = hasCurrent ? value! : hasLast ? (lastValue as number) : null;
+  const isStale = (isBackendStale || isErrorLike) && displayValue !== null;
+
+  // Show loading skeleton if loading or we have no value at all (never seen)
+  if (loading || displayValue === null) {
     return (
       <Card sx={{ minHeight: 148 }}>
         <CardContent>
@@ -96,9 +118,10 @@ export function SensorCard({
               fontWeight: 600,
               fontSize: { xs: '2rem', sm: '2.25rem', tablet: '2.25rem', md: '2.5rem' },
               fontVariantNumeric: 'tabular-nums',
+              color: isStale ? 'text.secondary' : undefined,
             }}
           >
-            {value.toFixed(precision)}
+            {displayValue.toFixed(precision)}
           </Typography>
           <Typography
             variant="h5"
@@ -110,7 +133,7 @@ export function SensorCard({
         </Box>
 
         {/* Subtitle or Trend */}
-        {(subtitle || trend !== undefined) && (
+        {(subtitle || trend !== undefined || isStale) && (
           <Box
             sx={{
               mt: 1,
@@ -142,11 +165,27 @@ export function SensorCard({
             )}
 
             {/* Subtitle */}
-            {subtitle && (
+            {(() => {
+              let text = subtitle;
+              const ageText =
+                lastReadSeconds != null ? `Last updated ${Math.round(lastReadSeconds)}s ago` : undefined;
+
+              if (isStale) {
+                if (ageText) {
+                  text = `Stale • ${ageText}`;
+                } else if (subtitle) {
+                  text = `Stale • ${subtitle}`;
+                } else {
+                  text = 'Stale';
+                }
+              }
+
+              return text ? (
               <Typography variant="caption" color="text.secondary">
-                {subtitle}
+                {text}
               </Typography>
-            )}
+              ) : null;
+            })()}
           </Box>
         )}
       </CardContent>

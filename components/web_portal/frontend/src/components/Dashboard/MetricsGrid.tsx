@@ -32,31 +32,37 @@ export function MetricsGrid() {
       <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.temp_c ?? null}
+          lastValue={state?.last?.temp_c ?? null}
           unit="°C"
           label="Temperature"
           icon={<ThermostatIcon />}
           color="error.main"
+          sensorId="sht45"
         />
       </Grid>
 
       <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.rh_pct ?? null}
+          lastValue={state?.last?.rh_pct ?? null}
           unit="%"
           label="Humidity"
           icon={<WaterDropIcon />}
           color="info.main"
+           sensorId="sht45"
         />
       </Grid>
 
       <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.co2_ppm ?? null}
+          lastValue={state?.last?.co2_ppm ?? null}
           unit="ppm"
           label="CO₂"
           icon={<Co2Icon />}
           color="warning.main"
           precision={0}
+          sensorId="s8"
           subtitle={typeof metrics?.co2_score === 'number' ? `Score: ${metrics.co2_score.toFixed(0)}` : undefined}
         />
       </Grid>
@@ -64,10 +70,12 @@ export function MetricsGrid() {
       <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.pressure_hpa ?? null}
+          lastValue={state?.last?.pressure_hpa ?? null}
           unit="hPa"
           label="Pressure"
           icon={<CloudIcon />}
           color="primary.main"
+          sensorId="bmp280"
           subtitle={metrics?.pressure?.trend}
         />
       </Grid>
@@ -76,10 +84,12 @@ export function MetricsGrid() {
       <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.pm25_ugm3 ?? null}
+          lastValue={state?.last?.pm25_ugm3 ?? null}
           unit="µg/m³"
           label="PM2.5"
           icon={<GrainIcon />}
           color="error.main"
+          sensorId="pms5003"
           subtitle={metrics?.pm25_spike_detected ? 'Spike detected' : undefined}
         />
       </Grid>
@@ -87,31 +97,37 @@ export function MetricsGrid() {
       <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.pm10_ugm3 ?? null}
+          lastValue={state?.last?.pm10_ugm3 ?? null}
           unit="µg/m³"
           label="PM10"
           icon={<GrainIcon />}
           color="warning.main"
+          sensorId="pms5003"
         />
       </Grid>
 
       <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.pm1_ugm3 ?? null}
+          lastValue={state?.last?.pm1_ugm3 ?? null}
           unit="µg/m³"
           label="PM1.0"
           icon={<GrainIcon />}
           color="info.main"
+          sensorId="pms5003"
         />
       </Grid>
 
       <Grid size={{ xs: 6, tablet: 4, md: 3 }}>
         <SensorCard
           value={state?.voc_index ?? null}
+          lastValue={state?.last?.voc_index ?? null}
           unit="index"
           label="VOC Index"
           icon={<ScienceIcon />}
           color="success.main"
           precision={0}
+          sensorId="sgp41"
           subtitle={metrics?.voc_category}
         />
       </Grid>

@@ -124,10 +124,7 @@ static void apply_pm_rh_correction(iaq_data_t *data)
 {
 #ifdef CONFIG_FUSION_PM_RH_ENABLE
     if (!data->valid.rh_pct || !data->valid.pm25_ugm3) {
-        /* Copy raw values to fused (no correction possible) */
-        data->fused.pm1_ugm3 = data->raw.pm1_ugm3;
-        data->fused.pm25_ugm3 = data->raw.pm25_ugm3;
-        data->fused.pm10_ugm3 = data->raw.pm10_ugm3;
+        /* No valid PM/RH input - keep last fused values as-is */
         data->fusion_diag.pm_rh_factor = 1.0f;
         data->fusion_diag.pm25_quality = 0;
         return;

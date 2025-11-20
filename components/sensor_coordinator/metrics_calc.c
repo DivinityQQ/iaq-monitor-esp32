@@ -196,11 +196,6 @@ static const char* aqi_value_to_category(uint16_t aqi)
 static void calculate_aqi(iaq_data_t *data)
 {
     if (!data->valid.pm25_ugm3 && !data->valid.pm10_ugm3) {
-        data->metrics.aqi_value = UINT16_MAX;
-        data->metrics.aqi_category = "unknown";
-        data->metrics.aqi_dominant = "none";
-        data->metrics.aqi_pm25_subindex = NAN;
-        data->metrics.aqi_pm10_subindex = NAN;
         return;
     }
 
@@ -330,11 +325,6 @@ static float calculate_heat_index(float temp_c, float rh_pct)
 static void calculate_comfort_score(iaq_data_t *data)
 {
     if (!data->valid.temp_c || !data->valid.rh_pct) {
-        data->metrics.comfort_score = UINT8_MAX;  // Unknown/invalid
-        data->metrics.comfort_category = "unknown";
-        data->metrics.dew_point_c = NAN;
-        data->metrics.abs_humidity_gm3 = NAN;
-        data->metrics.heat_index_c = NAN;
         return;
     }
 
@@ -412,7 +402,6 @@ static void calculate_comfort_score(iaq_data_t *data)
 static void calculate_co2_score(iaq_data_t *data)
 {
     if (!data->valid.co2_ppm) {
-        data->metrics.co2_score = UINT8_MAX;  // Unknown/invalid
         return;
     }
 
@@ -510,8 +499,6 @@ static void calculate_voc_nox_categories(iaq_data_t *data)
 static void calculate_mold_risk(iaq_data_t *data)
 {
     if (!data->valid.temp_c || !data->valid.rh_pct) {
-        data->metrics.mold_risk_score = UINT8_MAX;  // Unknown/invalid
-        data->metrics.mold_risk_category = "unknown";
         return;
     }
 

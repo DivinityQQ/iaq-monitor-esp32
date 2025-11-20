@@ -10,7 +10,7 @@ import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
-import { metricsAtom } from '../../store/atoms';
+import { metricsAtom, sensorStatusMapAtom } from '../../store/atoms';
 import { getIAQColorVar } from '../../theme';
 
 /**
@@ -29,9 +29,9 @@ import { getIAQColorVar } from '../../theme';
 export function IAQCard() {
   const theme = useTheme();
   const metrics = useAtomValue(metricsAtom);
+  const sensorStatusMap = useAtomValue(sensorStatusMapAtom);
   const [expanded, setExpanded] = useState(false);
-
-  // Show loading skeleton if metrics not available or incomplete
+  // Show loading skeleton until we have a complete metrics snapshot
   if (!metrics?.overall_iaq_score ||
       typeof metrics.overall_iaq_score !== 'number' ||
       !metrics.aqi || typeof metrics.aqi.value !== 'number' ||
@@ -64,6 +64,19 @@ export function IAQCard() {
 
   const iaqScore = metrics.overall_iaq_score;
   const iaqColor = getIAQColorVar(iaqScore, theme);
+
+  // Derive stale reason from backend sensor statuses
+  const staleSensors: string[] = [];
+  const sht = sensorStatusMap?.sht45;
+  const bmp = sensorStatusMap?.bmp280;
+  const pms = sensorStatusMap?.pms5003;
+  const s8 = sensorStatusMap?.s8;
+  if (sht?.stale || sht?.state === 'ERROR' || sht?.state === 'DISABLED') staleSensors.push('Temp/Humidity');
+  if (bmp?.stale || bmp?.state === 'ERROR' || bmp?.state === 'DISABLED') staleSensors.push('Pressure');
+  if (pms?.stale || pms?.state === 'ERROR' || pms?.state === 'DISABLED') staleSensors.push('PM');
+  if (s8?.stale || s8?.state === 'ERROR' || s8?.state === 'DISABLED') staleSensors.push('CO₂');
+  const isStale = staleSensors.length > 0;
+  const staleReason = isStale ? `Stale • ${staleSensors.join(', ')} sensor${staleSensors.length > 1 ? 's' : ''}` : '';
 
   // Determine IAQ category based on score
   const getCategory = (score: number): string => {
@@ -98,9 +111,16 @@ export function IAQCard() {
         {/* Header */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
           <HealthAndSafetyIcon sx={{ fontSize: 32, color: iaqColor }} />
-          <Typography variant="h5" fontWeight={600}>
-            Indoor Air Quality
-          </Typography>
+          <Box sx={{ display: 'flex', flexDirection: 'column' }}>
+            <Typography variant="h5" fontWeight={600}>
+              Indoor Air Quality
+            </Typography>
+            {isStale && (
+              <Typography variant="caption" color="text.secondary">
+                {staleReason}
+              </Typography>
+            )}
+          </Box>
         </Box>
 
         {/* Main IAQ Score */}

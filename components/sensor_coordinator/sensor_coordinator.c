@@ -93,14 +93,10 @@ static void invalidate_sensor_data(sensor_id_t id)
                 data->valid.rh_pct = false;
                 data->raw.temp_c = NAN;
                 data->raw.rh_pct = NAN;
-                /* Fused values depend on SHT45 */
-                data->fused.temp_c = NAN;
-                data->fused.rh_pct = NAN;
                 break;
             case SENSOR_ID_BMP280:
                 data->valid.pressure_pa = false;
                 data->raw.pressure_pa = NAN;
-                data->fused.pressure_pa = NAN;
                 break;
             case SENSOR_ID_SGP41:
                 data->valid.voc_index = false;
@@ -115,14 +111,10 @@ static void invalidate_sensor_data(sensor_id_t id)
                 data->raw.pm1_ugm3 = NAN;
                 data->raw.pm25_ugm3 = NAN;
                 data->raw.pm10_ugm3 = NAN;
-                data->fused.pm1_ugm3 = NAN;
-                data->fused.pm25_ugm3 = NAN;
-                data->fused.pm10_ugm3 = NAN;
                 break;
             case SENSOR_ID_S8:
                 data->valid.co2_ppm = false;
                 data->raw.co2_ppm = NAN;
-                data->fused.co2_ppm = NAN;
                 break;
             default:
                 break;

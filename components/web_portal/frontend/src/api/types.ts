@@ -17,6 +17,7 @@ export interface SensorStatus {
   errors: number;
   last_read_s?: number;
   warmup_remaining_s?: number;
+  stale?: boolean;
 }
 
 export interface SensorCadence {
@@ -41,6 +42,19 @@ export interface State {
   mcu_temp_c: number | null;
   aqi: number | null;
   comfort_score: number | null;
+  /** Last known valid values (for stale display). Fields mirror top-level State fields. */
+  last?: {
+    temp_c: number | null;
+    rh_pct: number | null;
+    pressure_hpa: number | null;
+    pm25_ugm3: number | null;
+    pm10_ugm3: number | null;
+    pm1_ugm3?: number | null;
+    co2_ppm: number | null;
+    voc_index: number | null;
+    nox_index: number | null;
+    mcu_temp_c: number | null;
+  };
 }
 
 // ============================================================================
