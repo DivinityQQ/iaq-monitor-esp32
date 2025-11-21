@@ -431,6 +431,11 @@ static bool check_screen_dirty(int idx)
         s_cache[idx].warming = warming;
         dirty = true;
     }
+    /* Keep warmup progress bar smooth even without time sync by forcing redraws
+     * while warming on the overview screen. */
+    if (warming && idx == 0) {
+        dirty = true;
+    }
 
     return dirty;
 }
