@@ -55,6 +55,41 @@ static bool s_ever_connected = false;         /* persisted across boots */
 /* Additional NVS keys */
 #define NVS_KEY_CONNECTED_ONCE "connected_once"
 
+static void wifi_manager_apply_ps(wifi_mode_t mode)
+{
+    /* Only applies to STA/APSTA */
+    if (mode != WIFI_MODE_STA && mode != WIFI_MODE_APSTA) {
+        (void)esp_wifi_set_ps(WIFI_PS_NONE);
+        return;
+    }
+
+#ifndef CONFIG_IAQ_PM_RUNTIME_ENABLE
+    /* Keep behavior explicit when runtime PM is disabled */
+    (void)esp_wifi_set_ps(WIFI_PS_NONE);
+    ESP_LOGI(TAG, "WiFi power save forced to NONE (runtime PM disabled)");
+    return;
+#endif
+
+    wifi_ps_type_t ps = WIFI_PS_NONE;
+#ifdef CONFIG_IAQ_WIFI_PS_MODEM_MIN
+    ps = WIFI_PS_MIN_MODEM;
+#endif
+#ifdef CONFIG_IAQ_WIFI_PS_MODEM_MAX
+    ps = WIFI_PS_MAX_MODEM;
+#endif
+#ifdef CONFIG_IAQ_WIFI_PS_NONE
+    ps = WIFI_PS_NONE;
+#endif
+
+    esp_err_t ret = esp_wifi_set_ps(ps);
+    if (ret == ESP_OK) {
+        ESP_LOGI(TAG, "WiFi power save: %s", ps == WIFI_PS_NONE ? "NONE" :
+                 (ps == WIFI_PS_MIN_MODEM ? "MODEM_MIN" : "MODEM_MAX"));
+    } else {
+        ESP_LOGW(TAG, "Failed to set WiFi power save: %s", esp_err_to_name(ret));
+    }
+}
+
 /* WiFi event handler */
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
@@ -369,6 +404,11 @@ esp_err_t wifi_manager_start_sta(void)
     strlcpy((char *)wifi_cfg.sta.password, s_password, sizeof(wifi_cfg.sta.password));
     wifi_cfg.sta.threshold.authmode = WIFI_AUTH_WPA2_PSK;
     wifi_cfg.sta.sae_pwe_h2e = WPA3_SAE_PWE_BOTH;
+#ifdef CONFIG_IAQ_WIFI_LISTEN_INTERVAL
+    wifi_cfg.sta.listen_interval = CONFIG_IAQ_WIFI_LISTEN_INTERVAL;
+#else
+    wifi_cfg.sta.listen_interval = 0; /* default listen interval */
+#endif
 
     /* Decide whether to keep AP (APSTA) based on Kconfig */
 #ifdef CONFIG_IAQ_AP_KEEP_AFTER_PROVISION
@@ -434,6 +474,8 @@ esp_err_t wifi_manager_start_sta(void)
         return ret;
     }
 
+    wifi_manager_apply_ps(target);
+
     s_current_mode = target;
     s_connect_retries = 0;
     ESP_LOGI(TAG, "WiFi STA started. SSID: %s", s_ssid);
@@ -486,6 +528,10 @@ esp_err_t wifi_manager_start_ap(void)
         ESP_LOGE(TAG, "Failed to start AP: %s", esp_err_to_name(ret));
         return ret;
     }
+
+    /* Force PS off in AP-only mode */
+    wifi_manager_apply_ps(WIFI_MODE_AP);
+
     s_current_mode = WIFI_MODE_AP;
     bool open_ap = (ap_cfg.ap.authmode == WIFI_AUTH_OPEN);
     if (open_ap) {

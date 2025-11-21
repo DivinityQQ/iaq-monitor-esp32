@@ -30,6 +30,7 @@
 #include "time_sync.h"
 #include "iaq_profiler.h"
 #include "iaq_json.h"
+#include "pm_guard.h"
 
 static const char *TAG = "MQTT_MGR";
 
@@ -516,6 +517,7 @@ esp_err_t mqtt_publish_status(const iaq_data_t *data)
 static esp_err_t publish_json(const char *topic, cJSON *obj)
 {
     if (!s_mqtt_connected || !obj || !topic) { if (obj) cJSON_Delete(obj); return ESP_FAIL; }
+    pm_guard_lock_cpu();
     char *json_string = cJSON_PrintUnformatted(obj);
     if (json_string) {
         int msg_id = esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, CONFIG_IAQ_MQTT_TELEMETRY_QOS, 0, true);
@@ -523,11 +525,13 @@ static esp_err_t publish_json(const char *topic, cJSON *obj)
             ESP_LOGW(TAG, "MQTT enqueue failed (topic=%s, msg_id=%d), dropping message", topic, msg_id);
             free(json_string);
             cJSON_Delete(obj);
+            pm_guard_unlock_cpu();
             return ESP_FAIL;
         }
         ESP_LOGD(TAG, "Enqueued %s, msg_id=%d", topic, msg_id);
         free(json_string);
     }
+    pm_guard_unlock_cpu();
     cJSON_Delete(obj);
     return ESP_OK;
 }

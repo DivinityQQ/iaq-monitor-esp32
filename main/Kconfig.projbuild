@@ -75,6 +75,16 @@ menu "IAQ Monitor Configuration"
         help
             Enable runtime console commands for configuration and debugging
 
+    config IAQ_PM_RUNTIME_ENABLE
+        bool "Enable runtime power management (DFS + light sleep)"
+        default y
+        depends on PM_ENABLE
+        help
+            When enabled, pm_guard configures dynamic frequency scaling and light sleep
+            locks at startup. Disable to compare power consumption without runtime PM
+            while keeping PM support compiled in.
+
+
     menu "Wi-Fi AP Provisioning"
         config IAQ_AP_SSID
             string "SoftAP SSID (provisioning)"
@@ -119,6 +129,31 @@ menu "IAQ Monitor Configuration"
                 When enabled, device runs in AP+STA after credentials are provisioned, so the
                 web UI can always be reached via SoftAP and LAN simultaneously. By default we
                 switch to STA-only after provisioning.
+    endmenu
+
+    menu "Wi-Fi Power Save"
+        choice IAQ_WIFI_PS_MODE
+            prompt "Wi-Fi power save mode (station)"
+            default IAQ_WIFI_PS_MODEM_MIN
+            depends on IAQ_PM_RUNTIME_ENABLE
+            help
+                Wi-Fi power save mode for station operation. Modem sleep reduces APB lock
+                time and power draw. Choose NONE if you need lowest latency.
+            config IAQ_WIFI_PS_NONE
+                bool "None"
+            config IAQ_WIFI_PS_MODEM_MIN
+                bool "Modem sleep (min)"
+            config IAQ_WIFI_PS_MODEM_MAX
+                bool "Modem sleep (max)"
+        endchoice
+
+        config IAQ_WIFI_LISTEN_INTERVAL
+            int "Listen interval (DTIMs) for station power save"
+            range 1 10
+            default 3
+            depends on IAQ_WIFI_PS_MODEM_MIN || IAQ_WIFI_PS_MODEM_MAX
+            help
+                DTIM listen interval used in STA mode. Takes effect when modem sleep is enabled.
     endmenu
 
     menu "MQTT Publishing Options"
@@ -279,6 +314,15 @@ menu "Profiling"
         help
             Adds CPU usage breakdown per task using FreeRTOS runtime stats.
             Increases code size modestly.
+
+    config IAQ_PROFILING_PM_LOCKS
+        bool "Include PM lock profiling (esp_pm_dump_locks)"
+        default n
+        depends on IAQ_PROFILING && PM_ENABLE
+        select PM_PROFILING
+        help
+            Track time each PM lock is held and allow dumping via esp_pm_dump_locks().
+            Adds runtime overhead; keep disabled in production.
 
     config IAQ_PROFILING_PARSEABLE_OUTPUT
         bool "Use machine-parseable output format"

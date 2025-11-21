@@ -82,16 +82,18 @@ CONFIG_FATFS_MAX_LFN=255
 CONFIG_NVS_ENCRYPTION=n  # Enable later for production
 
 # Console (for runtime commands)
-# Set the primary console to the on‑chip USB‑Serial/JTAG (CDC ACM on /dev/ttyACM*)
-CONFIG_ESP_CONSOLE_UART_DEFAULT=n
-CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=y
+# Primary console on UART (default pins, 115200). USB‑Serial/JTAG disabled for light sleep.
+CONFIG_ESP_CONSOLE_UART_DEFAULT=y
+CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG=n
 CONFIG_ESP_CONSOLE_USB_CDC=n
 CONFIG_ESP_CONSOLE_UART_BAUDRATE=115200
 # Do not mirror logs to a secondary console
 CONFIG_ESP_CONSOLE_SECONDARY_NONE=y
 
-# Power Management (disabled for now)
-CONFIG_PM_ENABLE=n
+# Power Management (enable DFS + light sleep by default)
+CONFIG_PM_ENABLE=y
+CONFIG_FREERTOS_USE_TICKLESS_IDLE=y
+# CONFIG_PM_PROFILING is not set
 
 # Watchdog
 CONFIG_ESP_TASK_WDT=y
@@ -107,3 +109,6 @@ CONFIG_ESP_COREDUMP_ENABLE_TO_NONE=y
 CONFIG_COMPILER_OPTIMIZATION_PERF=y
 # Keep assertions enabled (maps to -DNDEBUG off)
 CONFIG_COMPILER_OPTIMIZATION_ASSERTIONS_ENABLE=y
+
+# Sensors
+CONFIG_IAQ_PMS5003_BG_READER=n

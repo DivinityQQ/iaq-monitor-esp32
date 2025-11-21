@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "esp_timer.h"
+#include "pm_guard.h"
 
 #include "sensirion_gas_index_algorithm.h"
 
@@ -130,12 +131,22 @@ esp_err_t sgp41_driver_conditioning_tick(float temp_c, float humidity_rh)
     uint16_t t_ticks  = sgp41_t_to_ticks(temp_c);
     uint8_t tx[8];
     build_cmd_args(SGP41_CMD_EXECUTE_CONDITIONING, rh_ticks, t_ticks, tx);
+
+    pm_guard_lock_no_sleep();
+    pm_guard_lock_bus();
+
     esp_err_t ret = i2c_master_transmit(s_dev, tx, sizeof(tx), CONFIG_IAQ_I2C_TIMEOUT_MS);
-    if (ret != ESP_OK) return ret;
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
+    if (ret != ESP_OK) goto done;
     vTaskDelay(pdMS_TO_TICKS(SGP41_MEAS_DELAY_MS));
     /* Read 3 bytes: VOC[2] + CRC. Ignore value but verify CRC for health */
     uint8_t rx[3] = {0};
+    pm_guard_lock_no_sleep();
+    pm_guard_lock_bus();
     ret = i2c_master_receive(s_dev, rx, sizeof(rx), CONFIG_IAQ_I2C_TIMEOUT_MS);
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
     if (ret == ESP_OK && !verify_rx_word(rx[0], rx[1], rx[2])) {
         ret = ESP_ERR_INVALID_CRC;
     }
@@ -148,7 +159,9 @@ esp_err_t sgp41_driver_conditioning_tick(float temp_c, float humidity_rh)
     } else {
         s_cond_err_streak = 0;
     }
-    return ESP_OK;
+    ret = ESP_OK;
+done:
+    return ret;
 }
 
 esp_err_t sgp41_driver_read(uint16_t *out_voc_index, uint16_t *out_nox_index,
@@ -182,26 +195,34 @@ esp_err_t sgp41_driver_read(uint16_t *out_voc_index, uint16_t *out_nox_index,
     /* Build measure command */
     uint8_t tx[8];
     build_cmd_args(SGP41_CMD_MEASURE_RAW_SIGNALS, rh_ticks, t_ticks, tx);
+    pm_guard_lock_no_sleep();
+    pm_guard_lock_bus();
+
     esp_err_t ret = i2c_master_transmit(s_dev, tx, sizeof(tx), CONFIG_IAQ_I2C_TIMEOUT_MS);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "SGP41 transmit failed: %s", esp_err_to_name(ret));
         // One-shot retry on transient error
         ret = i2c_master_transmit(s_dev, tx, sizeof(tx), CONFIG_IAQ_I2C_TIMEOUT_MS);
-        if (ret != ESP_OK) return ret;
+        if (ret != ESP_OK) goto exit_tx;
     }
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
     vTaskDelay(pdMS_TO_TICKS(SGP41_MEAS_DELAY_MS));
     /* Read 6 bytes: VOC[2] CRC, NOx[2] CRC */
     uint8_t rx[6] = {0};
+    pm_guard_lock_no_sleep();
+    pm_guard_lock_bus();
     ret = i2c_master_receive(s_dev, rx, sizeof(rx), CONFIG_IAQ_I2C_TIMEOUT_MS);
     if (ret != ESP_OK) {
         ESP_LOGW(TAG, "SGP41 receive failed: %s", esp_err_to_name(ret));
         // One-shot retry
         ret = i2c_master_receive(s_dev, rx, sizeof(rx), CONFIG_IAQ_I2C_TIMEOUT_MS);
-        if (ret != ESP_OK) return ret;
+        if (ret != ESP_OK) goto exit_rx;
     }
     if (!verify_rx_word(rx[0], rx[1], rx[2]) || !verify_rx_word(rx[3], rx[4], rx[5])) {
         ESP_LOGW(TAG, "SGP41 CRC check failed");
-        return ESP_ERR_INVALID_CRC;
+        ret = ESP_ERR_INVALID_CRC;
+        goto exit_rx;
     }
     uint16_t sraw_voc = ((uint16_t)rx[0] << 8) | rx[1];
     uint16_t sraw_nox = ((uint16_t)rx[3] << 8) | rx[4];
@@ -214,7 +235,15 @@ esp_err_t sgp41_driver_read(uint16_t *out_voc_index, uint16_t *out_nox_index,
     if (out_voc_index) *out_voc_index = (uint16_t)voc_index;
     if (out_nox_index) *out_nox_index = (uint16_t)nox_index;
 
-    return ESP_OK;
+    ret = ESP_OK;
+exit_rx:
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
+    return ret;
+exit_tx:
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
+    return ret;
 #endif
 }
 

@@ -15,7 +15,7 @@ esp_err_t i2c_bus_init(void)
     }
 
     i2c_master_bus_config_t bus_config = {
-        .clk_source = I2C_CLK_SRC_DEFAULT,
+        .clk_source = I2C_CLK_SRC_XTAL,
         .i2c_port = I2C_NUM_0,
         .scl_io_num = CONFIG_IAQ_I2C_SCL_GPIO,
         .sda_io_num = CONFIG_IAQ_I2C_SDA_GPIO,

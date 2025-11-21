@@ -12,6 +12,7 @@
 #include "iaq_profiler.h"
 #include "iaq_data.h"
 #include "esp_wifi.h"
+#include "esp_pm.h"
 
 static const char *TAG = "IAQ_PROF";
 
@@ -302,6 +303,15 @@ void iaq_status_report(void)
         vPortFree(buf);
     } else {
         ESP_LOGW(TAG, "CPU stats skipped: OOM allocating buffer");
+    }
+#endif
+
+#if CONFIG_IAQ_PROFILING_PM_LOCKS
+    /* PM lock profiling (esp_pm_dump_locks) */
+    ESP_LOGI(TAG, "  -- PM Locks --");
+    esp_err_t pm_ret = esp_pm_dump_locks(stdout);
+    if (pm_ret != ESP_OK) {
+        ESP_LOGW(TAG, "  PM lock dump failed: %s", esp_err_to_name(pm_ret));
     }
 #endif
 

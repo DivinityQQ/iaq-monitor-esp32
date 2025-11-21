@@ -6,6 +6,7 @@
 #include "esp_timer.h"
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
+#include "pm_guard.h"
 #include <math.h>
 #include <string.h>
 
@@ -49,6 +50,11 @@ static esp_err_t s8_mb_read_regs(s8_mb_fn_t fn, uint16_t start_addr, uint16_t qu
     if (!s_initialized) return ESP_ERR_INVALID_STATE;
     if (quantity == 0 || quantity > 6) return ESP_ERR_INVALID_ARG; /* device limit */
 
+    pm_guard_lock_no_sleep();
+    pm_guard_lock_bus();
+
+    esp_err_t err = ESP_OK;
+
     uint8_t req[8];
     req[0] = s_slave_addr;
     req[1] = (uint8_t)fn;
@@ -62,41 +68,43 @@ static esp_err_t s8_mb_read_regs(s8_mb_fn_t fn, uint16_t start_addr, uint16_t qu
 
     (void)uart_bus_flush_rx(s_uart_port);
     int written = uart_bus_write_bytes(s_uart_port, req, sizeof(req));
-    if (written != sizeof(req)) return ESP_FAIL;
+    if (written != sizeof(req)) { err = ESP_FAIL; goto exit; }
 
     /* Read 3-byte header */
     uint8_t hdr[3];
     int n = uart_bus_read_bytes(s_uart_port, hdr, sizeof(hdr), 100);
-    if (n != 3) return ESP_ERR_TIMEOUT;
+    if (n != 3) { err = ESP_ERR_TIMEOUT; goto exit; }
 
-    if (hdr[0] != s_slave_addr) return ESP_ERR_INVALID_RESPONSE;
+    if (hdr[0] != s_slave_addr) { err = ESP_ERR_INVALID_RESPONSE; goto exit; }
     uint8_t func = hdr[1];
     if (func == ((uint8_t)fn | 0x80)) {
         /* Exception response: we already have ex_code in hdr[2]; read 2 CRC bytes */
         uint8_t crc_bytes[2];
         int m = uart_bus_read_bytes(s_uart_port, crc_bytes, sizeof(crc_bytes), 50);
-        if (m != (int)sizeof(crc_bytes)) return ESP_ERR_INVALID_RESPONSE;
+        if (m != (int)sizeof(crc_bytes)) { err = ESP_ERR_INVALID_RESPONSE; goto exit; }
         uint8_t ex_code = hdr[2];
         uint8_t tmp[3] = { hdr[0], hdr[1], ex_code };
         uint16_t crc_calc = uart_calc_crc16_modbus(tmp, 3);
         uint16_t crc_frame = ((uint16_t)crc_bytes[1] << 8) | crc_bytes[0];
-        if (crc_calc != crc_frame) return ESP_ERR_INVALID_RESPONSE;
+        if (crc_calc != crc_frame) { err = ESP_ERR_INVALID_RESPONSE; goto exit; }
         ESP_LOGW(TAG, "Modbus exception: fn=0x%02X code=0x%02X", (int)fn, ex_code);
-        return ESP_FAIL;
+        err = ESP_FAIL;
+        goto exit;
     }
 
-    if (func != (uint8_t)fn) return ESP_ERR_INVALID_RESPONSE;
+    if (func != (uint8_t)fn) { err = ESP_ERR_INVALID_RESPONSE; goto exit; }
 
     uint8_t byte_count = hdr[2];
     size_t need = (size_t)byte_count + 2; /* data + CRC */
     if (need > out_size + 2) {
         ESP_LOGE(TAG, "S8: response too large (%u bytes)", (unsigned)byte_count);
-        return ESP_ERR_NO_MEM;
+        err = ESP_ERR_NO_MEM;
+        goto exit;
     }
     uint8_t buf[64];
-    if (need > sizeof(buf)) return ESP_ERR_NO_MEM;
+    if (need > sizeof(buf)) { err = ESP_ERR_NO_MEM; goto exit; }
     int r = uart_bus_read_bytes(s_uart_port, buf, need, 100);
-    if (r != (int)need) return ESP_ERR_TIMEOUT;
+    if (r != (int)need) { err = ESP_ERR_TIMEOUT; goto exit; }
 
     /* Validate CRC over addr,func,byte_count,data */
     uint8_t tmp[3+64];
@@ -104,15 +112,23 @@ static esp_err_t s8_mb_read_regs(s8_mb_fn_t fn, uint16_t start_addr, uint16_t qu
     memcpy(tmp + 3, buf, byte_count);
     uint16_t crc_calc = uart_calc_crc16_modbus(tmp, 3 + byte_count);
     uint16_t crc_frame = ((uint16_t)buf[byte_count + 1] << 8) | buf[byte_count];
-    if (crc_calc != crc_frame) return ESP_ERR_INVALID_RESPONSE;
+    if (crc_calc != crc_frame) { err = ESP_ERR_INVALID_RESPONSE; goto exit; }
 
     memcpy(out_payload, buf, byte_count);
     if (out_len) *out_len = byte_count;
-    return ESP_OK;
+    err = ESP_OK;
+exit:
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
+    return err;
 }
 
 static esp_err_t s8_mb_write_single(uint16_t reg_addr, uint16_t value)
 {
+    pm_guard_lock_no_sleep();
+    pm_guard_lock_bus();
+    esp_err_t err = ESP_OK;
+
     uint8_t req[8];
     req[0] = s_slave_addr;
     req[1] = (uint8_t)S8_MB_FN_WRITE_SINGLE;
@@ -126,39 +142,44 @@ static esp_err_t s8_mb_write_single(uint16_t reg_addr, uint16_t value)
 
     (void)uart_bus_flush_rx(s_uart_port);
     int written = uart_bus_write_bytes(s_uart_port, req, sizeof(req));
-    if (written != sizeof(req)) return ESP_FAIL;
+    if (written != sizeof(req)) { err = ESP_FAIL; goto exit; }
 
     /* Read 3-byte header */
     uint8_t hdr[3];
     int n = uart_bus_read_bytes(s_uart_port, hdr, sizeof(hdr), 150);
-    if (n != (int)sizeof(hdr)) return ESP_ERR_TIMEOUT;
-    if (hdr[0] != s_slave_addr) return ESP_ERR_INVALID_RESPONSE;
+    if (n != (int)sizeof(hdr)) { err = ESP_ERR_TIMEOUT; goto exit; }
+    if (hdr[0] != s_slave_addr) { err = ESP_ERR_INVALID_RESPONSE; goto exit; }
     uint8_t func = hdr[1];
     if (func == ((uint8_t)S8_MB_FN_WRITE_SINGLE | 0x80)) {
         /* Exception response: hdr[2] is ex_code, then 2 CRC bytes */
         uint8_t crc_bytes[2];
         int m = uart_bus_read_bytes(s_uart_port, crc_bytes, sizeof(crc_bytes), 50);
-        if (m != (int)sizeof(crc_bytes)) return ESP_ERR_INVALID_RESPONSE;
+        if (m != (int)sizeof(crc_bytes)) { err = ESP_ERR_INVALID_RESPONSE; goto exit; }
         uint8_t ex_code = hdr[2];
         uint8_t tmp[3] = { hdr[0], hdr[1], ex_code };
         uint16_t crc_calc = uart_calc_crc16_modbus(tmp, 3);
         uint16_t crc_frame = ((uint16_t)crc_bytes[1] << 8) | crc_bytes[0];
-        if (crc_calc != crc_frame) return ESP_ERR_INVALID_RESPONSE;
+        if (crc_calc != crc_frame) { err = ESP_ERR_INVALID_RESPONSE; goto exit; }
         ESP_LOGW(TAG, "Modbus exception (write single): code=0x%02X", ex_code);
-        return ESP_FAIL;
+        err = ESP_FAIL;
+        goto exit;
     }
-    if (func != (uint8_t)S8_MB_FN_WRITE_SINGLE) return ESP_ERR_INVALID_RESPONSE;
+    if (func != (uint8_t)S8_MB_FN_WRITE_SINGLE) { err = ESP_ERR_INVALID_RESPONSE; goto exit; }
     /* Read remaining 5 bytes of normal 8-byte echo */
     uint8_t tail[5];
     int r = uart_bus_read_bytes(s_uart_port, tail, sizeof(tail), 100);
-    if (r != (int)sizeof(tail)) return ESP_ERR_TIMEOUT;
+    if (r != (int)sizeof(tail)) { err = ESP_ERR_TIMEOUT; goto exit; }
     uint8_t rsp[8] = { hdr[0], hdr[1], hdr[2], tail[0], tail[1], tail[2], tail[3], tail[4] };
     /* CRC check */
     uint16_t crc_calc = uart_calc_crc16_modbus(rsp, 6);
     uint16_t crc_frame = ((uint16_t)rsp[7] << 8) | rsp[6];
-    if (crc_calc != crc_frame) return ESP_ERR_INVALID_RESPONSE;
-    if (rsp[2] != req[2] || rsp[3] != req[3] || rsp[4] != req[4] || rsp[5] != req[5]) return ESP_ERR_INVALID_RESPONSE;
-    return ESP_OK;
+    if (crc_calc != crc_frame) { err = ESP_ERR_INVALID_RESPONSE; goto exit; }
+    if (rsp[2] != req[2] || rsp[3] != req[3] || rsp[4] != req[4] || rsp[5] != req[5]) { err = ESP_ERR_INVALID_RESPONSE; goto exit; }
+    err = ESP_OK;
+exit:
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
+    return err;
 }
 
 /* Request/response implemented inline in read_co2() using UART event queue */

@@ -10,8 +10,10 @@
 #include <math.h>
 #include <string.h>
 #include <stdlib.h>
+#include "esp_sleep.h"
 #include "driver/gpio.h"
 #include "iaq_profiler.h"
+#include "pm_guard.h"
 
 #ifdef CONFIG_IAQ_SIMULATION
 #include "sensor_sim.h"
@@ -217,6 +219,22 @@ static bool parse_pms_frame(const uint8_t *frame, float *pm1, float *pm25, float
     return true;
 }
 
+/* Build a 7-byte command frame: 0x42 0x4D cmd dataH dataL cksH cksL */
+static int pms_send_command(uint8_t cmd, uint16_t data)
+{
+    uint8_t frame[7];
+    frame[0] = 0x42;
+    frame[1] = 0x4D;
+    frame[2] = cmd;
+    frame[3] = (uint8_t)((data >> 8) & 0xFF);
+    frame[4] = (uint8_t)(data & 0xFF);
+    /* Datasheet: checksum is sum of bytes 0..4 */
+    uint16_t sum = (uint16_t)(frame[0] + frame[1] + frame[2] + frame[3] + frame[4]);
+    frame[5] = (uint8_t)((sum >> 8) & 0xFF);
+    frame[6] = (uint8_t)(sum & 0xFF);
+    return uart_bus_write_bytes(s_uart_port, frame, sizeof(frame));
+}
+
 esp_err_t pms5003_driver_init(void)
 {
     if (s_initialized) {
@@ -232,6 +250,16 @@ esp_err_t pms5003_driver_init(void)
     esp_err_t ret;
 #ifdef CONFIG_IAQ_PMS5003_BG_READER
     ret = uart_bus_init_with_queue(uart_port, tx_gpio, rx_gpio, 9600, rx_buf_size, 8, &s_uart_queue);
+    /* Light-sleep wake on UART RX so background streaming survives PM */
+    if (ret == ESP_OK) {
+        (void)uart_set_wakeup_threshold(uart_port, 1);
+#if CONFIG_PM_ENABLE
+        esp_err_t wake_err = esp_sleep_enable_uart_wakeup(uart_port);
+        if (wake_err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to enable UART%d wakeup: %s", uart_port, esp_err_to_name(wake_err));
+        }
+#endif
+    }
 #else
     ret = uart_bus_init(uart_port, tx_gpio, rx_gpio, 9600, rx_buf_size);
 #endif
@@ -282,6 +310,20 @@ esp_err_t pms5003_driver_init(void)
     /* Flush any stale data */
     (void)uart_bus_flush_rx(uart_port);
 
+#if !CONFIG_IAQ_PMS5003_BG_READER
+    /* Switch to passive mode so host controls when frames are emitted */
+    pm_guard_lock_no_sleep();
+    pm_guard_lock_bus();
+    int n = pms_send_command(0xE1, 0x0000); /* passive mode */
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
+    if (n == (int)sizeof(uint8_t) * 7) {
+        ESP_LOGI(TAG, "PMS5003: set to passive mode");
+    } else {
+        ESP_LOGW(TAG, "PMS5003: failed to set passive mode (wrote %d bytes)", n);
+    }
+#endif
+
     /* Mark initialized before creating background task so it doesn't exit early */
     s_initialized = true;
 #ifdef CONFIG_IAQ_PMS5003_BG_READER
@@ -331,16 +373,28 @@ esp_err_t pms5003_driver_read(float *out_pm1_0, float *out_pm2_5, float *out_pm1
     /* Non-blocking snapshot: drain whatever is buffered and attempt to parse one frame. */
     uint8_t buf[128];
     int total = 0;
+    esp_err_t ret = ESP_ERR_TIMEOUT;
 
     /* Ensure device is awake if SET is available */
     pms_set_work_mode(true);
 
-    size_t available = 0;
-    (void)uart_get_buffered_data_len(s_uart_port, &available);
-    if (available > 0) {
-        int to_read = (available < sizeof(buf)) ? (int)available : (int)sizeof(buf);
-        int n = uart_bus_read_bytes(s_uart_port, buf, to_read, 0);
-        if (n > 0) total = n;
+    /* Keep clocks stable and prevent sleep while we request and read a frame */
+    pm_guard_lock_no_sleep();
+    pm_guard_lock_bus();
+
+    /* Passive mode: request a single frame */
+    (void)uart_bus_flush_rx(s_uart_port); /* drop any partial stream */
+    int n = pms_send_command(0xE2, 0x0000); /* read/passive query */
+    if (n != 7) {
+        ESP_LOGW(TAG, "PMS5003: failed to send query command (wrote %d bytes)", n);
+    }
+
+    /* Read exactly one frame with a bounded timeout */
+    const TickType_t frame_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(1000);
+    while (total < 32 && (int32_t)(frame_deadline - xTaskGetTickCount()) > 0) {
+        int need = 32 - total;
+        int r = uart_bus_read_bytes(s_uart_port, buf + total, need, pdMS_TO_TICKS(50));
+        if (r > 0) total += r;
     }
 
     if (total >= 32) {
@@ -351,7 +405,8 @@ esp_err_t pms5003_driver_read(float *out_pm1_0, float *out_pm2_5, float *out_pm1
                     if (out_pm1_0) *out_pm1_0 = pm1;
                     if (out_pm2_5) *out_pm2_5 = pm25;
                     if (out_pm10)  *out_pm10  = pm10;
-                    return ESP_OK;
+                    ret = ESP_OK;
+                    goto exit;
                 }
             }
         }
@@ -361,7 +416,11 @@ esp_err_t pms5003_driver_read(float *out_pm1_0, float *out_pm2_5, float *out_pm1
     if (out_pm1_0) *out_pm1_0 = NAN;
     if (out_pm2_5) *out_pm2_5 = NAN;
     if (out_pm10)  *out_pm10  = NAN;
-    return ESP_ERR_TIMEOUT;
+    ESP_LOGW(TAG, "PMS5003 read timeout (avail=%u bytes)", (unsigned)total);
+exit:
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
+    return ret;
 #endif /* CONFIG_IAQ_PMS5003_BG_READER */
 #endif
 }
@@ -440,7 +499,11 @@ esp_err_t pms5003_driver_disable(void)
 
     /* Put sensor to sleep via SET pin if available */
     if (s_use_set) {
+        /* Ensure we can hold the level during light sleep */
+        gpio_hold_dis(s_set_gpio);
         pms_set_work_mode(false);  /* Set to sleep mode (LOW) */
+        /* Latch the low level through light sleep so the fan doesn't wake */
+        gpio_hold_en(s_set_gpio);
         ESP_LOGI(TAG, "PMS5003 disabled (hardware sleep via SET pin)");
     } else {
         ESP_LOGW(TAG, "PMS5003 disabled (SET pin not configured, no hardware sleep)");
@@ -458,6 +521,8 @@ esp_err_t pms5003_driver_enable(void)
 
     /* Wake sensor from sleep via SET pin if available */
     if (s_use_set) {
+        /* Release hold so we can drive the pin high again */
+        gpio_hold_dis(s_set_gpio);
         pms_set_work_mode(true);  /* Set to work mode (HIGH) */
         /* Give sensor time to wake up and stabilize */
         vTaskDelay(pdMS_TO_TICKS(100));

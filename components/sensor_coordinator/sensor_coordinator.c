@@ -28,6 +28,7 @@
 #include "metrics_calc.h"
 #include "esp_task_wdt.h"
 #include "iaq_profiler.h"
+#include "pm_guard.h"
 
 static const char *TAG = "SENSOR_COORD";
 
@@ -652,15 +653,19 @@ static void sensor_coordinator_task(void *arg)
         TickType_t next_wake = portMAX_DELAY;
 
         for (int i = 0; i < SENSOR_ID_MAX; ++i) {
-            if (s_schedule[i].enabled) {
-                TickType_t time_until_due = s_schedule[i].next_due - now;
-                /* Handle tick overflow and past-due sensors */
-                if ((int32_t)time_until_due <= 0) {
-                    next_wake = 0;  /* Sensor is due now */
-                    break;
-                } else if (time_until_due < next_wake) {
-                    next_wake = time_until_due;
-                }
+            if (!s_schedule[i].enabled) {
+                continue;
+            }
+            if (s_runtime[i].state == SENSOR_STATE_DISABLED) {
+                continue;
+            }
+            TickType_t time_until_due = s_schedule[i].next_due - now;
+            /* Handle tick overflow and past-due sensors */
+            if ((int32_t)time_until_due <= 0) {
+                next_wake = 0;  /* Sensor is due now */
+                break;
+            } else if (time_until_due < next_wake) {
+                next_wake = time_until_due;
             }
         }
 

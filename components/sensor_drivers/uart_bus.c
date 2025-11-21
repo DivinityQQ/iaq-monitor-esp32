@@ -21,7 +21,7 @@ esp_err_t uart_bus_init(uart_port_t uart_port, int tx_gpio, int rx_gpio,
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
+        .source_clk = UART_SCLK_XTAL,
     };
 
     esp_err_t ret = uart_param_config(uart_port, &uart_config);
@@ -65,7 +65,7 @@ esp_err_t uart_bus_init_with_queue(uart_port_t uart_port, int tx_gpio, int rx_gp
         .parity = UART_PARITY_DISABLE,
         .stop_bits = UART_STOP_BITS_1,
         .flow_ctrl = UART_HW_FLOWCTRL_DISABLE,
-        .source_clk = UART_SCLK_DEFAULT,
+        .source_clk = UART_SCLK_XTAL,
     };
 
     esp_err_t ret = uart_param_config(uart_port, &uart_config);

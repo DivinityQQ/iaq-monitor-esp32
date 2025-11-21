@@ -5,6 +5,7 @@
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "pm_guard.h"
 #include <math.h>
 #include <string.h>
 #include <inttypes.h>
@@ -46,6 +47,7 @@ static const char *TAG = "BMP280_DRIVER";
 #define BMP280_OSRS_P_SHIFT    2
 #define BMP280_MODE_SLEEP      0x00
 #define BMP280_MODE_FORCED     0x01
+#define BMP280_MODE_NORMAL     0x03
 
 /* config field helpers */
 #define BMP280_FILTER_SHIFT    2
@@ -142,14 +144,15 @@ static esp_err_t bmp280_configure(void)
     int filter = CONFIG_IAQ_BMP280_FILTER;
     if (filter < 0 || filter > 4) filter = 2;
 
+    /* t_sb=0 (0.5 ms), IIR filter as configured */
     uint8_t cfg = (uint8_t)((0 << 5) | ((filter & 0x07) << BMP280_FILTER_SHIFT) | 0);
     esp_err_t ret = i2c_write_reg8(BMP280_REG_CONFIG, cfg);
     if (ret != ESP_OK) return ret;
 
-    /* Put device into sleep with desired oversampling; reads will set forced */
+    /* Normal mode: continuous conversion at low standby to avoid forced-measure timeouts */
     uint8_t ctrl_meas = (uint8_t)(((osrs_t & 0x07) << BMP280_OSRS_T_SHIFT) |
                                   ((osrs_p & 0x07) << BMP280_OSRS_P_SHIFT) |
-                                  BMP280_MODE_SLEEP);
+                                  BMP280_MODE_NORMAL);
     ret = i2c_write_reg8(BMP280_REG_CTRL_MEAS, ctrl_meas);
     return ret;
 }
@@ -198,24 +201,29 @@ esp_err_t bmp280_driver_init(void)
     uint8_t addr = 0;
     i2c_master_dev_handle_t dev = NULL;
 
+    esp_err_t ret = ESP_OK;
+
+    pm_guard_lock_bus();
+
     if (CONFIG_IAQ_BMP280_ADDR >= 0) {
         addr = (uint8_t)CONFIG_IAQ_BMP280_ADDR;
-        esp_err_t ret = try_open_at_addr(addr, &dev);
+        ret = try_open_at_addr(addr, &dev);
         if (ret != ESP_OK) {
             ESP_LOGE(TAG, "BMP280 not found at 0x%02X: %s", addr, esp_err_to_name(ret));
-            return ret;
+            goto fail;
         }
     } else {
         /* Auto probe: 0x76 then 0x77 */
-        esp_err_t ret = try_open_at_addr(0x76, &dev);
+        ret = try_open_at_addr(0x76, &dev);
         if (ret == ESP_OK) {
             addr = 0x76;
         } else {
             ret = try_open_at_addr(0x77, &dev);
-            if (ret == ESP_OK) addr = 0x77;
-            else {
+            if (ret == ESP_OK) {
+                addr = 0x77;
+            } else {
                 ESP_LOGE(TAG, "BMP280 auto-probe failed: not found at 0x76/0x77");
-                return ret;
+                goto fail;
             }
         }
     }
@@ -224,21 +232,17 @@ esp_err_t bmp280_driver_init(void)
     s_addr = addr;
 
     /* Soft reset, read calibration and configure */
-    esp_err_t ret = bmp280_soft_reset();
+    ret = bmp280_soft_reset();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "BMP280 reset failed: %s", esp_err_to_name(ret));
-        (void)i2c_master_bus_rm_device(s_dev);
-        s_dev = NULL;
-        return ret;
+        goto fail;
     }
 
     /* Read calibration with a brief retry if values look invalid */
     ret = bmp280_read_calibration();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "BMP280 read calib failed: %s", esp_err_to_name(ret));
-        (void)i2c_master_bus_rm_device(s_dev);
-        s_dev = NULL;
-        return ret;
+        goto fail;
     }
     if (s_calib.dig_P1 == 0) {
         /* Retry once after extra delay; some parts need more time post-reset */
@@ -246,50 +250,31 @@ esp_err_t bmp280_driver_init(void)
         ret = bmp280_read_calibration();
         if (ret != ESP_OK || s_calib.dig_P1 == 0) {
             ESP_LOGE(TAG, "BMP280 invalid calib (dig_P1=%u)", (unsigned)s_calib.dig_P1);
-            (void)i2c_master_bus_rm_device(s_dev);
-            s_dev = NULL;
-            return (ret == ESP_OK) ? ESP_FAIL : ret;
+            ret = (ret == ESP_OK) ? ESP_FAIL : ret;
+            goto fail;
         }
     }
 
     ret = bmp280_configure();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "BMP280 configure failed: %s", esp_err_to_name(ret));
-        (void)i2c_master_bus_rm_device(s_dev);
-        s_dev = NULL;
-        return ret;
+        goto fail;
     }
 
     s_initialized = true;
     ESP_LOGI(TAG, "BMP280 initialized at 0x%02X (osrs_t=%d, osrs_p=%d, filter=%d)",
              s_addr, CONFIG_IAQ_BMP280_OSRS_T, CONFIG_IAQ_BMP280_OSRS_P, CONFIG_IAQ_BMP280_FILTER);
-    return ESP_OK;
-}
+    ret = ESP_OK;
+    goto exit;
 
-static esp_err_t bmp280_trigger_forced_and_wait(int expected_ms)
-{
-    /* Re-write ctrl_meas with FORCED mode while keeping osrs bits */
-    uint8_t ctrl = 0;
-    esp_err_t ret = i2c_read_regs(BMP280_REG_CTRL_MEAS, &ctrl, 1);
-    if (ret != ESP_OK) return ret;
-    ctrl = (uint8_t)((ctrl & 0xFC) | BMP280_MODE_FORCED);
-    ret = i2c_write_reg8(BMP280_REG_CTRL_MEAS, ctrl);
-    if (ret != ESP_OK) return ret;
-
-    int timeout_ms = expected_ms + CONFIG_IAQ_BMP280_MEAS_DELAY_MARGIN_MS;
-    if (timeout_ms < 5) timeout_ms = 5;
-    const TickType_t deadline = xTaskGetTickCount() + pdMS_TO_TICKS(timeout_ms);
-    bool timed_out = false;
-    /* Poll measuring bit with small sleeps */
-    while (1) {
-        uint8_t status = 0;
-        ret = i2c_read_regs(BMP280_REG_STATUS, &status, 1);
-        if (ret != ESP_OK) return ret;
-        if ((status & BMP280_STATUS_MEASURING) == 0) break;
-        if (xTaskGetTickCount() >= deadline) { timed_out = true; break; }
-        vTaskDelay(1);
+fail:
+    if (s_dev) {
+        (void)i2c_master_bus_rm_device(s_dev);
+        s_dev = NULL;
     }
-    return timed_out ? ESP_ERR_TIMEOUT : ESP_OK;
+exit:
+    pm_guard_unlock_bus();
+    return ret;
 }
 
 static float bmp280_compensate_temperature_c(int32_t adc_T)
@@ -340,20 +325,16 @@ esp_err_t bmp280_driver_read(float *out_pressure_hpa, float *out_temp_c)
     }
     return ret;
 #else
-    /* Compute expected measurement time (ms) */
-    int osrs_t = CONFIG_IAQ_BMP280_OSRS_T;
-    int osrs_p = CONFIG_IAQ_BMP280_OSRS_P;
-    int f_t = osrs_code_to_factor(osrs_t);
-    int f_p = osrs_code_to_factor(osrs_p);
-    float meas_ms_f = 1.25f + 2.3f * (float)f_t + 2.3f * (float)f_p;
-    int meas_ms = (int)(meas_ms_f + 0.5f);
-
-    esp_err_t ret = bmp280_trigger_forced_and_wait(meas_ms);
-    if (ret != ESP_OK) return ret;
+    /* Normal mode: just read latest conversion; keep clocks stable during I2C */
+    pm_guard_lock_no_sleep();
+    pm_guard_lock_bus();
 
     uint8_t rx[6] = {0};
-    ret = i2c_read_regs(BMP280_REG_PRESS_MSB, rx, sizeof(rx));
-    if (ret != ESP_OK) return ret;
+    esp_err_t ret = i2c_read_regs(BMP280_REG_PRESS_MSB, rx, sizeof(rx));
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Read data failed: %s", esp_err_to_name(ret));
+        goto exit;
+    }
 
     int32_t adc_P = ((int32_t)rx[0] << 12) | ((int32_t)rx[1] << 4) | ((int32_t)rx[2] >> 4);
     int32_t adc_T = ((int32_t)rx[3] << 12) | ((int32_t)rx[4] << 4) | ((int32_t)rx[5] >> 4);
@@ -362,12 +343,18 @@ esp_err_t bmp280_driver_read(float *out_pressure_hpa, float *out_temp_c)
     float pressure_pa = bmp280_compensate_pressure_pa(adc_P);
 
     if (isnan(pressure_pa)) {
-        return ESP_FAIL;
+        ESP_LOGW(TAG, "Pressure computation returned NaN");
+        ret = ESP_FAIL;
+        goto exit;
     }
 
     if (out_temp_c) *out_temp_c = temp_c;
     if (out_pressure_hpa) *out_pressure_hpa = pressure_pa / 100.0f; /* Pa -> hPa */
-    return ESP_OK;
+    ret = ESP_OK;
+exit:
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
+    return ret;
 #endif
 }
 
@@ -377,14 +364,17 @@ esp_err_t bmp280_driver_reset(void)
         /* Allow reset to act as re-init for coordinator auto-recovery */
         return bmp280_driver_init();
     }
+    pm_guard_lock_bus();
     esp_err_t ret = bmp280_soft_reset();
-    if (ret != ESP_OK) return ret;
+    if (ret != ESP_OK) goto exit;
     ret = bmp280_read_calibration();
-    if (ret != ESP_OK) return ret;
+    if (ret != ESP_OK) goto exit;
     ret = bmp280_configure();
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "BMP280 soft reset complete");
     }
+exit:
+    pm_guard_unlock_bus();
     return ret;
 }
 
@@ -410,9 +400,10 @@ esp_err_t bmp280_driver_disable(void)
     if (!s_initialized || s_dev == NULL) {
         return ESP_ERR_INVALID_STATE;
     }
+    pm_guard_lock_bus();
     uint8_t ctrl = 0;
     esp_err_t ret = i2c_read_regs(BMP280_REG_CTRL_MEAS, &ctrl, 1);
-    if (ret != ESP_OK) return ret;
+    if (ret != ESP_OK) goto exit;
     s_ctrl_meas_saved = ctrl;
     s_have_saved_ctrl = true;
     uint8_t ctrl_sleep = (uint8_t)((ctrl & 0xFC) | BMP280_MODE_SLEEP);
@@ -420,6 +411,8 @@ esp_err_t bmp280_driver_disable(void)
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "BMP280 disabled (mode=SLEEP)");
     }
+exit:
+    pm_guard_unlock_bus();
     return ret;
 }
 
@@ -432,10 +425,12 @@ esp_err_t bmp280_driver_enable(void)
         ESP_LOGW(TAG, "BMP280 enable called without prior disable; nothing to restore");
         return ESP_ERR_INVALID_STATE;
     }
+    pm_guard_lock_bus();
     esp_err_t ret = i2c_write_reg8(BMP280_REG_CTRL_MEAS, s_ctrl_meas_saved);
     if (ret == ESP_OK) {
         ESP_LOGI(TAG, "BMP280 enabled (ctrl_meas restored=0x%02X)", s_ctrl_meas_saved);
         s_have_saved_ctrl = false;
     }
+    pm_guard_unlock_bus();
     return ret;
 }

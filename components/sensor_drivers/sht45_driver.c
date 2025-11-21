@@ -5,6 +5,7 @@
 #include "sdkconfig.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
+#include "pm_guard.h"
 #include <math.h>
 #include <string.h>
 
@@ -79,19 +80,26 @@ esp_err_t sht45_driver_read(float *out_temp_c, float *out_humidity_rh)
     return ret;
 #else
     /* Issue high-precision measurement */
+    pm_guard_lock_no_sleep();
+    pm_guard_lock_bus();
     uint8_t cmd = SHT4X_CMD_MEASURE_HP;
     esp_err_t ret = i2c_master_transmit(s_dev, &cmd, 1, CONFIG_IAQ_I2C_TIMEOUT_MS);
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "SHT4x transmit failed: %s", esp_err_to_name(ret));
         return ret;
     }
 
-    /* Wait measurement time: typical 8.3ms; use 15ms margin */
-    vTaskDelay(pdMS_TO_TICKS(15));
+    /* Wait measurement time: typical 8.3ms; add extra slack to cover scheduling jitter */
+    vTaskDelay(pdMS_TO_TICKS(20));
 
     /* Read 6 bytes: T[2] CRC, RH[2] CRC */
     uint8_t rx[6] = {0};
+    pm_guard_lock_bus();
     ret = i2c_master_receive(s_dev, rx, sizeof(rx), CONFIG_IAQ_I2C_TIMEOUT_MS);
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "SHT4x receive failed: %s", esp_err_to_name(ret));
         return ret;
@@ -100,7 +108,8 @@ esp_err_t sht45_driver_read(float *out_temp_c, float *out_humidity_rh)
     /* Validate CRCs */
     if (crc8_sensirion(&rx[0], 2) != rx[2] || crc8_sensirion(&rx[3], 2) != rx[5]) {
         ESP_LOGW(TAG, "SHT4x CRC check failed");
-        return ESP_ERR_INVALID_CRC;
+        ret = ESP_ERR_INVALID_CRC;
+        return ret;
     }
 
     uint16_t raw_t = ((uint16_t)rx[0] << 8) | rx[1];
@@ -120,7 +129,8 @@ esp_err_t sht45_driver_read(float *out_temp_c, float *out_humidity_rh)
         }
         *out_humidity_rh = rh;
     }
-    return ESP_OK;
+    ret = ESP_OK;
+    return ret;
 #endif
 }
 
@@ -132,12 +142,14 @@ esp_err_t sht45_driver_reset(void)
     }
 
     uint8_t cmd = SHT4X_CMD_SOFT_RESET;
+    pm_guard_lock_bus();
     esp_err_t ret = i2c_master_transmit(s_dev, &cmd, 1, CONFIG_IAQ_I2C_TIMEOUT_MS);
     if (ret == ESP_OK) {
         /* Datasheet suggests up to 1ms after reset */
         vTaskDelay(pdMS_TO_TICKS(2));
         ESP_LOGI(TAG, "SHT4x soft reset issued");
     }
+    pm_guard_unlock_bus();
     return ret;
 }
 

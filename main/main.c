@@ -23,6 +23,7 @@
 #include "display_oled/display_ui.h"
 #include "iaq_profiler.h"
 #include "web_portal.h"
+#include "pm_guard.h"
 
 static const char *TAG = "IAQ_MAIN";
 
@@ -153,6 +154,13 @@ void app_main(void)
 {
     /* Initialize core system (NVS, networking, event group) */
     ESP_ERROR_CHECK(init_core_system());
+
+    /* Configure runtime PM (DFS + light sleep) and create shared locks */
+#ifdef CONFIG_IAQ_PM_RUNTIME_ENABLE
+    ESP_ERROR_CHECK(pm_guard_init());
+#else
+    ESP_LOGW(TAG, "Runtime PM disabled via CONFIG_IAQ_PM_RUNTIME_ENABLE");
+#endif
 
     /* Initialize IAQ data structure */
     ESP_LOGI(TAG, "Initializing IAQ data structure");

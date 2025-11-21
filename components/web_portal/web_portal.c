@@ -30,6 +30,7 @@
 #include "esp_wifi.h"
 #include "web_portal.h"
 #include "iaq_profiler.h"
+#include "pm_guard.h"
 
 static const char *TAG = "WEB_PORTAL";
 
@@ -153,12 +154,16 @@ static void ws_broadcast_json(const char *type, cJSON *payload)
     if (!s_server || !payload) { if (payload) cJSON_Delete(payload); return; }
     uint64_t t0 = iaq_prof_tic();
 
+    pm_guard_lock_cpu();
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", type);
     cJSON_AddItemToObject(root, "data", payload); /* takes ownership */
     char *txt = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
-    if (!txt) return;
+    if (!txt) {
+        pm_guard_unlock_cpu();
+        return;
+    }
 
     if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_WS_CLIENTS; ++i) {
@@ -187,6 +192,7 @@ static void ws_broadcast_json(const char *type, cJSON *payload)
     }
     if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
 
+    pm_guard_unlock_cpu();
     free(txt);
     iaq_prof_toc(IAQ_METRIC_WEB_WS_BROADCAST, t0);
 }
@@ -195,12 +201,16 @@ static void ws_broadcast_json(const char *type, cJSON *payload)
 static void ws_send_json_to_fd(int fd, const char *type, cJSON *payload)
 {
     if (!s_server || !payload) { if (payload) cJSON_Delete(payload); return; }
+    pm_guard_lock_cpu();
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", type);
     cJSON_AddItemToObject(root, "data", payload); /* takes ownership */
     char *txt = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
-    if (!txt) return;
+    if (!txt) {
+        pm_guard_unlock_cpu();
+        return;
+    }
 
     httpd_ws_frame_t frame = (httpd_ws_frame_t){ 0 };
     frame.type = HTTPD_WS_TYPE_TEXT;
@@ -210,6 +220,7 @@ static void ws_send_json_to_fd(int fd, const char *type, cJSON *payload)
     if (er != ESP_OK) {
         ESP_LOGW(TAG, "WS: enqueue send to %d failed: %s", fd, esp_err_to_name(er));
     }
+    pm_guard_unlock_cpu();
     free(txt);
 }
 
