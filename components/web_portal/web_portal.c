@@ -394,6 +394,32 @@ static const char* guess_mime_type(const char *path)
     return "application/octet-stream";
 }
 
+/* Captive portal probes (Android/iOS/Windows) often ask arbitrary paths first.
+ * Redirect those to "/" so the SPA router lands on a known route instead of
+ * showing its 404 screen. */
+static bool is_captive_probe_request(const char *uri)
+{
+    if (!uri || uri[0] != '/') return false;
+    const char *q = strchr(uri, '?');
+    size_t len = q ? (size_t)(q - uri) : strlen(uri);
+    const char *probes[] = {
+        "/generate_204",        /* Android */
+        "/gen_204",             /* Chrome/Android alt */
+        "/hotspot-detect.html", /* iOS/macOS */
+        "/hotspot-detect",
+        "/ncsi.txt",            /* Windows */
+        "/connecttest.txt",
+        "/success.txt"
+    };
+    for (size_t i = 0; i < sizeof(probes)/sizeof(probes[0]); ++i) {
+        size_t plen = strlen(probes[i]);
+        if (len == plen && strncmp(uri, probes[i], len) == 0) {
+            return true;
+        }
+    }
+    return false;
+}
+
 static esp_err_t static_handler(httpd_req_t *req)
 {
     uint64_t t0 = iaq_prof_tic();
@@ -402,6 +428,14 @@ static esp_err_t static_handler(httpd_req_t *req)
     /* Path traversal guard */
     if (!uri || uri[0] != '/' || strstr(uri, "..") != NULL || strchr(uri, '\\') != NULL) {
         respond_error(req, 400, "BAD_PATH", "Invalid path");
+        iaq_prof_toc(IAQ_METRIC_WEB_STATIC, t0);
+        return ESP_OK;
+    }
+    if (is_captive_probe_request(uri)) {
+        httpd_resp_set_status(req, "302 Temporary Redirect");
+        httpd_resp_set_hdr(req, "Location", "/");
+        httpd_resp_set_hdr(req, "Cache-Control", "no-cache");
+        httpd_resp_send(req, "Redirect", HTTPD_RESP_USE_STRLEN);
         iaq_prof_toc(IAQ_METRIC_WEB_STATIC, t0);
         return ESP_OK;
     }
