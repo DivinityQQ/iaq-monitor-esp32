@@ -1,337 +1,1143 @@
 menu "IAQ Monitor Configuration"
 
-    config IAQ_WIFI_SSID
-        string "WiFi SSID"
-        default ""
-        help
-            SSID of the WiFi network to connect to.
-            Leave empty to start in SoftAP provisioning mode on first boot
-            (or when credentials are not present in NVS).
-
-    config IAQ_WIFI_PASSWORD
-        string "WiFi Password"
-        default ""
-        help
-            WiFi password for the network.
-            Leave empty if not pre-provisioning via menuconfig. You can always
-            set credentials later using the web UI or console.
-
-    config IAQ_MQTT_BROKER_URL
-        string "MQTT Broker URL"
-        default "mqtt://192.168.1.100:1883"
-        help
-            URL of the MQTT broker. Examples:
-            mqtt://broker.local:1883
-            mqtts://broker.local:8883
-
-    config IAQ_MQTT_USERNAME
-        string "MQTT Username"
-        default ""
-        help
-            Username for MQTT authentication (leave empty if not required)
-
-    config IAQ_MQTT_PASSWORD
-        string "MQTT Password"
-        default ""
-        help
-            Password for MQTT authentication (leave empty if not required)
-
-    config IAQ_DEVICE_ID
-        string "Device ID"
-        default "iaq_livingroom"
-        help
-            Unique identifier for this device. Used in MQTT topics.
-
-    config IAQ_MQTT_CRITICAL_QOS
-        int "MQTT Critical Messages QoS Level"
-        default 1
-        range 0 2
-        help
-            QoS for critical, non-periodic messages (status LWT, HA discovery).
-            Recommended: 1 (At least once) - ensures delivery of important state changes.
-
-    config IAQ_MQTT_TELEMETRY_QOS
-        int "MQTT Telemetry QoS Level"
-        default 0
-        range 0 2
-        help
-            QoS for periodic telemetry topics (/health, /state, /metrics, /diagnostics).
-            These are published every 30-300 seconds and are idempotent.
-            Recommended: 0 (At most once) - prevents outbox congestion, missing one
-            message is acceptable since the next one arrives soon.
-
-            Using QoS 1 for high-frequency telemetry can cause MQTT outbox buildup
-            and block the publish worker after hours of operation.
-
-    config IAQ_STATUS_LED_GPIO
-        int "Status LED GPIO number"
-        default 48
-        help
-            GPIO number for status LED (RGB LED data pin for WS2812)
-
-    config IAQ_ENABLE_CONSOLE_COMMANDS
-        bool "Enable console commands"
-        default y
-        help
-            Enable runtime console commands for configuration and debugging
-
-    config IAQ_PM_RUNTIME_ENABLE
-        bool "Enable runtime power management (DFS + light sleep)"
-        default y
-        depends on PM_ENABLE
-        help
-            When enabled, pm_guard configures dynamic frequency scaling and light sleep
-            locks at startup. Disable to compare power consumption without runtime PM
-            while keeping PM support compiled in.
-
-
-    menu "Wi-Fi AP Provisioning"
-        config IAQ_AP_SSID
-            string "SoftAP SSID (provisioning)"
-            default "IAQ-Setup"
+    menu "Network & Identity"
+        config IAQ_DEVICE_ID
+            string "Device ID"
+            default "iaq_livingroom"
             help
-                SSID used when device starts in SoftAP mode for provisioning.
+                Unique identifier for this device. Used in MQTT topics.
 
-        config IAQ_AP_PASSWORD
-            string "SoftAP Password (empty = open)"
+        menu "Wi-Fi Station"
+            config IAQ_WIFI_SSID
+                string "WiFi SSID"
+                default ""
+                help
+                    SSID of the WiFi network to connect to.
+                    Leave empty to start in SoftAP provisioning mode on first boot
+                    (or when credentials are not present in NVS).
+
+            config IAQ_WIFI_PASSWORD
+                string "WiFi Password"
+                default ""
+                help
+                    WiFi password for the network.
+                    Leave empty if not pre-provisioning via menuconfig. You can always
+                    set credentials later using the web UI or console.
+
+            config IAQ_WIFI_CONNECT_MAX_RETRY
+                int "Max STA retries before AP fallback"
+                range 0 100
+                default 10
+                help
+                    Number of reconnect attempts in STA mode before falling back to SoftAP
+                    (provisioning) mode.
+        endmenu
+
+        menu "Provisioning SoftAP"
+            config IAQ_AP_SSID
+                string "SoftAP SSID (provisioning)"
+                default "IAQ-Setup"
+                help
+                    SSID used when device starts in SoftAP mode for provisioning.
+
+            config IAQ_AP_PASSWORD
+                string "SoftAP Password (empty = open)"
+                default ""
+                help
+                    Password for the provisioning SoftAP. Leave empty to run an open AP.
+                    If set but shorter than 8 characters, the firmware will warn at
+                    startup and start the AP in OPEN mode for compatibility.
+
+            config IAQ_AP_CHANNEL
+                int "SoftAP Channel"
+                range 1 13
+                default 1
+                help
+                    Wi-Fi channel for SoftAP mode.
+
+            config IAQ_AP_MAX_CONN
+                int "SoftAP max stations"
+                range 1 10
+                default 4
+                help
+                    Maximum number of stations allowed to connect to the SoftAP.
+
+            config IAQ_AP_KEEP_AFTER_PROVISION
+                bool "Keep SoftAP active after STA connects (AP+STA)"
+                default n
+                help
+                    When enabled, device runs in AP+STA after credentials are provisioned, so the
+                    web UI can always be reached via SoftAP and LAN simultaneously. By default we
+                    switch to STA-only after provisioning.
+        endmenu
+
+        menu "Wi-Fi Power Save"
+            choice IAQ_WIFI_PS_MODE
+                prompt "Wi-Fi power save mode (station)"
+                default IAQ_WIFI_PS_MODEM_MIN
+                depends on IAQ_PM_RUNTIME_ENABLE
+                help
+                    Wi-Fi power save mode for station operation. Modem sleep reduces APB lock
+                    time and power draw. Choose NONE if you need lowest latency.
+                config IAQ_WIFI_PS_NONE
+                    bool "None"
+                config IAQ_WIFI_PS_MODEM_MIN
+                    bool "Modem sleep (min)"
+                config IAQ_WIFI_PS_MODEM_MAX
+                    bool "Modem sleep (max)"
+            endchoice
+
+            config IAQ_WIFI_LISTEN_INTERVAL
+                int "Listen interval (DTIMs) for station power save"
+                range 1 10
+                default 3
+                depends on IAQ_WIFI_PS_MODEM_MIN || IAQ_WIFI_PS_MODEM_MAX
+                help
+                    DTIM listen interval used in STA mode. Takes effect when modem sleep is enabled.
+        endmenu
+    endmenu
+
+    menu "MQTT"
+        config IAQ_MQTT_BROKER_URL
+            string "MQTT Broker URL"
+            default "mqtt://192.168.1.100:1883"
+            help
+                URL of the MQTT broker. Examples:
+                mqtt://broker.local:1883
+                mqtts://broker.local:8883
+
+        config IAQ_MQTT_USERNAME
+            string "MQTT Username"
             default ""
-        help
-            Password for the provisioning SoftAP. Leave empty to run an open AP.
-            If set but shorter than 8 characters, the firmware will warn at
-            startup and start the AP in OPEN mode for compatibility.
-
-        config IAQ_AP_CHANNEL
-            int "SoftAP Channel"
-            range 1 13
-            default 1
             help
-                Wi-Fi channel for SoftAP mode.
+                Username for MQTT authentication (leave empty if not required)
 
-        config IAQ_AP_MAX_CONN
-            int "SoftAP max stations"
-            range 1 10
-            default 4
+        config IAQ_MQTT_PASSWORD
+            string "MQTT Password"
+            default ""
             help
-                Maximum number of stations allowed to connect to the SoftAP.
+                Password for MQTT authentication (leave empty if not required)
 
-        config IAQ_WIFI_CONNECT_MAX_RETRY
-            int "Max STA retries before AP fallback"
-            range 0 100
-            default 10
-            help
-                Number of reconnect attempts in STA mode before falling back to SoftAP
-                (provisioning) mode.
+        menu "Quality of Service"
+            config IAQ_MQTT_CRITICAL_QOS
+                int "MQTT Critical Messages QoS Level"
+                default 1
+                range 0 2
+                help
+                    QoS for critical, non-periodic messages (status LWT, HA discovery).
+                    Recommended: 1 (At least once) - ensures delivery of important state changes.
 
-        config IAQ_AP_KEEP_AFTER_PROVISION
-            bool "Keep SoftAP active after STA connects (AP+STA)"
-            default n
-            help
-                When enabled, device runs in AP+STA after credentials are provisioned, so the
-                web UI can always be reached via SoftAP and LAN simultaneously. By default we
-                switch to STA-only after provisioning.
+            config IAQ_MQTT_TELEMETRY_QOS
+                int "MQTT Telemetry QoS Level"
+                default 0
+                range 0 2
+                help
+                    QoS for periodic telemetry topics (/health, /state, /metrics, /diagnostics).
+                    These are published every 30-300 seconds and are idempotent.
+                    Recommended: 0 (At most once) - prevents outbox congestion, missing one
+                    message is acceptable since the next one arrives soon.
+
+                    Using QoS 1 for high-frequency telemetry can cause MQTT outbox buildup
+                    and block the publish worker after hours of operation.
+        endmenu
+
+        menu "Publishing"
+            config MQTT_STATE_PUBLISH_INTERVAL_SEC
+                int "State publish interval (seconds)"
+                default 30
+                range 5 300
+                help
+                    How often to publish compensated sensor data to /state topic.
+                    This is the primary telemetry topic with fused (compensated) values.
+                    Default: 30 seconds.
+
+            config MQTT_METRICS_PUBLISH_INTERVAL_SEC
+                int "Metrics publish interval (seconds)"
+                default 30
+                range 5 300
+                help
+                    How often to publish derived metrics to /metrics topic.
+                    Includes AQI breakdown, comfort details, trends, and scores.
+                    Default: 30 seconds.
+
+            config MQTT_PUBLISH_DIAGNOSTICS
+                bool "Publish diagnostics topic"
+                default n
+                help
+                    Publish detailed diagnostics to iaq/{device}/diagnostics topic.
+                    Includes raw sensor values, fusion corrections, and ABC state.
+                    Published at lower rate (5 min) to reduce bandwidth.
+                    Useful for validation and tuning, not needed for normal operation.
+
+            config MQTT_DIAGNOSTICS_PUBLISH_INTERVAL_SEC
+                int "Diagnostics publish interval (seconds)"
+                default 300
+                range 60 3600
+                depends on MQTT_PUBLISH_DIAGNOSTICS
+                help
+                    How often to publish diagnostics data.
+                    Default: 300 seconds (5 minutes).
+
+            config MQTT_PUBLISH_PM1
+                bool "Create Home Assistant entity for PM1.0"
+                default n
+                help
+                    Publish PM1.0 to HA auto-discovery.
+                    Most users only need PM2.5/PM10 for AQI.
+                    PM1.0 is still collected and included in diagnostics.
+                    Enable for advanced monitoring or sensor validation.
+        endmenu
+
+        menu "TLS & Security"
+            config IAQ_MQTT_TLS_SKIP_COMMON_NAME_CHECK
+                bool "Skip TLS common name (CN) check"
+                default n
+                help
+                    When using MQTTS with an IP address or when the certificate CN/SAN
+                    does not match the hostname, enable this to skip the CN check.
+                    Not recommended for production; prefer matching hostnames.
+
+            choice IAQ_MQTT_TLS_TRUST_MODE
+                prompt "TLS trust source"
+                default IAQ_MQTT_TLS_TRUST_BUNDLE
+                help
+                    Select how the device verifies the broker's server certificate when
+                    connecting to mqtts:// URLs.
+
+                config IAQ_MQTT_TLS_TRUST_BUNDLE
+                    bool "Certificate bundle (recommended)"
+                    help
+                        Use ESP-IDF's built-in certificate bundle to validate public CAs
+                        (e.g., Let's Encrypt). Enable CONFIG_MBEDTLS_CERTIFICATE_BUNDLE.
+
+                config IAQ_MQTT_TLS_TRUST_CA_PEM
+                    bool "Embed custom Root CA PEM"
+                    help
+                        Embed a custom Root CA PEM at build time. Place the file at
+                        components/connectivity/certs/ca.pem.
+
+                config IAQ_MQTT_TLS_TRUST_INSECURE
+                    bool "Insecure (no server verification)"
+                    help
+                        Do not verify the broker's certificate. This is insecure and
+                        should only be used for local testing with self-signed certs.
+                        Consider using a proper Root CA instead.
+            endchoice
+
+            config IAQ_MQTT_MTLS_ENABLE
+                bool "Enable mutual TLS (client certificate)"
+                default n
+                help
+                    Enable client certificate authentication. Place client cert and key
+                    files at components/connectivity/certs/client.crt.pem and
+                    components/connectivity/certs/client.key.pem.
+
+            config IAQ_MQTT_TLS_AWS_IOT_ALPN
+                bool "Use AWS IoT ALPN (port 443)"
+                default n
+                help
+                    Attach ALPN protocol x-amzn-mqtt-ca for AWS IoT Core over port 443.
+                    Use with mqtts://<endpoint>:443. Leave disabled for port 8883.
+        endmenu
     endmenu
 
-    menu "Wi-Fi Power Save"
-        choice IAQ_WIFI_PS_MODE
-            prompt "Wi-Fi power save mode (station)"
-            default IAQ_WIFI_PS_MODEM_MIN
-            depends on IAQ_PM_RUNTIME_ENABLE
+    menu "Web Portal"
+        config IAQ_WEB_PORTAL_ENABLE_HTTPS
+            bool "Enable HTTPS for web portal"
+            default y
             help
-                Wi-Fi power save mode for station operation. Modem sleep reduces APB lock
-                time and power draw. Choose NONE if you need lowest latency.
-            config IAQ_WIFI_PS_NONE
-                bool "None"
-            config IAQ_WIFI_PS_MODEM_MIN
-                bool "Modem sleep (min)"
-            config IAQ_WIFI_PS_MODEM_MAX
-                bool "Modem sleep (max)"
-        endchoice
+                When enabled, the portal can run over HTTPS (esp_https_server) once STA
+                is connected. Cert/key are loaded from LittleFS files at /www/cert.pem and
+                /www/key.pem if present; otherwise, a built-in self-signed dev cert is used.
+                In AP-only provisioning mode, the portal always runs HTTP for captive portal
+                compatibility.
 
-        config IAQ_WIFI_LISTEN_INTERVAL
-            int "Listen interval (DTIMs) for station power save"
-            range 1 10
-            default 3
-            depends on IAQ_WIFI_PS_MODEM_MIN || IAQ_WIFI_PS_MODEM_MAX
+        config IAQ_WEB_PORTAL_MAX_WS_CLIENTS
+            int "Maximum WebSocket clients"
+            range 1 32
+            default 8
+
+        config IAQ_WEB_PORTAL_CORS_ORIGIN
+            string "CORS allowed origin"
+            default "*"
             help
-                DTIM listen interval used in STA mode. Takes effect when modem sleep is enabled.
+                Set to a specific origin (e.g., http://192.168.4.1) for tighter security.
+
+        config IAQ_WEB_PORTAL_STATIC_MAX_AGE_SEC
+            int "Static file Cache-Control max-age (seconds)"
+            range 0 86400
+            default 600
+
+        config IAQ_WEB_PORTAL_DEBUG_LOGS
+            bool "Enable verbose Web Portal logs (WS/TLS)"
+            default n
+            help
+                Turns on DEBUG level for httpd, httpd_ws, esp_https_server, and esp-tls-mbedtls
+                tags. Useful for troubleshooting connection drops/handshakes. Disable for
+                normal operation to reduce log noise.
+
+        config IAQ_WEB_PORTAL_WS_PING_INTERVAL_SEC
+            int "WebSocket ping interval (seconds)"
+            range 5 600
+            default 30
+
+        config IAQ_WEB_PORTAL_WS_PONG_TIMEOUT_SEC
+            int "WebSocket pong timeout (seconds)"
+            range 10 1800
+            default 90
+
+        config IAQ_WEB_PORTAL_WIFI_SCAN_LIMIT
+            int "WiFi scan result limit"
+            range 5 100
+            default 20
+
+        config IAQ_WEB_PORTAL_CADENCE_MAX_MS
+            int "Max allowed sensor cadence (ms)"
+            range 0 7200000
+            default 3600000
     endmenu
 
-    menu "MQTT Publishing Options"
-        config MQTT_STATE_PUBLISH_INTERVAL_SEC
-            int "State publish interval (seconds)"
-            default 30
-            range 5 300
+    menu "Time & Region"
+        config IAQ_TZ_STRING
+            string "Time zone (POSIX TZ string)"
+            default "CET-1CEST,M3.5.0/2,M10.5.0/3"
             help
-                How often to publish compensated sensor data to /state topic.
-                This is the primary telemetry topic with fused (compensated) values.
-                Default: 30 seconds.
+                POSIX TZ string for local time. Default is Central European Time
+                with daylight saving for Czech Republic: CET (UTC+1) and CEST
+                from last Sunday in March 02:00 to last Sunday in October 03:00.
+                Example alternatives: "UTC" or other POSIX TZ strings.
+                Used to format localtime and determine day/night windows.
 
-        config MQTT_METRICS_PUBLISH_INTERVAL_SEC
-            int "Metrics publish interval (seconds)"
-            default 30
-            range 5 300
+        config IAQ_NTP_SERVER0
+            string "Primary NTP server"
+            default "time.google.com"
             help
-                How often to publish derived metrics to /metrics topic.
-                Includes AQI breakdown, comfort details, trends, and scores.
-                Default: 30 seconds.
+                Hostname of the primary NTP server.
 
-        config MQTT_PUBLISH_DIAGNOSTICS
-            bool "Publish diagnostics topic"
+        config IAQ_NTP_SERVER1
+            string "Secondary NTP server"
+            default "pool.ntp.org"
+            help
+                Hostname of a secondary NTP server (optional).
+    endmenu
+
+    menu "System & Debug"
+        config IAQ_STATUS_LED_GPIO
+            int "Status LED GPIO number"
+            default 48
+            help
+                GPIO number for status LED (RGB LED data pin for WS2812)
+
+        config IAQ_ENABLE_CONSOLE_COMMANDS
+            bool "Enable console commands"
+            default y
+            help
+                Enable runtime console commands for configuration and debugging
+
+        config IAQ_PM_RUNTIME_ENABLE
+            bool "Enable runtime power management (DFS + light sleep)"
+            default y
+            depends on PM_ENABLE
+            help
+                When enabled, pm_guard configures dynamic frequency scaling and light sleep
+                locks at startup. Disable to compare power consumption without runtime PM
+                while keeping PM support compiled in.
+
+        menu "Profiling"
+            config IAQ_PROFILING
+                bool "Enable profiling and extended status reporting"
+                default n
+                help
+                    Enable low-overhead profiling of key operations and enhanced
+                    system status report. When disabled, reporting falls back to a
+                    single concise status line.
+
+            config IAQ_PROFILING_INTERVAL_SEC
+                int "Profiling report interval (seconds)"
+                default 30
+                range 5 600
+                depends on IAQ_PROFILING
+                help
+                    How often to print and reset profiling statistics.
+
+            config IAQ_PROFILING_TASK_STACKS
+                bool "Include task stack high-water marks in report"
+                default y
+                depends on IAQ_PROFILING
+                help
+                    Report FreeRTOS task stack headroom (bytes) for registered tasks.
+
+            config IAQ_PROFILING_RUNTIME_STATS
+                bool "Include CPU runtime stats per task"
+                default n
+                depends on IAQ_PROFILING
+                select FREERTOS_USE_TRACE_FACILITY
+                select FREERTOS_GENERATE_RUN_TIME_STATS
+                select FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
+                help
+                    Adds CPU usage breakdown per task using FreeRTOS runtime stats.
+                    Increases code size modestly.
+
+            config IAQ_PROFILING_PM_LOCKS
+                bool "Include PM lock profiling (esp_pm_dump_locks)"
+                default n
+                depends on IAQ_PROFILING && PM_ENABLE
+                select PM_PROFILING
+                help
+                    Track time each PM lock is held and allow dumping via esp_pm_dump_locks().
+                    Adds runtime overhead; keep disabled in production.
+
+            config IAQ_PROFILING_PARSEABLE_OUTPUT
+                bool "Use machine-parseable output format"
+                default n
+                depends on IAQ_PROFILING
+                help
+                    Emit simplified parseable lines instead of human-friendly formatting.
+                    Useful for scraping logs; off by default.
+                    Note: Reserved for future use; currently not used.
+        endmenu
+    endmenu
+
+    menu "Hardware & UI"
+        menu "I2C Bus Configuration"
+            config IAQ_I2C_SDA_GPIO
+                int "I2C SDA GPIO"
+                default 8
+                range 0 48
+                help
+                    GPIO number for I2C SDA (Serial Data Line).
+                    Shared by SHT4x (SHT45), BMP280, and SGP41 sensors.
+                    Default: GPIO8 (safe for ESP32-S3 DevKit).
+
+            config IAQ_I2C_SCL_GPIO
+                int "I2C SCL GPIO"
+                default 9
+                range 0 48
+                help
+                    GPIO number for I2C SCL (Serial Clock Line).
+                    Shared by SHT4x (SHT45), BMP280, and SGP41 sensors.
+                    Default: GPIO9 (safe for ESP32-S3 DevKit).
+
+            config IAQ_I2C_FREQ_HZ
+                int "I2C Clock Frequency (Hz)"
+                default 100000
+                range 10000 400000
+                help
+                    I2C master clock frequency in Hz.
+                    100kHz is safe for all sensors; 400kHz (fast mode) may work.
+                    Default: 100000 (standard mode).
+
+            config IAQ_I2C_TIMEOUT_MS
+                int "I2C Timeout (ms)"
+                default 1000
+                range 100 10000
+                help
+                    I2C transaction timeout in milliseconds.
+                    Default: 1000ms.
+
+            config IAQ_I2C_INTERNAL_PULLUPS
+                bool "Enable internal pull-ups (SDA/SCL)"
+                default y
+                help
+                    Enable ESP32 internal pull-ups on the I2C SDA and SCL pins.
+                    Internal pulls are weak (~20–50 kΩ typ) and are not sufficient
+                    alone for fast edges at higher speeds or with higher bus
+                    capacitance. Keep enabled for dev bring-up; disable in production
+                    when relying on proper external pull-ups on your I2C modules/PCB.
+        endmenu
+
+        menu "BMP280 Barometer"
+            config IAQ_BMP280_ADDR
+                int "BMP280 I2C address (-1 = auto)"
+                default -1
+                range -1 119
+                help
+                    I2C address for BMP280. Valid values are 0x76 (118) or 0x77 (119).
+                    Set to -1 to auto-probe 0x76 then 0x77.
+
+            config IAQ_BMP280_OSRS_T
+                int "Temperature oversampling (osrs_t code)"
+                default 1
+                range 0 5
+                help
+                    BMP280 temperature oversampling setting used in ctrl_meas.
+                    Code mapping: 0=skip, 1=x1, 2=x2, 3=x4, 4=x8, 5=x16.
+                    NOTE: Using 0 (skip) may degrade pressure compensation accuracy.
+
+            config IAQ_BMP280_OSRS_P
+                int "Pressure oversampling (osrs_p code)"
+                default 3
+                range 0 5
+                help
+                    BMP280 pressure oversampling setting used in ctrl_meas.
+                    Code mapping: 0=skip, 1=x1, 2=x2, 3=x4, 4=x8, 5=x16.
+
+            config IAQ_BMP280_FILTER
+                int "IIR filter coefficient (filter code)"
+                default 2
+                range 0 4
+                help
+                    BMP280 IIR filter coefficient in config register.
+                    Code mapping: 0=off, 1=2, 2=4, 3=8, 4=16.
+
+            config IAQ_BMP280_MEAS_DELAY_MARGIN_MS
+                int "Measurement delay margin (ms)"
+                default 3
+                range 0 50
+                help
+                    Extra delay margin added to the computed forced-mode measurement time.
+                    Datasheet formula: 1.25ms + 2.3ms*osrs_t + 2.3ms*osrs_p.
+                    A small margin (2–5ms) is recommended.
+        endmenu
+
+        menu "UART Sensors"
+            menu "PMS5003 Particulate Matter Sensor"
+                config IAQ_PMS5003_UART_PORT
+                    int "UART Port Number"
+                    default 1
+                    range 0 2
+                    help
+                        UART port for PMS5003 sensor (0, 1, or 2).
+                        Port 0 is typically used by console.
+                        Default: 1.
+
+                config IAQ_PMS5003_TX_GPIO
+                    int "TX GPIO"
+                    default 17
+                    range 0 48
+                    help
+                        GPIO for UART TX to PMS5003.
+                        Default: GPIO17.
+
+                config IAQ_PMS5003_RX_GPIO
+                    int "RX GPIO"
+                    default 18
+                    range 0 48
+                    help
+                        GPIO for UART RX from PMS5003.
+                        Default: GPIO18.
+
+                config IAQ_PMS5003_SET_GPIO
+                    int "SET Pin GPIO (Sleep/Wake Control)"
+                    default 6
+                    range -1 48
+                    help
+                        GPIO for PMS5003 SET pin (optional).
+                        -1 disables power management.
+                        Default: -1 (disabled).
+
+                config IAQ_PMS5003_RX_BUF_SIZE
+                    int "RX Buffer Size (bytes)"
+                    default 256
+                    range 256 2048
+                    help
+                        UART RX buffer size for PMS5003.
+                        MUST be > 128 bytes (ESP32-S3 UART FIFO size).
+                        PMS5003 frame is 32 bytes; buffer should accommodate bursts.
+                        Default: 256 bytes.
+
+                config IAQ_PMS5003_RST_GPIO
+                    int "RESET Pin GPIO (active LOW)"
+                    default 7
+                    range -1 48
+                    help
+                        Optional hardware RESET pin for PMS5003.
+                        -1 disables hardware reset control.
+                        Active LOW: driver pulses LOW then HIGH during reset.
+
+                config IAQ_PMS5003_RST_PULSE_MS
+                    int "RESET pulse width (ms)"
+                    default 50
+                    range 10 500
+                    help
+                        Duration to hold RESET pin LOW when performing a hard reset.
+
+                config IAQ_PMS5003_RST_SETTLE_MS
+                    int "RESET settle delay (ms)"
+                    default 200
+                    range 50 2000
+                    help
+                        Delay after releasing RESET (HIGH) before attempting to read.
+                        Note: overall warm-up is managed by the coordinator.
+
+                menu "Filtering and Background Reader"
+                    config IAQ_PMS5003_BG_READER
+                        bool "Enable background UART reader"
+                        default y
+                        help
+                            Continuously parse PMS5003 frames at ~1 Hz in the background
+                            and maintain a smoothed reading. The coordinator read will
+                            fetch the latest smoothed value without blocking on UART.
+
+                    config IAQ_PMS5003_RING_SIZE
+                        int "Median window (samples)"
+                        default 5
+                        range 3 9
+                        depends on IAQ_PMS5003_BG_READER
+                        help
+                            Number of recent samples used for median filtering
+                            before EWMA smoothing. Use an odd number (3,5,7,9).
+
+                    config IAQ_PMS5003_EWMA_ALPHA
+                        string "EWMA alpha (0.0-1.0)"
+                        default "0.3"
+                        depends on IAQ_PMS5003_BG_READER
+                        help
+                            Exponential moving average weight. Higher alpha reacts
+                            faster to changes, lower alpha smooths more. Example: 0.3.
+
+                    config IAQ_PMS5003_STALE_MS
+                        int "Stale timeout (ms)"
+                        default 5000
+                        range 1000 60000
+                        depends on IAQ_PMS5003_BG_READER
+                        help
+                            If no valid frame is received within this time, the
+                            next driver read reports timeout.
+                endmenu
+            endmenu
+
+            menu "Senseair S8 CO2 Sensor"
+                config IAQ_S8_UART_PORT
+                    int "UART Port Number"
+                    default 2
+                    range 0 2
+                    help
+                        UART port for Senseair S8 sensor (0, 1, or 2).
+                        Must differ from PMS5003 port if both enabled.
+                        Default: 2.
+
+                config IAQ_S8_ADDR
+                    int "Modbus Address"
+                    default 254
+                    range 1 254
+                    help
+                        Senseair S8 Modbus address (decimal). Default: 254 (0xFE).
+                        Change only if your module has been readdressed.
+
+                config IAQ_S8_TX_GPIO
+                    int "TX GPIO"
+                    default 47
+                    range 0 48
+                    help
+                        GPIO for UART TX to S8.
+                        Default: GPIO47 (avoids conflict with USB D-/D+ on 19/20).
+
+                config IAQ_S8_RX_GPIO
+                    int "RX GPIO"
+                    default 48
+                    range 0 48
+                    help
+                        GPIO for UART RX from S8.
+                        Default: GPIO48 (avoids conflict with USB D-/D+ on 19/20).
+
+                config IAQ_S8_RX_BUF_SIZE
+                    int "RX Buffer Size (bytes)"
+                    default 256
+                    range 256 2048
+                    help
+                        UART RX buffer size for S8.
+                        MUST be > 128 bytes (ESP32-S3 UART FIFO size).
+                        S8 Modbus responses are typically <32 bytes.
+                        Default: 256 bytes.
+
+                config IAQ_S8_ENABLE_ABC
+                    bool "Enable sensor-side ABC (Automatic Baseline Correction)"
+                    default n
+                    help
+                        When enabled, the driver will configure the S8 to manage ABC internally
+                        via its ABC period holding register. This disables fusion-side ABC.
+
+                config IAQ_S8_ABC_PERIOD_HOURS
+                    int "ABC period (hours)"
+                    default 180
+                    range 0 10000
+                    depends on IAQ_S8_ENABLE_ABC
+                    help
+                        ABC period in hours (0 disables ABC). Typical: 180 hours (7.5 days).
+
+                config IAQ_S8_USE_SENSOR_PRESSURE_COMP
+                    bool "Use sensor-side pressure compensation (if supported)"
+                    default n
+                    help
+                        If the S8 variant supports ambient pressure input via Modbus, enable this
+                        to write measured pressure to the sensor. This will disable fusion-side
+                        pressure compensation to avoid double-correction. If unsupported, this
+                        setting has no effect.
+            endmenu
+        endmenu
+
+        menu "OLED Display (SH1106)"
+            config IAQ_OLED_ENABLE
+                bool "Enable OLED display"
+                default y
+                help
+                    Enable the SH1106-based OLED display. Uses the shared I2C bus
+                    (see Sensor Hardware Configuration → I2C Bus Configuration).
+
+            config IAQ_OLED_I2C_ADDR
+                int "OLED I2C address"
+                default 60  # 0x3C
+                range 8 119
+                depends on IAQ_OLED_ENABLE
+                help
+                    7-bit I2C address for the OLED controller. Most SH1106/SSD1306 modules
+                    are at 0x3C (60) or 0x3D (61).
+
+            config IAQ_OLED_COLUMN_OFFSET
+                int "Column offset for 132-wide modules"
+                default 2
+                range 0 4
+                depends on IAQ_OLED_ENABLE
+                help
+                    SH1106 has 132 columns with typically only 128 visible. Set the left
+                    column offset (0–4) so the 128-pixel content is centered.
+
+            choice IAQ_OLED_ROTATION
+                prompt "Rotation"
+                default IAQ_OLED_ROTATION_0
+                depends on IAQ_OLED_ENABLE
+                help
+                    Rotate the display 0 or 180 degrees.
+
+                config IAQ_OLED_ROTATION_0
+                    bool "0°"
+
+                config IAQ_OLED_ROTATION_180
+                    bool "180°"
+            endchoice
+
+            config IAQ_OLED_CONTRAST
+                int "Contrast (0-255)"
+                default 150
+                range 0 255
+                depends on IAQ_OLED_ENABLE
+                help
+                    SH1106 contrast (0x81 command). Typical: 96–160.
+
+            config IAQ_OLED_I2C_FREQ_HZ
+                int "OLED I2C Clock Frequency (Hz)"
+                default 400000
+                range 10000 400000
+                depends on IAQ_OLED_ENABLE
+                help
+                    I2C clock for the OLED device. Many SH1106/SSD1306 modules support
+                    400 kHz (Fast mode). If you see bus issues, reduce to 100000.
+
+            config IAQ_OLED_REFRESH_MS
+                int "Refresh interval (ms)"
+                default 500
+                range 100 5000
+                depends on IAQ_OLED_ENABLE
+                help
+                    UI refresh cadence for dynamic screens.
+
+            config IAQ_OLED_IDLE_TIMEOUT_MS
+                int "Idle auto-off timeout (ms)"
+                default 0
+                range 0 3600000
+                depends on IAQ_OLED_ENABLE
+                help
+                    Turns off the display after inactivity. 0 disables auto-off.
+
+            menu "Night Schedule"
+                depends on IAQ_OLED_ENABLE
+
+                config IAQ_OLED_NIGHT_START_H
+                    int "Night start hour (0-23)"
+                    default 23
+                    range 0 23
+                config IAQ_OLED_NIGHT_END_H
+                    int "Night end hour (0-23)"
+                    default 7
+                    range 0 23
+                config IAQ_OLED_WAKE_SECS
+                    int "Night wake duration (s)"
+                    default 15
+                    range 5 600
+                    help
+                        When in night mode, a button press will wake the display for this duration.
+            endmenu
+
+            menu "Button"
+                depends on IAQ_OLED_ENABLE
+
+                config IAQ_OLED_BUTTON_GPIO
+                    int "Button GPIO (-1 to disable)"
+                    default -1
+                    range -1 48
+                config IAQ_OLED_BUTTON_ACTIVE_LOW
+                    bool "Button is active low"
+                    default y
+                config IAQ_OLED_BUTTON_DEBOUNCE_MS
+                    int "Debounce (ms)"
+                    default 30
+                    range 1 200
+                config IAQ_OLED_BUTTON_LONG_MS
+                    int "Long-press threshold (ms)"
+                    default 1200
+                    range 100 10000
+            endmenu
+        endmenu
+    endmenu
+
+    menu "Sampling, Simulation, Fusion"
+        menu "Sampling Cadence"
+            config IAQ_CADENCE_MCU_MS
+                int "MCU temperature cadence (ms)"
+                default 10000
+                range 0 600000
+                help
+                    Period between MCU internal temperature sensor reads.
+                    Recommended: 10s. MCU temperature changes slowly; shorter cadences
+                    mostly add noise. Set 0 to disable.
+
+            config IAQ_CADENCE_SHT45_MS
+                int "SHT45 cadence (ms)"
+                default 2000
+                range 0 600000
+                help
+                    Period between SHT45 reads. Recommended: 2s.
+                    Faster than ~2s offers little benefit and can increase self-heating.
+                    Set 0 to disable.
+
+            config IAQ_CADENCE_BMP280_MS
+                int "BMP280 cadence (ms)"
+                default 10000
+                range 0 600000
+                help
+                    Period between BMP280 reads. Recommended: 10s.
+                    Pressure changes slowly; shorter cadences add noise without value.
+                    Set 0 to disable.
+
+            config IAQ_CADENCE_SGP41_MS
+                int "SGP41 cadence (ms)"
+                default 1000
+                range 0 600000
+                help
+                    Period between SGP41 reads. Recommended: 1s (or 10s).
+                    Sensirion's Gas Index Algorithm is validated at 1s and 10s sampling.
+                    The driver initializes the algorithm using this cadence. Set 0 to disable.
+
+            config IAQ_CADENCE_PMS5003_MS
+                int "PMS5003 cadence (ms)"
+                default 10000
+                range 0 600000
+                help
+                    Period between PMS5003 reads. Recommended: 10–30s.
+                    Continuous fast sampling increases fan wear and dust accumulation;
+                    10s is a good balance for responsiveness. Set 0 to disable.
+
+            config IAQ_CADENCE_S8_MS
+                int "Senseair S8 cadence (ms)"
+                default 10000
+                range 0 600000
+                help
+                    Period between S8 CO2 reads. Recommended: 10s.
+                    CO2 dynamics are slow (T90 ~30s); faster sampling rarely adds value.
+                    Set 0 to disable.
+        endmenu
+
+        menu "Sensor Warm-up Durations"
+            config IAQ_WARMUP_MCU_MS
+                int "MCU temperature warm-up (ms)"
+                default 0
+                range 0 60000
+                help
+                    MCU sensor warm-up time. Reads are blocked until this period elapses.
+                    Default: 0 (no warm-up needed).
+
+            config IAQ_WARMUP_SHT45_MS
+                int "SHT45 warm-up (ms)"
+                default 0
+                range 0 60000
+                help
+                    SHT45 warm-up time after power-on.
+                    Default: 0 (ready immediately).
+
+            config IAQ_WARMUP_BMP280_MS
+                int "BMP280 warm-up (ms)"
+                default 20000
+                range 0 60000
+                help
+                    BMP280 warm-up time after power-on.
+                    Default: 20000 (20 seconds) for stable readings.
+
+            config IAQ_WARMUP_SGP41_MS
+                int "SGP41 warm-up (ms)"
+                default 55000
+                range 10000 60000
+                help
+                    SGP41 VOC/NOx sensor warm-up duration. The sensor requires:
+                    - Minimum 10s: Mandatory conditioning period (hardware requirement)
+                    - Recommended 55s: Full stabilization (10s conditioning + 45s algorithm blackout)
+
+                    After 10s conditioning, the sensor outputs readings, but the gas index
+                    algorithm needs ~45s more to report accurate values. Setting this to 10s
+                    will make the sensor available faster, but initial readings may be unstable.
+                    Default: 55000ms (55 seconds) for accurate readings from the start.
+
+            config IAQ_WARMUP_PMS5003_MS
+                int "PMS5003 warm-up (ms)"
+                default 30000
+                range 0 60000
+                help
+                    PMS5003 particulate sensor needs ~30s to stabilize fan and readings.
+                    Default: 30000 (30 seconds).
+
+            config IAQ_WARMUP_S8_MS
+                int "Senseair S8 warm-up (ms)"
+                default 20000
+                range 0 60000
+                help
+                    S8 CO2 sensor requires ~20s warm-up for accurate readings.
+                    Default: 20000 (20 seconds).
+        endmenu
+
+        config IAQ_SIMULATION
+            bool "Enable sensor simulation mode"
             default n
             help
-                Publish detailed diagnostics to iaq/{device}/diagnostics topic.
-                Includes raw sensor values, fusion corrections, and ABC state.
-                Published at lower rate (5 min) to reduce bandwidth.
-                Useful for validation and tuning, not needed for normal operation.
+                Replace real sensor reads with simulated data.
+                Useful for testing MQTT/HA integration without hardware.
+                Simulation still respects cadences, warm-up delays, and state machine logic.
 
-        config MQTT_DIAGNOSTICS_PUBLISH_INTERVAL_SEC
-            int "Diagnostics publish interval (seconds)"
-            default 300
-            range 60 3600
-            depends on MQTT_PUBLISH_DIAGNOSTICS
-            help
-                How often to publish diagnostics data.
-                Default: 300 seconds (5 minutes).
+        menu "Sensor Fusion"
+            config FUSION_PM_RH_ENABLE
+                bool "Enable PM humidity compensation"
+                default y
+                help
+                    Correct PM2.5/PM10 readings for humidity effects.
+                    Optical PM sensors over-read at high RH due to hygroscopic growth.
+                    Applies correction: pm_dry = pm_raw / (1 + a*(RH/100)^b)
 
-        config MQTT_PUBLISH_PM1
-            bool "Create Home Assistant entity for PM1.0"
-            default n
-            help
-                Publish PM1.0 to HA auto-discovery.
-                Most users only need PM2.5/PM10 for AQI.
-                PM1.0 is still collected and included in diagnostics.
-                Enable for advanced monitoring or sensor validation.
+            config FUSION_PM_RH_A
+                string "PM RH correction coefficient A"
+                default "0.3"
+                depends on FUSION_PM_RH_ENABLE
+                help
+                    Coefficient 'a' in PM RH correction formula.
+                    Default: 0.3 (conservative, based on literature).
+                    Tune via console 'fusion set pm_offset' after field calibration.
 
-endmenu
+            config FUSION_PM_RH_B
+                string "PM RH correction coefficient B"
+                default "3.0"
+                depends on FUSION_PM_RH_ENABLE
+                help
+                    Exponent 'b' in PM RH correction formula.
+                    Default: 3.0 (conservative, based on literature).
 
-menu "MQTT TLS"
-    config IAQ_MQTT_TLS_SKIP_COMMON_NAME_CHECK
-        bool "Skip TLS common name (CN) check"
-        default n
-        help
-            When using MQTTS with an IP address or when the certificate CN/SAN
-            does not match the hostname, enable this to skip the CN check.
-            Not recommended for production; prefer matching hostnames.
+            config FUSION_PM_RH_MAX_PERCENT
+                int "Maximum RH for PM correction (%)"
+                default 90
+                range 70 95
+                depends on FUSION_PM_RH_ENABLE
+                help
+                    Above this RH, PM correction is not applied (quality flagged as low).
+                    Optical sensors become unreliable at very high RH.
+                    Default: 90%.
 
-    choice IAQ_MQTT_TLS_TRUST_MODE
-        prompt "TLS trust source"
-        default IAQ_MQTT_TLS_TRUST_BUNDLE
-        help
-            Select how the device verifies the broker's server certificate when
-            connecting to mqtts:// URLs.
+            config FUSION_CO2_PRESSURE_ENABLE
+                bool "Enable CO2 pressure compensation"
+                depends on !IAQ_S8_USE_SENSOR_PRESSURE_COMP
+                default y
+                help
+                    Compensate CO2 readings for barometric pressure changes.
+                    Formula: co2_corrected = co2_raw * (P_ref / P_measured).
+                    Useful for altitude changes and weather variations.
 
-        config IAQ_MQTT_TLS_TRUST_BUNDLE
-            bool "Certificate bundle (recommended)"
-            help
-                Use ESP-IDF's built-in certificate bundle to validate public CAs
-                (e.g., Let's Encrypt). Enable CONFIG_MBEDTLS_CERTIFICATE_BUNDLE.
+            config FUSION_CO2_PRESSURE_REF_PA
+                int "Reference pressure for CO2 compensation (Pa)"
+                default 101325
+                range 95000 106000
+                depends on FUSION_CO2_PRESSURE_ENABLE
+                help
+                    Reference pressure (Pa) for CO2 compensation.
+                    Default: 101325 Pa (sea level standard).
+                    Adjust for local altitude if needed.
 
-        config IAQ_MQTT_TLS_TRUST_CA_PEM
-            bool "Embed custom Root CA PEM"
-            help
-                Embed a custom Root CA PEM at build time. Place the file at
-                components/connectivity/certs/ca.pem.
+            config FUSION_TEMP_SELF_HEAT_OFFSET_C
+                string "Temperature self-heating offset (°C)"
+                default "0.0"
+                help
+                    Offset to compensate for sensor self-heating.
+                    If SHT45 reads warmer than ambient due to board heat, set positive offset.
+                    Example: "0.5" if sensor reads 0.5°C high.
+                    Runtime adjustable via console 'fusion set temp_offset'.
 
-        config IAQ_MQTT_TLS_TRUST_INSECURE
-            bool "Insecure (no server verification)"
-            help
-                Do not verify the broker's certificate. This is insecure and
-                should only be used for local testing with self-signed certs.
-                Consider using a proper Root CA instead.
-    endchoice
+            config FUSION_CO2_ABC_ENABLE
+                bool "Enable CO2 automatic baseline correction (ABC)"
+                depends on !IAQ_S8_ENABLE_ABC
+                default n
+                help
+                    Automatically track and correct CO2 sensor baseline drift.
+                    Assumes sensor is occasionally exposed to outdoor air (400 ppm).
+                    Tracks nightly minima over 7 days to establish baseline.
+                    WARNING: Disable if sensor is in sealed/mobile environment.
 
-    config IAQ_MQTT_MTLS_ENABLE
-        bool "Enable mutual TLS (client certificate)"
-        default n
-        help
-            Enable client certificate authentication. Place client cert and key
-            files at components/connectivity/certs/client.crt.pem and
-            components/connectivity/certs/client.key.pem.
+            config FUSION_CO2_ABC_NIGHT_START_HOUR
+                int "ABC night start hour (24hr)"
+                default 2
+                range 0 6
+                depends on FUSION_CO2_ABC_ENABLE
+                help
+                    Hour to start tracking CO2 minima for ABC (24-hour format).
+                    Default: 2 AM (typical lowest occupancy).
 
-    config IAQ_MQTT_TLS_AWS_IOT_ALPN
-        bool "Use AWS IoT ALPN (port 443)"
-        default n
-        help
-            Attach ALPN protocol x-amzn-mqtt-ca for AWS IoT Core over port 443.
-            Use with mqtts://<endpoint>:443. Leave disabled for port 8883.
-endmenu
+            config FUSION_CO2_ABC_NIGHT_END_HOUR
+                int "ABC night end hour (24hr)"
+                default 6
+                range 3 8
+                depends on FUSION_CO2_ABC_ENABLE
+                help
+                    Hour to end tracking CO2 minima for ABC (24-hour format).
+                    Default: 6 AM.
+        endmenu
 
-menu "Time Synchronization"
-    config IAQ_TZ_STRING
-        string "Time zone (POSIX TZ string)"
-        default "CET-1CEST,M3.5.0/2,M10.5.0/3"
-        help
-            POSIX TZ string for local time. Default is Central European Time
-            with daylight saving for Czech Republic: CET (UTC+1) and CEST
-            from last Sunday in March 02:00 to last Sunday in October 03:00.
-            Example alternatives: "UTC" or other POSIX TZ strings.
-            Used to format localtime and determine day/night windows.
+        menu "Derived Metrics"
+            config METRICS_AQI_ENABLE
+                bool "Calculate EPA Air Quality Index (AQI)"
+                default y
+                help
+                    Compute EPA AQI from PM2.5 and PM10 measurements.
+                    Uses official EPA breakpoints and piecewise linear interpolation.
+                    Result: 0-500 with category (Good, Moderate, Unhealthy, etc.)
 
-    config IAQ_NTP_SERVER0
-        string "Primary NTP server"
-        default "time.google.com"
-        help
-            Hostname of the primary NTP server.
+            config METRICS_COMFORT_ENABLE
+                bool "Calculate thermal comfort metrics"
+                default y
+                help
+                    Compute dew point, heat index, and comfort score.
+                    Formulas: Magnus (dew point), NOAA (heat index), custom scoring.
+                    Result: 0-100 comfort score with category.
 
-    config IAQ_NTP_SERVER1
-        string "Secondary NTP server"
-        default "pool.ntp.org"
-        help
-            Hostname of a secondary NTP server (optional).
-endmenu
+            config METRICS_COMFORT_TARGET_TEMP_C
+                int "Target comfort temperature (°C)"
+                default 22
+                range 18 26
+                depends on METRICS_COMFORT_ENABLE
+                help
+                    Ideal temperature for comfort scoring.
+                    Deviations reduce comfort score.
+                    Default: 22°C.
 
-menu "Profiling"
-    config IAQ_PROFILING
-        bool "Enable profiling and extended status reporting"
-        default n
-        help
-            Enable low-overhead profiling of key operations and enhanced
-            system status report. When disabled, reporting falls back to a
-            single concise status line.
+            config METRICS_COMFORT_TARGET_RH_PCT
+                int "Target comfort relative humidity (%)"
+                default 45
+                range 30 60
+                depends on METRICS_COMFORT_ENABLE
+                help
+                    Ideal RH for comfort scoring.
+                    Deviations reduce comfort score.
+                    Default: 45%.
 
-    config IAQ_PROFILING_INTERVAL_SEC
-        int "Profiling report interval (seconds)"
-        default 30
-        range 5 600
-        depends on IAQ_PROFILING
-        help
-            How often to print and reset profiling statistics.
+            config METRICS_PRESSURE_TREND_ENABLE
+                bool "Calculate barometric pressure trend"
+                default y
+                help
+                    Track pressure changes over configurable window (default 3 hours).
+                    Result: RISING, STABLE, or FALLING with delta value.
+                    Useful for weather context and ventilation strategy.
 
-    config IAQ_PROFILING_TASK_STACKS
-        bool "Include task stack high-water marks in report"
-        default y
-        depends on IAQ_PROFILING
-        help
-            Report FreeRTOS task stack headroom (bytes) for registered tasks.
+            config METRICS_PRESSURE_TREND_WINDOW_HR
+                int "Pressure trend window (hours)"
+                default 3
+                range 1 6
+                depends on METRICS_PRESSURE_TREND_ENABLE
+                help
+                    Time window for pressure trend calculation.
+                    Default: 3 hours (meteorological standard).
 
-    config IAQ_PROFILING_RUNTIME_STATS
-        bool "Include CPU runtime stats per task"
-        default n
-        depends on IAQ_PROFILING
-        select FREERTOS_USE_TRACE_FACILITY
-        select FREERTOS_GENERATE_RUN_TIME_STATS
-        select FREERTOS_USE_STATS_FORMATTING_FUNCTIONS
-        help
-            Adds CPU usage breakdown per task using FreeRTOS runtime stats.
-            Increases code size modestly.
+            config METRICS_PRESSURE_TREND_THRESHOLD_HPA
+                string "Pressure trend threshold (hPa)"
+                default "1.5"
+                depends on METRICS_PRESSURE_TREND_ENABLE
+                help
+                    Change threshold to classify as RISING or FALLING.
+                    Value represents delta over the configured window (default 3h).
 
-    config IAQ_PROFILING_PM_LOCKS
-        bool "Include PM lock profiling (esp_pm_dump_locks)"
-        default n
-        depends on IAQ_PROFILING && PM_ENABLE
-        select PM_PROFILING
-        help
-            Track time each PM lock is held and allow dumping via esp_pm_dump_locks().
-            Adds runtime overhead; keep disabled in production.
+            config METRICS_PRESSURE_TREND_HYSTERESIS_HPA
+                string "Pressure trend hysteresis (hPa)"
+                default "0.3"
+                depends on METRICS_PRESSURE_TREND_ENABLE
+                help
+                    Hysteresis band applied when exiting RISING/FALLING back to STABLE.
+                    Prevents rapid oscillation around the trend threshold.
+                    Must be <= threshold.
 
-    config IAQ_PROFILING_PARSEABLE_OUTPUT
-        bool "Use machine-parseable output format"
-        default n
-        depends on IAQ_PROFILING
-        help
-            Emit simplified parseable lines instead of human-friendly formatting.
-            Useful for scraping logs; off by default.
-            Note: Reserved for future use; currently not used.
-endmenu
+            config METRICS_VOC_NOX_CATEGORIES_ENABLE
+                bool "Calculate VOC/NOx quality categories"
+                default y
+                help
+                    Map SGP41 VOC and NOx indices (0-500) to user-friendly categories.
+                    Categories: Excellent, Good, Moderate, Poor, Very Poor, Severe.
+                    Helps interpret gas sensor readings without understanding index scale.
+
+            config METRICS_MOLD_RISK_ENABLE
+                bool "Calculate mold risk index"
+                default y
+                help
+                    Assess mold growth risk based on humidity, dew point, and duration.
+                    Combines RH > 65%, dew point proximity to cold surfaces.
+                    Result: 0-100 risk score with category (Low, Moderate, High, Severe).
+                    Helps prevent costly mold remediation.
+
+            config METRICS_MOLD_RISK_COLD_SURFACE_OFFSET_C
+                int "Cold surface temperature offset (°C)"
+                default 5
+                range 0 15
+                depends on METRICS_MOLD_RISK_ENABLE
+                help
+                    Assume cold surfaces (walls, windows) are this many °C below ambient.
+                    Higher values = more conservative (higher risk scores).
+                    Default: 5°C (typical for poorly insulated walls).
+
+            config METRICS_CO2_RATE_ENABLE
+                bool "Calculate CO2 rate of change"
+                default y
+                help
+                    Track CO2 change rate (ppm/hour) for occupancy and ventilation detection.
+                    Rapid rise indicates occupancy increase or ventilation failure.
+                    Rapid fall indicates effective ventilation or occupants leaving.
+
+            config METRICS_CO2_RATE_WINDOW_MIN
+                int "CO2 rate calculation window (minutes)"
+                default 15
+                range 5 60
+                depends on METRICS_CO2_RATE_ENABLE
+                help
+                    Time window for CO2 rate-of-change calculation.
+                    Shorter = more responsive to changes.
+                    Longer = more stable, less noisy.
+                    Default: 15 minutes.
+
+            config METRICS_PM_SPIKE_DETECTION_ENABLE
+                bool "Detect PM2.5 pollution spikes"
+                default y
+                help
+                    Detect sudden PM2.5 increases (cooking, smoking, outdoor pollution).
+                    Compares current reading to recent average.
+                    Triggers alert flag for automation (air purifier, notification).
+
+            config METRICS_PM_SPIKE_THRESHOLD_UGPM3
+                int "PM2.5 spike threshold (µg/m³)"
+                default 25
+                range 10 100
+                depends on METRICS_PM_SPIKE_DETECTION_ENABLE
+                help
+                    Minimum PM2.5 increase to trigger spike detection.
+                    Default: 25 µg/m³ above baseline (typical cooking event).
+
+            config METRICS_PM_SPIKE_BASELINE_WINDOW_MIN
+                int "PM2.5 baseline averaging window (minutes)"
+                default 30
+                range 10 120
+                depends on METRICS_PM_SPIKE_DETECTION_ENABLE
+                help
+                    Time window for calculating PM2.5 baseline (pre-spike level).
+                    Default: 30 minutes.
+        endmenu
+    endmenu
 
 endmenu
