@@ -19,6 +19,7 @@ idf_component_register(
         sensor_coordinator
         time_sync
         app_config
+        power_board
     PRIV_REQUIRES
         esp_timer
         driver

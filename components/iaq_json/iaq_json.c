@@ -6,6 +6,7 @@
 #include "iaq_json.h"
 #include "sensor_coordinator.h"
 #include "time_sync.h"
+#include "power_board.h"
 #include <time.h>
 
 static double round_to_1dp(double v) { return round(v * 10.0) / 10.0; }
@@ -269,4 +270,45 @@ cJSON* iaq_json_build_health(const iaq_data_t *data)
     cJSON_AddItemToObject(root, "sensors", sensors);
 
     return root;
+}
+
+cJSON* iaq_json_build_power(void)
+{
+    cJSON *root = cJSON_CreateObject();
+
+#if !CONFIG_IAQ_POWERFEATHER_ENABLE
+    cJSON_AddBoolToObject(root, "available", false);
+    return root;
+#else
+    iaq_power_snapshot_t p = {0};
+    IAQ_DATA_WITH_LOCK() { p = iaq_data_get()->power; }
+
+    cJSON_AddBoolToObject(root, "available", p.available);
+    if (!p.available) {
+        return root;
+    }
+
+    cJSON_AddBoolToObject(root, "supply_good", p.supply_good);
+    cJSON_AddNumberToObject(root, "supply_mv", p.supply_mv);
+    cJSON_AddNumberToObject(root, "supply_ma", p.supply_ma);
+    cJSON_AddNumberToObject(root, "maintain_mv", p.maintain_mv);
+    cJSON_AddBoolToObject(root, "en", p.en);
+    cJSON_AddBoolToObject(root, "v3v_on", p.v3v_on);
+    cJSON_AddBoolToObject(root, "vsqt_on", p.vsqt_on);
+    cJSON_AddBoolToObject(root, "stat_on", p.stat_on);
+    cJSON_AddBoolToObject(root, "charging_on", p.charging_on);
+    cJSON_AddNumberToObject(root, "charge_limit_ma", p.charge_limit_ma);
+    cJSON_AddNumberToObject(root, "batt_mv", p.batt_mv);
+    cJSON_AddNumberToObject(root, "batt_ma", p.batt_ma);
+    cJSON_AddNumberToObject(root, "charge_pct", p.charge_pct);
+    cJSON_AddNumberToObject(root, "health_pct", p.health_pct);
+    cJSON_AddNumberToObject(root, "cycles", p.cycles);
+    cJSON_AddNumberToObject(root, "time_left_min", p.time_left_min);
+    cJSON_AddNumberToObject(root, "batt_temp_c", p.batt_temp_c);
+    cJSON_AddNumberToObject(root, "alarm_low_v_mv", p.alarm_low_v_mv);
+    cJSON_AddNumberToObject(root, "alarm_high_v_mv", p.alarm_high_v_mv);
+    cJSON_AddNumberToObject(root, "alarm_low_pct", p.alarm_low_pct);
+    cJSON_AddNumberToObject(root, "updated_at_us", (double)p.updated_us);
+    return root;
+#endif
 }

@@ -30,6 +30,18 @@
   - Derived metrics (same as MQTT `/metrics`).
   - Response: `{ aqi:{ value, category, dominant, pm25_subindex, pm10_subindex }, comfort:{ score, category, dew_point_c, abs_humidity_gm3, heat_index_c }, pressure:{ trend, delta_hpa, window_hours }, co2_score, voc_category, nox_category, overall_iaq_score, mold_risk:{ score, category }, co2_rate_ppm_hr, pm25_spike_detected }`.
 
+**Power (PowerFeather only)**
+- GET `/api/v1/power`
+  - Power/charger/fuel-gauge snapshot. Response: `{ available, supply_good, supply_mv, supply_ma, maintain_mv, en, v3v_on, vsqt_on, stat_on, charging_on, charge_limit_ma, batt_mv, batt_ma, charge_pct, health_pct, cycles, time_left_min, batt_temp_c, alarm_low_v_mv, alarm_high_v_mv, alarm_low_pct, updated_at_us }`. If PF is disabled/uninitialized: `{ available:false, error? }`.
+- POST `/api/v1/power/outputs`
+  - Body: `{ en?, v3v_on?, vsqt_on?, stat_on? }` toggles rails/pins (optional fields).
+- POST `/api/v1/power/charger`
+  - Body: `{ enable?, limit_ma?, maintain_mv? }` toggles charging, sets current limit and maintain voltage (MPP).
+- POST `/api/v1/power/alarms`
+  - Body: `{ low_v_mv?, high_v_mv?, low_pct? }` sets battery alarms (0 to clear).
+- POST `/api/v1/power/ship` | `/shutdown` | `/cycle`
+  - Triggers ship mode, shutdown, or power-cycle (will drop connectivity).
+
 **Health**
 - GET `/api/v1/health`
   - System health and per‑sensor runtime state.
@@ -75,12 +87,13 @@
 
 **WebSocket**
 - Connect to `/ws`.
-- Messages are JSON envelopes: `{ type:"state"|"metrics"|"health", data:<payload> }`.
-- Initial snapshot: upon connection, the server immediately pushes one `state`, `metrics`, and `health` message to that client so the UI can render without REST bootstrapping.
+- Messages are JSON envelopes: `{ type:"state"|"metrics"|"health"|"power", data:<payload> }`.
+- Initial snapshot: upon connection, the server immediately pushes one `state`, `metrics`, and `health` message to that client so the UI can render without REST bootstrapping (power is streamed on the next state tick).
 - Update cadence:
   - `state`: 1 Hz
   - `metrics`: every 5 s
   - `health`: 1 Hz while at least one WS client is connected
+  - `power`: 1 Hz while at least one WS client is connected (available=false when PF is disabled)
  - Heartbeats: server sends WS PINGs periodically; stale clients are removed if no PONG within timeout.
 - Timers only run while at least one WS client is connected.
 
@@ -107,6 +120,8 @@
   - `curl http://<ip>/api/v1/sensors/cadence`
   - `curl -X POST http://<ip>/api/v1/wifi -H 'Content-Type: application/json' -d '{"ssid":"SSID","password":"PASS","restart":true}'`
   - `curl -X POST http://<ip>/api/v1/sensor/sht45/cadence -H 'Content-Type: application/json' -d '{"ms":5000}'`
+  - `curl http://<ip>/api/v1/power`
+  - `curl -X POST http://<ip>/api/v1/power/outputs -H 'Content-Type: application/json' -d '{"en":true,"v3v_on":true,"vsqt_on":true}'`
 
 - HTTPS with self‑signed cert:
   - When HTTPS is enabled and the device uses a self‑signed certificate (default), add `-k` (`--insecure`) to curl:

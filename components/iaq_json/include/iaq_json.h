@@ -20,6 +20,9 @@ cJSON* iaq_json_build_metrics(const iaq_data_t *data);
 /* /health payload: system health + per-sensor runtime info */
 cJSON* iaq_json_build_health(const iaq_data_t *data);
 
+/* /power payload: board power/charger/fuel-gauge snapshot (optional) */
+cJSON* iaq_json_build_power(void);
+
 /* Utility: stringify and free cJSON */
 static inline char* iaq_json_to_string_and_delete(cJSON *obj)
 {
@@ -34,4 +37,3 @@ static inline char* iaq_json_to_string_and_delete(cJSON *obj)
 #endif
 
 #endif /* IAQ_JSON_H */
-

@@ -1140,4 +1140,84 @@ menu "IAQ Monitor Configuration"
         endmenu
     endmenu
 
+    menu "PowerFeather Board"
+
+        config IAQ_POWERFEATHER_ENABLE
+            bool "Enable PowerFeather board support"
+            default n
+            help
+                Enable integration with the PowerFeather SDK for power management (rails, charger,
+                fuel gauge, alarms). Disable when building for non-PowerFeather hardware.
+
+        config IAQ_POWERFEATHER_FAIL_SOFT
+            bool "Fail soft when board is absent"
+            default y
+            depends on IAQ_POWERFEATHER_ENABLE
+            help
+                If enabled, initialization errors will be logged but not treated as fatal so the
+                application can continue running on non-PowerFeather hardware.
+
+        config IAQ_POWERFEATHER_BATTERY_MAH
+            int "Battery capacity (mAh)"
+            default 0
+            range 0 6000
+            depends on IAQ_POWERFEATHER_ENABLE
+            help
+                Battery capacity in mAh (50-6000) per cell. For parallel cells, enter the
+                single-cell capacity (not the combined pack). Set to 0 if no battery is
+                present. For predefined cells (ICR18650_26H or UR18650ZY) this value is
+                ignored.
+
+        choice IAQ_POWERFEATHER_BATTERY_TYPE
+            prompt "Battery type"
+            default IAQ_POWERFEATHER_BATTERY_GENERIC_3V7
+            depends on IAQ_POWERFEATHER_ENABLE
+
+            config IAQ_POWERFEATHER_BATTERY_GENERIC_3V7
+                bool "Generic 3.7V (4.2V max)"
+
+            config IAQ_POWERFEATHER_BATTERY_ICR18650_26H
+                bool "Samsung ICR18650-26H"
+
+            config IAQ_POWERFEATHER_BATTERY_UR18650ZY
+                bool "Panasonic UR18650ZY"
+
+        endchoice
+
+        config IAQ_POWERFEATHER_MAINTAIN_VOLTAGE_MV
+            int "Maintain supply voltage (mV)"
+            default 0
+            range 0 16800
+            depends on IAQ_POWERFEATHER_ENABLE
+            help
+                Supply voltage to maintain (useful for solar MPP). Set to 0 to disable.
+
+        config IAQ_POWERFEATHER_CHARGE_LIMIT_MA
+            int "Charge current limit (mA)"
+            default 500
+            range 0 2000
+            depends on IAQ_POWERFEATHER_ENABLE
+            help
+                Maximum battery charge current in mA. Set to 0 to use SDK default (50 mA).
+
+        config IAQ_POWERFEATHER_POLL_INTERVAL_MS
+            int "Power poll interval (ms)"
+            default 2000
+            range 200 10000
+            depends on IAQ_POWERFEATHER_ENABLE
+            help
+                How often to poll PowerFeather power/charger/fuel-gauge state and cache it
+                in iaq_data. Acts like another sensor cadence. Lower = fresher data, higher =
+                less I2C/CPU load.
+
+        config IAQ_MQTT_PUBLISH_POWER
+            bool "Publish PowerFeather power topic to MQTT"
+            default n
+            depends on IAQ_POWERFEATHER_ENABLE
+            help
+                Publish power/charger/fuel-gauge snapshot to MQTT /power topic. Disabled by default
+                even when PowerFeather support is enabled.
+
+    endmenu
+
 endmenu

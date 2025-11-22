@@ -19,6 +19,7 @@
 #include "mqtt_manager.h"
 #include "sensor_coordinator.h"
 #include "s8_driver.h"
+#include "power_board.h"
 /* SGP41 baseline ops removed; no direct console hooks needed */
 
 static const char *TAG = "CONSOLE_CMD";
@@ -855,6 +856,38 @@ static int cmd_version(int argc, char **argv)
     return 0;
 }
 
+/* ==================== POWER COMMAND (PowerFeather) ==================== */
+static int cmd_power(int argc, char **argv)
+{
+    iaq_power_snapshot_t snap = {0};
+    IAQ_DATA_WITH_LOCK() {
+        snap = iaq_data_get()->power;
+    }
+    if (!snap.available) {
+        printf("PowerFeather support is not enabled or not initialized.\n");
+        return 1;
+    }
+    printf("\n=== PowerFeather ===\n");
+    printf("Supply: %s, %u mV, %d mA (maintain %u mV)\n",
+           snap.supply_good ? "good" : "not good",
+           (unsigned)snap.supply_mv, (int)snap.supply_ma, (unsigned)snap.maintain_mv);
+    printf("Rails: EN=%s, 3V3=%s, VSQT=%s, STAT=%s\n",
+           snap.en ? "on" : "off",
+           snap.v3v_on ? "on" : "off",
+           snap.vsqt_on ? "on" : "off",
+           snap.stat_on ? "on" : "off");
+    printf("Charger: %s, limit=%u mA\n",
+           snap.charging_on ? "enabled" : "disabled",
+           (unsigned)snap.charge_limit_ma);
+    printf("Battery: %u mV, %d mA, %u%% charge, %u%% health, cycles=%u, time_left=%d min, temp=%.1f C\n",
+           (unsigned)snap.batt_mv, (int)snap.batt_ma, (unsigned)snap.charge_pct,
+           (unsigned)snap.health_pct, (unsigned)snap.cycles, snap.time_left_min, snap.batt_temp_c);
+    printf("Alarms: low_v=%u mV, high_v=%u mV, low_pct=%u%%\n",
+           (unsigned)snap.alarm_low_v_mv, (unsigned)snap.alarm_high_v_mv, (unsigned)snap.alarm_low_pct);
+    printf("\n");
+    return 0;
+}
+
 /* ==================== DISPLAY COMMAND ==================== */
 #if CONFIG_IAQ_OLED_ENABLE
 #include "display_oled/display_ui.h"
@@ -1067,6 +1100,15 @@ esp_err_t console_commands_init(void)
         .func = &cmd_sensor,
     };
     ESP_ERROR_CHECK(esp_console_cmd_register(&sensor_cmd));
+
+    /* Register power command (PowerFeather) */
+    const esp_console_cmd_t power_cmd = {
+        .command = "power",
+        .help = "PowerFeather power status",
+        .hint = NULL,
+        .func = &cmd_power,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&power_cmd));
 
     /* Register free command */
     const esp_console_cmd_t free_cmd = {

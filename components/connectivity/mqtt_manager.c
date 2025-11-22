@@ -28,6 +28,7 @@
 #include "esp_timer.h"
 #include "esp_task_wdt.h"
 #include "time_sync.h"
+#include "power_board.h"
 #include "iaq_profiler.h"
 #include "iaq_json.h"
 #include "pm_guard.h"
@@ -41,6 +42,12 @@ static esp_timer_handle_t s_metrics_timer = NULL;
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
 static esp_timer_handle_t s_diagnostics_timer = NULL;
 #endif
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+static esp_timer_handle_t s_power_timer = NULL;
+#endif
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+static esp_timer_handle_t s_power_timer = NULL;
+#endif
 
 typedef enum {
     MQTT_PUBLISH_EVENT_HEALTH = 0,
@@ -48,6 +55,9 @@ typedef enum {
     MQTT_PUBLISH_EVENT_METRICS,
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
     MQTT_PUBLISH_EVENT_DIAGNOSTICS,
+#endif
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+    MQTT_PUBLISH_EVENT_POWER,
 #endif
 } mqtt_publish_event_t;
 
@@ -74,6 +84,7 @@ static char s_password[64] = {0};
 #define TOPIC_STATE     TOPIC_PREFIX "/state"
 #define TOPIC_METRICS   TOPIC_PREFIX "/metrics"
 #define TOPIC_DIAGNOSTICS TOPIC_PREFIX "/diagnostics"
+#define TOPIC_POWER     TOPIC_PREFIX "/power"
 #define TOPIC_COMMAND   TOPIC_PREFIX "/cmd/#"
 #define TOPIC_CMD_RESTART   TOPIC_PREFIX "/cmd/restart"
 #define TOPIC_CMD_CALIBRATE TOPIC_PREFIX "/cmd/calibrate"
@@ -87,6 +98,15 @@ static void mqtt_state_timer_callback(void *arg);
 static void mqtt_metrics_timer_callback(void *arg);
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
 static void mqtt_diagnostics_timer_callback(void *arg);
+#endif
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+static void mqtt_power_timer_callback(void *arg);
+#endif
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+static void mqtt_power_timer_callback(void *arg);
+#endif
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+static void mqtt_power_timer_callback(void *arg);
 #endif
 static void mqtt_publish_worker_task(void *arg);
 static esp_err_t ensure_publish_timers_started(void);
@@ -558,6 +578,18 @@ esp_err_t mqtt_publish_metrics(const iaq_data_t *data)
     return publish_json(TOPIC_METRICS, root);
 }
 
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+/**
+ * Publish /power topic (PowerFeather snapshot).
+ */
+esp_err_t mqtt_publish_power(void)
+{
+    if (!s_mqtt_connected) return ESP_FAIL;
+    cJSON *root = iaq_json_build_power();
+    return publish_json(TOPIC_POWER, root);
+}
+#endif
+
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
 /**
  * Publish optional /diagnostics topic with raw values and fusion debug info.
@@ -821,6 +853,37 @@ static void mqtt_diagnostics_timer_callback(void *arg)
 }
 #endif /* CONFIG_MQTT_PUBLISH_DIAGNOSTICS */
 
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+/**
+ * MQTT power publishing timer callback.
+ * Publishes /power topic (PowerFeather snapshot). Uses same cadence as /state.
+ */
+static void mqtt_power_timer_callback(void *arg)
+{
+    (void)arg;
+    enqueue_publish_event(MQTT_PUBLISH_EVENT_POWER);
+
+    if (s_power_timer && !esp_timer_is_active(s_power_timer)) {
+        esp_timer_start_periodic(s_power_timer, CONFIG_MQTT_STATE_PUBLISH_INTERVAL_SEC * 1000000ULL);
+    }
+}
+#endif /* CONFIG_IAQ_MQTT_PUBLISH_POWER */
+
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+/**
+ * MQTT power publishing timer callback.
+ * Publishes /power topic (PowerFeather snapshot). Uses same cadence as /state.
+ */
+static void mqtt_power_timer_callback(void *arg)
+{
+    (void)arg;
+    enqueue_publish_event(MQTT_PUBLISH_EVENT_POWER);
+
+    if (s_power_timer && !esp_timer_is_active(s_power_timer)) {
+        esp_timer_start_periodic(s_power_timer, CONFIG_MQTT_STATE_PUBLISH_INTERVAL_SEC * 1000000ULL);
+    }
+}
+#endif /* CONFIG_IAQ_MQTT_PUBLISH_POWER */
 
 
 
@@ -971,6 +1034,25 @@ static esp_err_t ensure_publish_timers_started(void)
         }
     }
 #endif
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+    /* Power timer - share state cadence (starts after 5s) */
+    if (s_power_timer == NULL) {
+        const esp_timer_create_args_t power_args = {
+            .callback = &mqtt_power_timer_callback,
+            .name = "mqtt_power"
+        };
+        ret = esp_timer_create(&power_args, &s_power_timer);
+        if (ret != ESP_OK) {
+            return ret;
+        }
+    }
+    if (!esp_timer_is_active(s_power_timer)) {
+        ret = esp_timer_start_once(s_power_timer, 5000000ULL);
+        if (ret != ESP_OK && ret != ESP_ERR_INVALID_STATE) {
+            return ret;
+        }
+    }
+#endif
 
     return ESP_OK;
 }
@@ -1042,8 +1124,20 @@ static void mqtt_publish_worker_task(void *arg)
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
         if (pending_events & (1 << MQTT_PUBLISH_EVENT_DIAGNOSTICS)) {
             iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_MQTT_DIAG);
-            mqtt_publish_diagnostics(&snapshot);
-            iaq_prof_end(p);
+        mqtt_publish_diagnostics(&snapshot);
+        iaq_prof_end(p);
+        if (wdt_ret == ESP_OK) esp_task_wdt_reset();
+    }
+#endif
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+    if (pending_events & (1 << MQTT_PUBLISH_EVENT_POWER)) {
+        mqtt_publish_power();
+        if (wdt_ret == ESP_OK) esp_task_wdt_reset();
+    }
+#endif
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+        if (pending_events & (1 << MQTT_PUBLISH_EVENT_POWER)) {
+            mqtt_publish_power();
             if (wdt_ret == ESP_OK) esp_task_wdt_reset();
         }
 #endif

@@ -24,6 +24,7 @@
 #include "iaq_profiler.h"
 #include "web_portal.h"
 #include "pm_guard.h"
+#include "power_board.h"
 
 static const char *TAG = "IAQ_MAIN";
 
@@ -165,6 +166,16 @@ void app_main(void)
     /* Initialize IAQ data structure */
     ESP_LOGI(TAG, "Initializing IAQ data structure");
     ESP_ERROR_CHECK(iaq_data_init());
+
+    /* Initialize PowerFeather board integration (fail-soft if disabled or absent) */
+    esp_err_t pf_ret = power_board_init();
+    if (pf_ret == ESP_OK) {
+        ESP_LOGI(TAG, "PowerFeather integration enabled");
+    } else if (pf_ret == ESP_ERR_NOT_SUPPORTED) {
+        ESP_LOGI(TAG, "PowerFeather integration not active (disabled or not detected)");
+    } else {
+        ESP_ERROR_CHECK(pf_ret);
+    }
 
     /* Initialize profiler (no-op when disabled) */
     iaq_profiler_init();

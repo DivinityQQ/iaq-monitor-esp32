@@ -131,6 +131,7 @@ static const char* metric_name(int id)
         case IAQ_METRIC_WEB_API_SENSOR_ACTION:return "web/api_sensor_action";
         case IAQ_METRIC_WEB_WS_BROADCAST:    return "web/ws_broadcast";
         case IAQ_METRIC_WEB_WS_RX:           return "web/ws_rx";
+        case IAQ_METRIC_POWER_POLL:          return "power/poll";
         default: return "unknown";
     }
 }

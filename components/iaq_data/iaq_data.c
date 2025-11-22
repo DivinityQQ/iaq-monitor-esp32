@@ -86,6 +86,29 @@ esp_err_t iaq_data_init(void)
     g_iaq_data.hw_diag.s8_abc_period_hours = 0;
     g_iaq_data.hw_diag.s8_abc_enabled = false;
 
+    /* Power snapshot */
+    g_iaq_data.power.available = false;
+    g_iaq_data.power.updated_us = 0;
+    g_iaq_data.power.supply_mv = 0;
+    g_iaq_data.power.supply_ma = 0;
+    g_iaq_data.power.batt_mv = 0;
+    g_iaq_data.power.batt_ma = 0;
+    g_iaq_data.power.charge_pct = 0;
+    g_iaq_data.power.health_pct = 0;
+    g_iaq_data.power.cycles = 0;
+    g_iaq_data.power.time_left_min = 0;
+    g_iaq_data.power.batt_temp_c = NAN;
+    g_iaq_data.power.maintain_mv = 0;
+    g_iaq_data.power.en = false;
+    g_iaq_data.power.v3v_on = false;
+    g_iaq_data.power.vsqt_on = false;
+    g_iaq_data.power.stat_on = false;
+    g_iaq_data.power.charging_on = false;
+    g_iaq_data.power.charge_limit_ma = 0;
+    g_iaq_data.power.alarm_low_v_mv = 0;
+    g_iaq_data.power.alarm_high_v_mv = 0;
+    g_iaq_data.power.alarm_low_pct = 0;
+
     /* Initialize all validity flags to false */
     g_iaq_data.valid.temp_c = false;
     g_iaq_data.valid.mcu_temp_c = false;

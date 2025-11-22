@@ -31,6 +31,7 @@
 #include "web_portal.h"
 #include "iaq_profiler.h"
 #include "pm_guard.h"
+#include "power_board.h"
 
 static const char *TAG = "WEB_PORTAL";
 
@@ -228,8 +229,9 @@ static void ws_send_json_to_fd(int fd, const char *type, cJSON *payload)
 static void ws_work_send_state(void *arg) { (void)arg; iaq_data_t snap = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){ snap = *iaq_data_get(); } ws_broadcast_json("state", iaq_json_build_state(&snap)); }
 static void ws_work_send_metrics(void *arg) { (void)arg; iaq_data_t snap = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){ snap = *iaq_data_get(); } ws_broadcast_json("metrics", iaq_json_build_metrics(&snap)); }
 static void ws_work_send_health(void *arg) { (void)arg; iaq_data_t snap = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){ snap = *iaq_data_get(); } ws_broadcast_json("health", iaq_json_build_health(&snap)); }
+static void ws_work_send_power(void *arg) { (void)arg; ws_broadcast_json("power", iaq_json_build_power()); }
 
-static void ws_state_timer_cb(void *arg) { (void)arg; if (s_server) { esp_err_t er = httpd_queue_work(s_server, ws_work_send_state, NULL); if (er != ESP_OK) ESP_LOGW(TAG, "WS: queue state failed: %s", esp_err_to_name(er)); } }
+static void ws_state_timer_cb(void *arg) { (void)arg; if (s_server) { esp_err_t er = httpd_queue_work(s_server, ws_work_send_state, NULL); if (er != ESP_OK) ESP_LOGW(TAG, "WS: queue state failed: %s", esp_err_to_name(er)); er = httpd_queue_work(s_server, ws_work_send_power, NULL); if (er != ESP_OK) ESP_LOGW(TAG, "WS: queue power failed: %s", esp_err_to_name(er)); } }
 static void ws_metrics_timer_cb(void *arg) { (void)arg; if (s_server) { esp_err_t er = httpd_queue_work(s_server, ws_work_send_metrics, NULL); if (er != ESP_OK) ESP_LOGW(TAG, "WS: queue metrics failed: %s", esp_err_to_name(er)); } }
 
 static void ws_ping_and_prune(void)
@@ -646,6 +648,104 @@ static esp_err_t api_health_get(httpd_req_t *req)
     iaq_prof_toc(IAQ_METRIC_WEB_API_HEALTH, t0);
     return ESP_OK;
 }
+
+static esp_err_t api_power_get(httpd_req_t *req)
+{
+    respond_json(req, iaq_json_build_power(), 200);
+    return ESP_OK;
+}
+
+static bool power_guard(httpd_req_t *req)
+{
+    if (!power_board_is_enabled()) {
+        respond_error(req, 400, "POWER_DISABLED", "PowerFeather support is disabled or not initialized");
+        return false;
+    }
+    return true;
+}
+
+static esp_err_t api_power_outputs_post(httpd_req_t *req)
+{
+    cJSON *root = NULL;
+    if (!read_req_json(req, &root)) { respond_error(req, 400, "BAD_JSON", "Invalid JSON"); return ESP_OK; }
+    if (!power_guard(req)) { cJSON_Delete(root); return ESP_OK; }
+
+    cJSON *en = cJSON_GetObjectItemCaseSensitive(root, "en");
+    cJSON *v3v = cJSON_GetObjectItemCaseSensitive(root, "v3v_on");
+    cJSON *vsqt = cJSON_GetObjectItemCaseSensitive(root, "vsqt_on");
+    cJSON *stat = cJSON_GetObjectItemCaseSensitive(root, "stat_on");
+
+    esp_err_t ret = ESP_OK;
+    if (cJSON_IsBool(en)) ret = power_board_set_en(cJSON_IsTrue(en));
+    if (ret == ESP_OK && cJSON_IsBool(v3v)) ret = power_board_enable_3v3(cJSON_IsTrue(v3v));
+    if (ret == ESP_OK && cJSON_IsBool(vsqt)) ret = power_board_enable_vsqt(cJSON_IsTrue(vsqt));
+    if (ret == ESP_OK && cJSON_IsBool(stat)) ret = power_board_enable_stat(cJSON_IsTrue(stat));
+
+    cJSON_Delete(root);
+    if (ret != ESP_OK) { respond_error(req, 400, "POWER_SET_FAILED", esp_err_to_name(ret)); return ESP_OK; }
+    cJSON *ok = cJSON_CreateObject(); cJSON_AddStringToObject(ok, "status", "ok"); respond_json(req, ok, 200);
+    return ESP_OK;
+}
+
+static esp_err_t api_power_charger_post(httpd_req_t *req)
+{
+    cJSON *root = NULL;
+    if (!read_req_json(req, &root)) { respond_error(req, 400, "BAD_JSON", "Invalid JSON"); return ESP_OK; }
+    if (!power_guard(req)) { cJSON_Delete(root); return ESP_OK; }
+
+    cJSON *enable = cJSON_GetObjectItemCaseSensitive(root, "enable");
+    cJSON *limit = cJSON_GetObjectItemCaseSensitive(root, "limit_ma");
+    cJSON *maintain = cJSON_GetObjectItemCaseSensitive(root, "maintain_mv");
+
+    esp_err_t ret = ESP_OK;
+    if (cJSON_IsBool(enable)) ret = power_board_enable_charging(cJSON_IsTrue(enable));
+    if (ret == ESP_OK && cJSON_IsNumber(limit)) ret = power_board_set_charge_limit((uint16_t)limit->valuedouble);
+    if (ret == ESP_OK && cJSON_IsNumber(maintain)) ret = power_board_set_supply_maintain_voltage((uint16_t)maintain->valuedouble);
+
+    cJSON_Delete(root);
+    if (ret != ESP_OK) { respond_error(req, 400, "POWER_CHARGER_FAILED", esp_err_to_name(ret)); return ESP_OK; }
+    cJSON *ok = cJSON_CreateObject(); cJSON_AddStringToObject(ok, "status", "ok"); respond_json(req, ok, 200);
+    return ESP_OK;
+}
+
+static esp_err_t api_power_alarms_post(httpd_req_t *req)
+{
+    cJSON *root = NULL;
+    if (!read_req_json(req, &root)) { respond_error(req, 400, "BAD_JSON", "Invalid JSON"); return ESP_OK; }
+    if (!power_guard(req)) { cJSON_Delete(root); return ESP_OK; }
+
+    cJSON *lowv = cJSON_GetObjectItemCaseSensitive(root, "low_v_mv");
+    cJSON *highv = cJSON_GetObjectItemCaseSensitive(root, "high_v_mv");
+    cJSON *lowpct = cJSON_GetObjectItemCaseSensitive(root, "low_pct");
+
+    esp_err_t ret = ESP_OK;
+    if (cJSON_IsNumber(lowv)) ret = power_board_set_alarm_low_voltage((uint16_t)lowv->valuedouble);
+    if (ret == ESP_OK && cJSON_IsNumber(highv)) ret = power_board_set_alarm_high_voltage((uint16_t)highv->valuedouble);
+    if (ret == ESP_OK && cJSON_IsNumber(lowpct)) ret = power_board_set_alarm_low_charge((uint8_t)lowpct->valuedouble);
+
+    cJSON_Delete(root);
+    if (ret != ESP_OK) { respond_error(req, 400, "POWER_ALARM_FAILED", esp_err_to_name(ret)); return ESP_OK; }
+    cJSON *ok = cJSON_CreateObject(); cJSON_AddStringToObject(ok, "status", "ok"); respond_json(req, ok, 200);
+    return ESP_OK;
+}
+
+static esp_err_t api_power_action_post(httpd_req_t *req, const char *action)
+{
+    if (!power_guard(req)) return ESP_OK;
+    esp_err_t ret = ESP_ERR_INVALID_ARG;
+    if (strcmp(action, "ship") == 0) ret = power_board_enter_ship_mode();
+    else if (strcmp(action, "shutdown") == 0) ret = power_board_enter_shutdown_mode();
+    else if (strcmp(action, "cycle") == 0) ret = power_board_power_cycle();
+    else { respond_error(req, 400, "UNKNOWN_ACTION", "Unknown power action"); return ESP_OK; }
+
+    if (ret != ESP_OK) { respond_error(req, 400, "POWER_ACTION_FAILED", esp_err_to_name(ret)); return ESP_OK; }
+    cJSON *ok = cJSON_CreateObject(); cJSON_AddStringToObject(ok, "status", "ok"); respond_json(req, ok, 200);
+    return ESP_OK;
+}
+
+static esp_err_t api_power_ship_post(httpd_req_t *req) { return api_power_action_post(req, "ship"); }
+static esp_err_t api_power_shutdown_post(httpd_req_t *req) { return api_power_action_post(req, "shutdown"); }
+static esp_err_t api_power_cycle_post(httpd_req_t *req) { return api_power_action_post(req, "cycle"); }
 
 static esp_err_t api_wifi_get(httpd_req_t *req)
 {
@@ -1110,7 +1210,7 @@ esp_err_t web_portal_start(void)
         scfg.httpd.uri_match_fn = httpd_uri_match_wildcard;
         /* Default LRU purge behavior */
         scfg.httpd.lru_purge_enable = true;
-        scfg.httpd.max_uri_handlers = 20;
+        scfg.httpd.max_uri_handlers = 32; /* increased for power endpoints */
         /* Moderate simultaneous handshake pressure */
         scfg.httpd.backlog_conn = 3;
         /* Cap HTTPD sockets so other services (MQTT/SNTP/DNS) keep room */
@@ -1192,7 +1292,7 @@ esp_err_t web_portal_start(void)
         cfg.uri_match_fn = httpd_uri_match_wildcard;
         /* Default LRU purge behavior */
         cfg.lru_purge_enable = true;
-        cfg.max_uri_handlers = 20;
+        cfg.max_uri_handlers = 32; /* increased for power endpoints */
         /* Moderate simultaneous pending connects to limit spikes */
         cfg.backlog_conn = 3;
         /* Cap HTTPD sockets so other services (MQTT/SNTP/DNS) keep room */
@@ -1227,6 +1327,13 @@ esp_err_t web_portal_start(void)
     const httpd_uri_t uri_state = { .uri = "/api/v1/state", .method = HTTP_GET, .handler = api_state_get, .user_ctx = NULL };
     const httpd_uri_t uri_metrics = { .uri = "/api/v1/metrics", .method = HTTP_GET, .handler = api_metrics_get, .user_ctx = NULL };
     const httpd_uri_t uri_health = { .uri = "/api/v1/health", .method = HTTP_GET, .handler = api_health_get, .user_ctx = NULL };
+    const httpd_uri_t uri_power = { .uri = "/api/v1/power", .method = HTTP_GET, .handler = api_power_get, .user_ctx = NULL };
+    const httpd_uri_t uri_power_outputs = { .uri = "/api/v1/power/outputs", .method = HTTP_POST, .handler = api_power_outputs_post, .user_ctx = NULL };
+    const httpd_uri_t uri_power_charger = { .uri = "/api/v1/power/charger", .method = HTTP_POST, .handler = api_power_charger_post, .user_ctx = NULL };
+    const httpd_uri_t uri_power_alarms = { .uri = "/api/v1/power/alarms", .method = HTTP_POST, .handler = api_power_alarms_post, .user_ctx = NULL };
+    const httpd_uri_t uri_power_ship = { .uri = "/api/v1/power/ship", .method = HTTP_POST, .handler = api_power_ship_post, .user_ctx = NULL };
+    const httpd_uri_t uri_power_shutdown = { .uri = "/api/v1/power/shutdown", .method = HTTP_POST, .handler = api_power_shutdown_post, .user_ctx = NULL };
+    const httpd_uri_t uri_power_cycle = { .uri = "/api/v1/power/cycle", .method = HTTP_POST, .handler = api_power_cycle_post, .user_ctx = NULL };
     const httpd_uri_t uri_wifi_get = { .uri = "/api/v1/wifi", .method = HTTP_GET, .handler = api_wifi_get, .user_ctx = NULL };
     const httpd_uri_t uri_wifi_scan = { .uri = "/api/v1/wifi/scan", .method = HTTP_GET, .handler = api_wifi_scan_get, .user_ctx = NULL };
     const httpd_uri_t uri_wifi_post = { .uri = "/api/v1/wifi", .method = HTTP_POST, .handler = api_wifi_post, .user_ctx = NULL };
@@ -1251,6 +1358,13 @@ esp_err_t web_portal_start(void)
     httpd_register_uri_handler(s_server, &uri_state);
     httpd_register_uri_handler(s_server, &uri_metrics);
     httpd_register_uri_handler(s_server, &uri_health);
+    httpd_register_uri_handler(s_server, &uri_power);
+    httpd_register_uri_handler(s_server, &uri_power_outputs);
+    httpd_register_uri_handler(s_server, &uri_power_charger);
+    httpd_register_uri_handler(s_server, &uri_power_alarms);
+    httpd_register_uri_handler(s_server, &uri_power_ship);
+    httpd_register_uri_handler(s_server, &uri_power_shutdown);
+    httpd_register_uri_handler(s_server, &uri_power_cycle);
     httpd_register_uri_handler(s_server, &uri_wifi_get);
     httpd_register_uri_handler(s_server, &uri_wifi_scan);
     httpd_register_uri_handler(s_server, &uri_wifi_post);

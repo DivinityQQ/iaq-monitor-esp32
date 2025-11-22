@@ -18,6 +18,7 @@ idf_component_register(
         connectivity
         sensor_coordinator
         console_commands
+        power_board
         app_config
         iaq_profiler
         web_portal

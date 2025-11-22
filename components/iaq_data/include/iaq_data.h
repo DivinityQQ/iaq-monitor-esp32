@@ -7,6 +7,10 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/semphr.h"
 
+#ifdef __cplusplus
+extern "C" {
+#endif
+
 /**
  * Pressure trend classification based on 3-hour change.
  */
@@ -112,6 +116,31 @@ typedef struct {
     bool     s8_abc_enabled;       // derived from period>0
 } iaq_hw_diagnostics_t;
 
+typedef struct {
+    bool available;        // true if PF is enabled and last poll succeeded
+    bool supply_good;
+    uint16_t supply_mv;
+    int16_t supply_ma;
+    uint16_t maintain_mv;
+    bool en;
+    bool v3v_on;
+    bool vsqt_on;
+    bool stat_on;
+    bool charging_on;
+    uint16_t charge_limit_ma;
+    uint16_t batt_mv;
+    int16_t batt_ma;
+    uint8_t charge_pct;
+    uint8_t health_pct;
+    uint16_t cycles;
+    int time_left_min;
+    float batt_temp_c;
+    uint16_t alarm_low_v_mv;
+    uint16_t alarm_high_v_mv;
+    uint8_t alarm_low_pct;
+    int64_t updated_us;    // esp_timer_get_time() at last poll
+} iaq_power_snapshot_t;
+
 /**
  * Global data structure for all IAQ measurements and system state.
  * Access must be protected by mutex.
@@ -133,6 +162,9 @@ typedef struct {
 
     /* Hardware/driver diagnostics */
     iaq_hw_diagnostics_t hw_diag;
+
+    /* PowerFeather power/charger snapshot (optional) */
+    iaq_power_snapshot_t power;
 
     /* Metadata */
     struct {
@@ -211,5 +243,9 @@ void iaq_data_unlock(void);
  */
 #define IAQ_DATA_WITH_LOCK() \
     for (int _iaq_lock_once = iaq_data_lock(portMAX_DELAY); _iaq_lock_once; _iaq_lock_once = (iaq_data_unlock(), 0))
+
+#ifdef __cplusplus
+}
+#endif
 
 #endif /* IAQ_DATA_H */

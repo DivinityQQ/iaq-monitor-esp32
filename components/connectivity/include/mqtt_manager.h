@@ -69,6 +69,15 @@ esp_err_t mqtt_publish_metrics(const iaq_data_t *data);
 esp_err_t mqtt_publish_diagnostics(const iaq_data_t *data);
 #endif
 
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+/**
+ * Publish power/charger/fuel-gauge snapshot to /power topic (PowerFeather only).
+ *
+ * @return ESP_OK on success, ESP_FAIL if not connected or PF unavailable
+ */
+esp_err_t mqtt_publish_power(void);
+#endif
+
 /**
  * Check if MQTT client is connected to broker.
  *
