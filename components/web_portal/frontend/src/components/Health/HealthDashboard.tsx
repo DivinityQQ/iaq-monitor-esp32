@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react';
 import { useAtomValue } from 'jotai';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
+import Container from '@mui/material/Container';
 import Grid from '@mui/material/Grid';
 import Typography from '@mui/material/Typography';
 import { RestartAlt as RestartIcon } from '@mui/icons-material';
@@ -57,10 +58,10 @@ export function HealthDashboard() {
   }, [sensorStatusMap, restarting, showNotification]);
 
   return (
-    <Box>
+    <Container maxWidth="xl" sx={{ py: 3, px: { xs: 2, sm: 3 } }}>
       {/* Header with restart button */}
-      <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={3}>
-        <Box sx={{ mb: 4 }}>
+      <Box display="flex" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 4 }}>
+        <Box>
           <Typography variant="h4" component="h1" fontWeight={600} gutterBottom>
             System Health
           </Typography>
@@ -112,6 +113,6 @@ export function HealthDashboard() {
         onCancel={() => setRestartDialogOpen(false)}
         loading={restarting}
       />
-    </Box>
+    </Container>
   );
 }

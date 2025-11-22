@@ -1,4 +1,5 @@
 import Box from '@mui/material/Box';
+import Container from '@mui/material/Container';
 import Grid from '@mui/material/Grid';
 import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
@@ -34,10 +35,10 @@ export function ChartContainer() {
   );
 
   return (
-    <Box>
+    <Container maxWidth="xl" sx={{ py: 3, px: { xs: 2, sm: 3 } }}>
       {/* Page Header with Time Range Controls */}
-      <Box display="flex" justifyContent="space-between" alignItems="flex-start" mb={3}>
-        <Box sx={{ mb: 4 }}>
+      <Box display="flex" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 4 }}>
+        <Box>
           <Typography variant="h4" component="h1" fontWeight={600} gutterBottom>
             Charts
           </Typography>
@@ -93,6 +94,6 @@ export function ChartContainer() {
           <PMChartTile range={range} yMin={0} softYMax={50} />
         </Grid>
       </Grid>
-    </Box>
+    </Container>
   );
 }

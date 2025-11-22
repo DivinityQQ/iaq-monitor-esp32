@@ -50,15 +50,17 @@ export function ConfigView() {
   };
 
   return (
-    <Container maxWidth="xl" sx={{ py: 3 }}>
+    <Container maxWidth="xl" sx={{ py: 3, px: { xs: 2, sm: 3 } }}>
       {/* Configuration Header */}
-      <Box sx={{ mb: 4 }}>
-        <Typography variant="h4" component="h1" fontWeight={600} gutterBottom>
-          Configuration
-        </Typography>
-        <Typography variant="body1" color="text.secondary">
-          Configure WiFi, MQTT, and sensor settings
-        </Typography>
+      <Box display="flex" justifyContent="space-between" alignItems="flex-start" sx={{ mb: 4 }}>
+        <Box>
+          <Typography variant="h4" component="h1" fontWeight={600} gutterBottom>
+            Configuration
+          </Typography>
+          <Typography variant="body1" color="text.secondary">
+            Configure WiFi, MQTT, and sensor settings
+          </Typography>
+        </Box>
       </Box>
 
       {/* Tabs Navigation */}

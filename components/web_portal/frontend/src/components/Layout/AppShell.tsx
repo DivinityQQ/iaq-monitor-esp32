@@ -21,27 +21,21 @@ const ConfigView = lazy(() =>
 );
 
 const ChartsView = () => (
-  <Box p={3}>
-    <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={400}><CircularProgress /></Box>}>
-      <ChartContainer />
-    </Suspense>
-  </Box>
+  <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={400}><CircularProgress /></Box>}>
+    <ChartContainer />
+  </Suspense>
 );
 
 const HealthView = () => (
-  <Box p={3}>
-    <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={400}><CircularProgress /></Box>}>
-      <HealthDashboard />
-    </Suspense>
-  </Box>
+  <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={400}><CircularProgress /></Box>}>
+    <HealthDashboard />
+  </Suspense>
 );
 
 const ConfigViewRoute = () => (
-  <Box p={3}>
-    <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={400}><CircularProgress /></Box>}>
-      <ConfigView />
-    </Suspense>
-  </Box>
+  <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={400}><CircularProgress /></Box>}>
+    <ConfigView />
+  </Suspense>
 );
 
 export function AppShell() {
