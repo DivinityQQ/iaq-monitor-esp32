@@ -16,6 +16,9 @@
 
 static const char *TAG = "BMP280_DRIVER";
 
+#define BMP280_PRESSURE_MIN_PA 80000.0f   /* ~800 hPa, low outlier guard */
+#define BMP280_PRESSURE_MAX_PA 110000.0f  /* ~1100 hPa, high outlier guard */
+
 /* BMP280 registers */
 #define BMP280_REG_DIG_T1      0x88
 #define BMP280_REG_DIG_T2      0x8A
@@ -129,6 +132,12 @@ static esp_err_t bmp280_read_calibration(void)
     return ESP_OK;
 }
 
+static bool bmp280_calib_valid(void)
+{
+    /* Minimal validation: nonzero required fields */
+    return (s_calib.dig_T1 != 0 && s_calib.dig_P1 != 0);
+}
+
 static esp_err_t bmp280_configure(void)
 {
     /* Clamp unsupported values */
@@ -231,28 +240,24 @@ esp_err_t bmp280_driver_init(void)
     s_dev = dev;
     s_addr = addr;
 
-    /* Soft reset, read calibration and configure */
+    /* Soft reset, allow NVM copy to complete, then read calibration */
     ret = bmp280_soft_reset();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "BMP280 reset failed: %s", esp_err_to_name(ret));
         goto fail;
     }
+    vTaskDelay(pdMS_TO_TICKS(20)); /* give NVM->reg copy time before reading calib */
 
-    /* Read calibration with a brief retry if values look invalid */
+    /* Single calibration read with minimal validation */
     ret = bmp280_read_calibration();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "BMP280 read calib failed: %s", esp_err_to_name(ret));
         goto fail;
     }
-    if (s_calib.dig_P1 == 0) {
-        /* Retry once after extra delay; some parts need more time post-reset */
-        vTaskDelay(pdMS_TO_TICKS(10));
-        ret = bmp280_read_calibration();
-        if (ret != ESP_OK || s_calib.dig_P1 == 0) {
-            ESP_LOGE(TAG, "BMP280 invalid calib (dig_P1=%u)", (unsigned)s_calib.dig_P1);
-            ret = (ret == ESP_OK) ? ESP_FAIL : ret;
-            goto fail;
-        }
+    if (!bmp280_calib_valid()) {
+        ESP_LOGE(TAG, "BMP280 calibration invalid: T1=%u P1=%u (aborting init)", s_calib.dig_T1, s_calib.dig_P1);
+        ret = ESP_FAIL;
+        goto fail;
     }
 
     ret = bmp280_configure();
@@ -260,6 +265,15 @@ esp_err_t bmp280_driver_init(void)
         ESP_LOGE(TAG, "BMP280 configure failed: %s", esp_err_to_name(ret));
         goto fail;
     }
+
+    /* Log chip ID and calibration once to debug bad-pressure startups */
+    uint8_t chip_id = 0;
+    (void)bmp280_read_chip_id(&chip_id);
+    ESP_LOGI(TAG, "BMP280 init: id=0x%02X addr=0x%02X calib T1=%u T2=%d T3=%d P1=%u P2=%d P3=%d P4=%d P5=%d P6=%d P7=%d P8=%d P9=%d",
+             chip_id, s_addr,
+             s_calib.dig_T1, s_calib.dig_T2, s_calib.dig_T3,
+             s_calib.dig_P1, s_calib.dig_P2, s_calib.dig_P3, s_calib.dig_P4,
+             s_calib.dig_P5, s_calib.dig_P6, s_calib.dig_P7, s_calib.dig_P8, s_calib.dig_P9);
 
     s_initialized = true;
     ESP_LOGI(TAG, "BMP280 initialized at 0x%02X (osrs_t=%d, osrs_p=%d, filter=%d)",
