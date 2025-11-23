@@ -555,8 +555,11 @@ static void sensor_coordinator_task(void *arg)
 
         /* For SGP41, run 1 Hz conditioning ticks during WARMING (first 10s only) */
         if (s_runtime[SENSOR_ID_SGP41].state == SENSOR_STATE_WARMING) {
-            int64_t now_us = esp_timer_get_time();
-            if (now_us - s_runtime[SENSOR_ID_SGP41].last_read_us >= 1000000) {
+            int64_t warmup_start_us = s_runtime[SENSOR_ID_SGP41].warmup_deadline_us -
+                                      ((int64_t)s_warmup_ms[SENSOR_ID_SGP41] * 1000LL);
+            /* Avoid scheduling conditioning past the 10s hardware window */
+            if ((now_us - warmup_start_us) <= 10 * 1000000LL &&
+                (now_us - s_runtime[SENSOR_ID_SGP41].last_read_us) >= 1000000) {
                 /* Use last known temp/RH for compensation; fallback defaults */
                 float temp_c = 25.0f, humidity_rh = 50.0f;
                 IAQ_DATA_WITH_LOCK() {
