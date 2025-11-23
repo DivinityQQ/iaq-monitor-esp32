@@ -43,7 +43,6 @@ idf.py -p /dev/ttyACM0 monitor
 idf.py -p \\.\COM3 flash
 idf.py -p \\.\COM3 monitor
 ```
-Tip: On Windows, use `\\.\COMx` or set `$env:ESPPORT='\\.\COM3'`. On Linux, the default console is the on‑chip USB‑Serial/JTAG device (`/dev/ttyACM*`).
 ## First Boot + Configuration
 - Open the serial console and type `help`.
 - Set Wi‑Fi credentials and reconnect:
@@ -263,7 +262,6 @@ sensor cadence set <sensor> <ms>
 Changelog has moved to a dedicated file: see CHANGELOG.md
 
 ## Troubleshooting
-- On Windows, use the `\\.\COMx` device path
 - If MQTT does not start: set a valid broker URL via console
 - Empty SSID disables Wi‑Fi without failing init/start
 - For testing without sensors: enable simulation mode in menuconfig
