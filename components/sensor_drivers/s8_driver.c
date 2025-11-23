@@ -260,6 +260,7 @@ esp_err_t s8_driver_read_co2(float *out_co2_ppm)
     uint8_t payload[8]; size_t len = 0;
     esp_err_t err = s8_mb_read_regs(S8_MB_FN_READ_INPUT, /*addr*/(uint16_t)(S8_IR_CO2_SPACE_REG - 1), /*qty*/1, payload, sizeof(payload), &len);
     if (err != ESP_OK || len != 2) {
+        ESP_LOGW(TAG, "S8 read failed: %s (len=%u)", esp_err_to_name(err), (unsigned)len);
         *out_co2_ppm = NAN;
         return (err == ESP_OK ? ESP_ERR_INVALID_RESPONSE : err);
     }
