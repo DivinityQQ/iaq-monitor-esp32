@@ -1,29 +1,18 @@
 # IAQ Monitor (ESP32-S3, ESP-IDF)
-Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, robust defaults, a built‑in web portal, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery.
-Current version: 0.8.3
+Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, runtime power management, a built‑in web portal, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery. Optional PowerFeather board support adds charger/fuel‑gauge telemetry and power rail control.
+Current version: 0.9.0
 ## Features
-- Wi‑Fi station mode with NVS‑stored credentials (console configurable)
-- MQTT 5.0 client, retained LWT/status, HA auto‑discovery
-- Central data model with explicit "no data" until sensors report
-- **6 sensor drivers (real hardware)**: MCU temp, SHT45 (T/RH), BMP280 (pressure), SGP41 (VOC/NOx), PMS5003 (PM), Senseair S8 (CO₂)
-- **Sensor fusion**: Cross-sensor compensation (PM/RH, CO₂/pressure, temp self-heating, ABC baseline)
-- **Derived metrics**: EPA AQI, thermal comfort, CO₂ rate, PM spike detection, mold risk, pressure trends
-- **Simulation mode**: Complete MQTT/HA integration testing without physical sensors
-- **Time sync (SNTP)**: Local time via NTP with configurable TZ; event bit set when time is valid
-- **OLED display (SH1106)**: 6 screens (Overview, Environment, Air Quality, CO₂ Detail, Particulate, System) with button navigation, night mode, and idle auto-off
-- **On‑device Web Portal**: Single‑Page App served from LittleFS `www` with real‑time dashboard (state/metrics/health), charts, notifications, and configuration for Wi‑Fi, MQTT, and sensors
-- **HTTP/S API + WebSocket**: REST at `/api/v1/*` and live updates at `/ws`; gzip static serving and SPA fallback
-- Sensor coordinator with state machine (UNINIT → INIT → WARMING → READY → ERROR)
-- Per‑sensor cadences (configurable via Kconfig/console, persisted in NVS)
-- Per‑sensor warm‑up periods with observable countdown
-- Error recovery via console `sensor reset` commands
-- Per‑sensor MQTT topics with JSON null handling for missing values
-- Console commands for status, Wi‑Fi, MQTT, sensors, and cadences
-- Non‑blocking MQTT publishing (enqueue)
+- Connectivity & automation: Wi‑Fi station mode with NVS‑stored credentials, captive‑portal provisioning that lands on the dashboard, MQTT 5.0 with HA auto‑discovery, HTTP/S REST API + WebSocket streaming, and a console for on‑device setup.
+- Sensors & fusion: Six real sensor drivers (MCU temp, SHT45, BMP280, SGP41, PMS5003, Senseair S8) with cross‑sensor compensation, derived metrics (AQI, comfort, CO₂ rate, PM spikes, mold risk, pressure trends), and full simulation mode for hardware‑free testing.
+- Power & platform: Runtime power management (DFS + light sleep) guarded by shared PM locks; optional PowerFeather board integration via the official SDK with rail control, charger/fuel‑gauge telemetry, MQTT `/power` topic, REST/WebSocket `/power`, and a console `power` view.
+- UI: SH1106 OLED with smooth warm‑up indicator, night schedule, and button navigation; on‑device SPA web portal served from LittleFS with consistent dashboard/config/health panels, charts, and notifications.
+- Security: MQTT TLS (custom CA, mutual TLS, AWS IoT ALPN) and HTTPS with built‑in or user‑provided certificates plus gzip static serving and SPA fallback.
+- Reliability & observability: Central data model with explicit "no data" sentinels, per‑sensor cadences/warm‑up countdowns, staggered timers, error recovery, time sync events, watchdog integration, profiling hooks, and non‑blocking MQTT publishing with queue coalescing.
 ## Hardware/Software
-- Target: ESP32‑S3
+- Target: ESP32‑S3 (DevKit and PowerFeather board)
 - SDK: ESP‑IDF v5.5.1+
 - Tooling: idf.py (CMake + Ninja)
+- Optional power board: PowerFeather integration via the official SDK (power rails, charger, fuel gauge, alarms). The SDK license permits use on official PowerFeather hardware.
 ### Supported Sensors
 **Fully Supported (real drivers):**
 - ESP32‑S3 internal temperature sensor (MCU)
@@ -33,6 +22,11 @@ Current version: 0.8.3
 - PMS5003 (UART) — PM1.0, PM2.5, PM10 with background reader and smoothing
 - Senseair S8 (UART Modbus) — CO₂; diagnostics+ABC controls
 All sensors also support simulation mode for testing without hardware (enable via menuconfig).
+### PowerFeather Board (optional)
+- Official PowerFeather SDK integration for rail control, charger configuration, and fuel‑gauge telemetry.
+- Power snapshot surfaced via console (`power`), MQTT (`/power`), REST (`/api/v1/power`), and WebSocket (`power` stream).
+- Control endpoints for rails/charger/alarms/ship/shutdown when running on a PowerFeather.
+- Licensed for official PowerFeather hardware only (see `components/power_board/powerfeather/LICENSE`).
 ## Quick Start
 ```
 idf.py build
@@ -70,13 +64,14 @@ mqtt restart
 - For AWS IoT over 443, enable AWS IoT ALPN option and use endpoint `mqtts://<your-endpoint>:443`.
 
 ## Web Portal (Dashboard + API)
-- Access: open `http://<device-ip>/` (AP‑only mode) or `https://<device-ip>/` (STA or AP+STA when HTTPS is enabled).
-- Live data: the UI connects to `/ws` for `state`, `metrics`, and `health` updates.
+- Access: open `http://<device-ip>/` (AP‑only mode) or `https://<device-ip>/` (STA or AP+STA when HTTPS is enabled). AP provisioning lands on the dashboard by default for a smoother captive‑portal flow.
+- Live data: the UI connects to `/ws` for `state`, `metrics`, `health`, and `power` (PowerFeather) updates.
 - API: REST endpoints under `/api/v1` (see `components/web_portal/API.md`). Quick tests:
   - `curl http://<ip>/api/v1/info`
   - `curl http://<ip>/api/v1/state`
   - `curl http://<ip>/api/v1/metrics`
   - `curl http://<ip>/api/v1/health`
+  - `curl http://<ip>/api/v1/power`
 
 HTTPS & certificates
 - Default: a built‑in self‑signed development certificate is used.
@@ -101,11 +96,12 @@ sensor status | sensor read <sensor> | sensor reset <sensor>
 sensor calibrate co2 <ppm>
 sensor cadence | sensor cadence set <sensor> <ms>
 sensor s8 status | sensor s8 abc <on|off> [hours]
+power
 display status | display on | display off | display next | display prev
 display screen <0-5> | display invert <on|off> | display contrast <0-255>
 free | version | restart
 ```
-Sensors: mcu (internal temp), sht45, bmp280, sgp41, pms5003, s8 (as drivers are wired).
+Sensors: mcu (internal temp), sht45, bmp280, sgp41, pms5003, s8 (as drivers are wired). The `power` command reports rails/charger/fuel‑gauge data when PowerFeather support is enabled.
 ## OLED Display
 The firmware includes an optional SH1106-based OLED display (128x64) with 6 information screens:
 - **Overview**: Key metrics at a glance (CO₂, AQI, temp, humidity, pressure)
@@ -164,6 +160,7 @@ sensor cadence set <sensor> <ms>
 - **State**: `iaq/{device_id}/state` - Fused (compensated) readings: temp, humidity, pressure, PM1/2.5/10, CO₂, VOC/NOx indices, MCU temp, plus basic metrics (AQI value, comfort score). *Default: 30s interval*
 - **Metrics**: `iaq/{device_id}/metrics` - Derived data: AQI breakdown, comfort details, pressure trend, CO₂ rate, VOC/NOx categories, mold risk, PM spike detection, overall IAQ score. *Default: 30s interval*
 - **Health**: `iaq/{device_id}/health` - System diagnostics: uptime, heap, WiFi RSSI, per-sensor state/error counts/warmup status. *Default: 30s interval*
+- **Power** (PowerFeather only): `iaq/{device_id}/power` - Power rail + charger/fuel-gauge snapshot, gated by `CONFIG_IAQ_MQTT_PUBLISH_POWER`. Shares cadence with `/state`.
 - **Diagnostics**: `iaq/{device_id}/diagnostics` - Raw (uncompensated) values + fusion parameters for validation/tuning. *Optional, default: 5min interval, enable with `CONFIG_MQTT_PUBLISH_DIAGNOSTICS=y`*
 - **Status (LWT)**: `iaq/{device_id}/status` - `online`/`offline` (Last Will & Testament)
 
@@ -241,7 +238,7 @@ sensor cadence set <sensor> <ms>
 - For new settings, consider Kconfig defaults and NVS persistence
 - Follow CONTRIBUTING.md for coding and component guidelines
 ## Development Status
-**Current Status (v0.8.3)**
+**Current Status (v0.9.0)**
 - ✅ Core infrastructure (Wi‑Fi, MQTT 5.0, Home Assistant auto‑discovery)
 - ✅ 6 sensor drivers with real hardware support (MCU, SHT45, BMP280, SGP41, PMS5003, S8)
 - ✅ Full simulation mode for testing without hardware
@@ -251,6 +248,8 @@ sensor cadence set <sensor> <ms>
 - ✅ Unified MQTT topics (/state, /metrics, /health, /diagnostics)
 - ✅ Timer‑based publishing with event coalescing and staggered starts
 - ✅ Task Watchdog integration for deadlock detection
+- ✅ Runtime power management (DFS + light sleep) with shared PM guards around I/O and compute hotspots
+- ✅ Optional PowerFeather board support (rails, charger/fuel gauge telemetry, MQTT/WebSocket/REST/console `/power`)
 - ✅ Console commands for configuration, diagnostics, and sensor control (including S8 ABC)
 - ✅ SNTP time sync with TZ support
 - ✅ OLED display (SH1106) with 6 screens, button navigation, night mode

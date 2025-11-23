@@ -11,8 +11,8 @@
  * Keep in sync with the project version in CMakeLists.txt.
  */
 #define IAQ_VERSION_MAJOR  0
-#define IAQ_VERSION_MINOR  8
-#define IAQ_VERSION_PATCH  3
+#define IAQ_VERSION_MINOR  9
+#define IAQ_VERSION_PATCH  0
 
 /**
  * Task priorities (higher number = higher priority)

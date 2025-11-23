@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog, and the project adheres to Semantic Versioning.
 
+## [0.9.0] - 2025-11-23
+
+Major milestone: introduces runtime power management and first-class PowerFeather board support with power telemetry, controls, and portal polish.
+
+Added:
+- PowerFeather board integration using the official SDK: rail/charger/fuel-gauge telemetry surfaced via console (`power`), REST (`/api/v1/power`), WebSocket (`power` stream), and optional MQTT `/power` publishing alongside `/state`. Includes control endpoints for rails, charger, alarms, ship/shutdown, and power-cycle.
+- Runtime power management and tickless mode through `pm_guard`, enabling DFS + light sleep with shared locks around sensor drivers, MQTT, and web server hotspots.
+
+Changed:
+- Migrated the I2C layer to the new ESP-IDF API and aligned the PowerFeather wrapper with project conventions. All Kconfig options are now consolidated under `main/Kconfig.projbuild` for easier navigation.
+- Captive portal now lands on the dashboard, and the web portal panels/cards are standardized across dashboard/config/health views. OLED warm-up progress now animates smoothly.
+
+Fixed:
+- Corrected bad calibration reads on startup that produced invalid values.
+- Resolved occasional misalignment on on-demand sensor reads, improved Senseair S8 error visibility in logs, and removed duplicate logging.
+
 ## [0.8.3] - 2025-11-20
 
 Added:
