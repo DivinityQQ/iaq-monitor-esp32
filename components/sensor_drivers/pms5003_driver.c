@@ -389,26 +389,40 @@ esp_err_t pms5003_driver_read(float *out_pm1_0, float *out_pm2_5, float *out_pm1
         ESP_LOGW(TAG, "PMS5003: failed to send query command (wrote %d bytes)", n);
     }
 
-    /* Read exactly one frame with a bounded timeout */
+    /* Read with resync: keep sliding until a valid frame is found or timeout elapses */
     const TickType_t frame_deadline = xTaskGetTickCount() + pdMS_TO_TICKS(1000);
-    while (total < 32 && (int32_t)(frame_deadline - xTaskGetTickCount()) > 0) {
-        int need = 32 - total;
-        int r = uart_bus_read_bytes(s_uart_port, buf + total, need, pdMS_TO_TICKS(50));
-        if (r > 0) total += r;
-    }
+    while ((int32_t)(frame_deadline - xTaskGetTickCount()) > 0) {
+        size_t space = sizeof(buf) - (size_t)total;
+        if (space == 0) {
+            /* Buffer full without sync: keep last byte to allow realignment */
+            buf[0] = buf[total - 1];
+            total = 1;
+            space = sizeof(buf) - (size_t)total;
+        }
 
-    if (total >= 32) {
-        for (int i = 0; i <= total - 32; ++i) {
-            if (buf[i] == 0x42 && buf[i+1] == 0x4D && uart_validate_pms5003_frame(&buf[i])) {
-                float pm1 = NAN, pm25 = NAN, pm10 = NAN;
-                if (parse_pms_frame(&buf[i], &pm1, &pm25, &pm10)) {
-                    if (out_pm1_0) *out_pm1_0 = pm1;
-                    if (out_pm2_5) *out_pm2_5 = pm25;
-                    if (out_pm10)  *out_pm10  = pm10;
-                    ret = ESP_OK;
-                    goto exit;
+        int r = uart_bus_read_bytes(s_uart_port, buf + total, space, pdMS_TO_TICKS(50));
+        if (r > 0) total += r;
+
+        while (total >= 32) {
+            for (int i = 0; i <= total - 32; ++i) {
+                if (buf[i] == 0x42 && buf[i+1] == 0x4D) {
+                    float pm1 = NAN, pm25 = NAN, pm10 = NAN;
+                    if (parse_pms_frame(&buf[i], &pm1, &pm25, &pm10)) {
+                        if (out_pm1_0) *out_pm1_0 = pm1;
+                        if (out_pm2_5) *out_pm2_5 = pm25;
+                        if (out_pm10)  *out_pm10  = pm10;
+                        ret = ESP_OK;
+                        goto exit;
+                    }
                 }
             }
+
+            /* No full frame yet: keep the tail so a split header can be completed next read */
+            if (total > 31) {
+                memmove(buf, buf + total - 31, 31);
+                total = 31;
+            }
+            break; /* Need more bytes */
         }
     }
 
@@ -455,6 +469,20 @@ esp_err_t pms5003_driver_reset(void)
     portENTER_CRITICAL(&s_pm_lock);
     s_last_update_us = 0;
     portEXIT_CRITICAL(&s_pm_lock);
+#endif
+#if !CONFIG_IAQ_PMS5003_BG_READER
+    /* After reset the sensor returns to active streaming; re-apply passive mode for on-demand reads */
+    pms_set_work_mode(true);
+    pm_guard_lock_no_sleep();
+    pm_guard_lock_bus();
+    int n = pms_send_command(0xE1, 0x0000); /* passive mode */
+    pm_guard_unlock_bus();
+    pm_guard_unlock_no_sleep();
+    if (n == (int)sizeof(uint8_t) * 7) {
+        ESP_LOGI(TAG, "PMS5003: passive mode re-applied after reset");
+    } else {
+        ESP_LOGW(TAG, "PMS5003: failed to set passive mode after reset (wrote %d bytes)", n);
+    }
 #endif
 
     return ESP_OK;
