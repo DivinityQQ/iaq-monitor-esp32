@@ -40,6 +40,7 @@
 #include <soc/reset_reasons.h>
 #include <driver/gpio.h>
 #include <esp_log.h>
+#include <esp_timer.h>
 
 #include "Mainboard.h"
 
@@ -146,9 +147,10 @@ namespace PowerFeather
 
     Result Mainboard::_udpateChargerADC()
     {
-        uint32_t now = 0;
+        uint64_t now = esp_timer_get_time(); // microseconds since boot
+        uint64_t wait_us = static_cast<uint64_t>(_chargerADCWaitTime) * 1000ULL;
         // Since updating ADC values take a long time, only update it again after _chargerADCWaitTime has elapsed.
-        if (_chargerADCTime == 0 || (now - _chargerADCTime) >= _chargerADCWaitTime)
+        if (_chargerADCTime == 0 || (now - _chargerADCTime) >= wait_us)
         {
             bool done = false;
             RET_IF_FALSE(getCharger().setupADC(true, BQ2562x::ADCRate::Oneshot, BQ2562x::ADCSampling::Bits_10), Result::Failure);

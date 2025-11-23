@@ -666,7 +666,7 @@ namespace PowerFeather
         LC709204F _fuelGauge{_i2c};
         bool _sqtEnabled{false};
         bool _initDone{false};
-        uint32_t _chargerADCTime{0};
+        uint64_t _chargerADCTime{0};
         uint16_t _batteryCapacity{0};
         uint16_t _terminationCurrent{0};
         BatteryType _batteryType{BatteryType::Generic_3V7};

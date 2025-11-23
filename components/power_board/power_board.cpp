@@ -30,6 +30,7 @@ static uint16_t s_charge_limit_ma = CONFIG_IAQ_POWERFEATHER_CHARGE_LIMIT_MA;
 static uint16_t s_alarm_low_v_mv = 0;
 static uint16_t s_alarm_high_v_mv = 0;
 static uint8_t s_alarm_low_pct = 0;
+static uint16_t s_maintain_mv = CONFIG_IAQ_POWERFEATHER_MAINTAIN_VOLTAGE_MV;
 
 static bool s_init_ok = false;
 static std::mutex s_lock;
@@ -50,6 +51,12 @@ static esp_err_t pf_to_err(Result r)
         return ESP_FAIL;
     }
 }
+
+class PmNoSleepBusGuard {
+public:
+    PmNoSleepBusGuard() { pm_guard_lock_no_sleep(); pm_guard_lock_bus(); }
+    ~PmNoSleepBusGuard() { pm_guard_unlock_bus(); pm_guard_unlock_no_sleep(); }
+};
 
 static Mainboard::BatteryType cfg_battery_type(void)
 {
@@ -73,6 +80,8 @@ esp_err_t power_board_init(void)
     uint16_t capacity = CONFIG_IAQ_POWERFEATHER_BATTERY_MAH;
     Mainboard::BatteryType type = cfg_battery_type();
 
+    PmNoSleepBusGuard pm;
+
     Result r = Board.init(capacity, type);
     if (r != Result::Ok) {
         ESP_LOGE(TAG, "PowerFeather init failed: %d", static_cast<int>(r));
@@ -85,11 +94,22 @@ esp_err_t power_board_init(void)
 
     /* Apply configured outputs/limits if provided */
     if (CONFIG_IAQ_POWERFEATHER_MAINTAIN_VOLTAGE_MV > 0) {
-        (void)Board.setSupplyMaintainVoltage(CONFIG_IAQ_POWERFEATHER_MAINTAIN_VOLTAGE_MV);
+        Result rr = Board.setSupplyMaintainVoltage(CONFIG_IAQ_POWERFEATHER_MAINTAIN_VOLTAGE_MV);
+        if (rr == Result::Ok) {
+            s_maintain_mv = CONFIG_IAQ_POWERFEATHER_MAINTAIN_VOLTAGE_MV;
+        } else {
+            ESP_LOGW(TAG, "Failed to set maintain voltage: %d", static_cast<int>(rr));
+            s_maintain_mv = 0;
+        }
     }
     if (CONFIG_IAQ_POWERFEATHER_CHARGE_LIMIT_MA > 0) {
-        (void)Board.setBatteryChargingMaxCurrent(CONFIG_IAQ_POWERFEATHER_CHARGE_LIMIT_MA);
-        s_charge_limit_ma = CONFIG_IAQ_POWERFEATHER_CHARGE_LIMIT_MA;
+        Result rr = Board.setBatteryChargingMaxCurrent(CONFIG_IAQ_POWERFEATHER_CHARGE_LIMIT_MA);
+        if (rr == Result::Ok) {
+            s_charge_limit_ma = CONFIG_IAQ_POWERFEATHER_CHARGE_LIMIT_MA;
+        } else {
+            ESP_LOGW(TAG, "Failed to set charge limit: %d", static_cast<int>(rr));
+            s_charge_limit_ma = 0;
+        }
     }
     /* Charging default: SDK defaults to disabled; keep that unless we explicitly enable later */
 
@@ -120,23 +140,45 @@ esp_err_t power_board_get_snapshot(power_board_snapshot_t *out)
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
 
     std::lock_guard<std::mutex> guard(s_lock);
+    PmNoSleepBusGuard pm;
 
     Result r;
     uint16_t u16 = 0;
     int16_t s16 = 0;
     uint8_t u8 = 0;
     bool b = false;
+    bool any_ok = false;
+    esp_err_t first_err = ESP_OK;
+
+    auto record_err = [&](Result res) {
+        if (res == Result::Ok) {
+            any_ok = true;
+            return;
+        }
+        if (first_err == ESP_OK && res != Result::NotReady) {
+            first_err = pf_to_err(res);
+        }
+    };
 
     r = Board.checkSupplyGood(b);
-    if (r == Result::Ok) out->supply_good = b;
+    if (r == Result::Ok) {
+        out->supply_good = b;
+    }
+    record_err(r);
 
     r = Board.getSupplyVoltage(u16);
-    if (r == Result::Ok) out->supply_mv = u16;
+    if (r == Result::Ok) {
+        out->supply_mv = u16;
+    }
+    record_err(r);
 
     r = Board.getSupplyCurrent(s16);
-    if (r == Result::Ok) out->supply_ma = s16;
+    if (r == Result::Ok) {
+        out->supply_ma = s16;
+    }
+    record_err(r);
 
-    out->maintain_mv = CONFIG_IAQ_POWERFEATHER_MAINTAIN_VOLTAGE_MV;
+    out->maintain_mv = s_maintain_mv;
 
     out->en = s_en;
     out->v3v_on = s_v3v_on;
@@ -144,27 +186,48 @@ esp_err_t power_board_get_snapshot(power_board_snapshot_t *out)
     out->stat_on = s_stat_on;
 
     r = Board.getBatteryVoltage(u16);
-    if (r == Result::Ok) out->batt_mv = u16;
+    if (r == Result::Ok) {
+        out->batt_mv = u16;
+    }
+    record_err(r);
 
     r = Board.getBatteryCurrent(s16);
-    if (r == Result::Ok) out->batt_ma = s16;
+    if (r == Result::Ok) {
+        out->batt_ma = s16;
+    }
+    record_err(r);
 
     r = Board.getBatteryCharge(u8);
-    if (r == Result::Ok) out->charge_pct = u8;
+    if (r == Result::Ok) {
+        out->charge_pct = u8;
+    }
+    record_err(r);
 
     r = Board.getBatteryHealth(u8);
-    if (r == Result::Ok) out->health_pct = u8;
+    if (r == Result::Ok) {
+        out->health_pct = u8;
+    }
+    record_err(r);
 
     r = Board.getBatteryCycles(u16);
-    if (r == Result::Ok) out->cycles = u16;
+    if (r == Result::Ok) {
+        out->cycles = u16;
+    }
+    record_err(r);
 
     int minutes = 0;
     r = Board.getBatteryTimeLeft(minutes);
-    if (r == Result::Ok) out->time_left_min = minutes;
+    if (r == Result::Ok) {
+        out->time_left_min = minutes;
+    }
+    record_err(r);
 
     float temp = 0.0f;
     r = Board.getBatteryTemperature(temp);
-    if (r == Result::Ok) out->batt_temp_c = temp;
+    if (r == Result::Ok) {
+        out->batt_temp_c = temp;
+    }
+    record_err(r);
 
     out->charging_on = s_charging_on;
     out->charge_limit_ma = s_charge_limit_ma;
@@ -174,6 +237,9 @@ esp_err_t power_board_get_snapshot(power_board_snapshot_t *out)
 
     out->updated_at_us = esp_timer_get_time();
 
+    if (!any_ok) {
+        return (first_err != ESP_OK) ? first_err : ESP_ERR_INVALID_STATE;
+    }
     return ESP_OK;
 }
 
@@ -215,7 +281,6 @@ static void power_poll_task(void *arg)
     while (true) {
         if (s_init_ok) {
             iaq_prof_ctx_t pctx = iaq_prof_start(IAQ_METRIC_POWER_POLL);
-            pm_guard_lock_no_sleep();
             if (power_board_get_snapshot(&snap) == ESP_OK) {
                 power_board_store_snapshot(&snap);
             } else {
@@ -224,7 +289,6 @@ static void power_poll_task(void *arg)
                     iaq_data_get()->power.updated_us = esp_timer_get_time();
                 }
             }
-            pm_guard_unlock_no_sleep();
             iaq_prof_end(pctx);
         } else {
             IAQ_DATA_WITH_LOCK() {
@@ -240,85 +304,107 @@ esp_err_t power_board_set_en(bool high)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
-    s_en = high;
-    return pf_to_err(Board.setEN(high));
+    PmNoSleepBusGuard pm;
+    Result r = Board.setEN(high);
+    if (r == Result::Ok) s_en = high;
+    return pf_to_err(r);
 }
 
 esp_err_t power_board_enable_3v3(bool enable)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
-    s_v3v_on = enable;
-    return pf_to_err(Board.enable3V3(enable));
+    PmNoSleepBusGuard pm;
+    Result r = Board.enable3V3(enable);
+    if (r == Result::Ok) s_v3v_on = enable;
+    return pf_to_err(r);
 }
 
 esp_err_t power_board_enable_vsqt(bool enable)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
-    s_vsqt_on = enable;
-    return pf_to_err(Board.enableVSQT(enable));
+    PmNoSleepBusGuard pm;
+    Result r = Board.enableVSQT(enable);
+    if (r == Result::Ok) s_vsqt_on = enable;
+    return pf_to_err(r);
 }
 
 esp_err_t power_board_enable_stat(bool enable)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
-    s_stat_on = enable;
-    return pf_to_err(Board.enableSTAT(enable));
+    PmNoSleepBusGuard pm;
+    Result r = Board.enableSTAT(enable);
+    if (r == Result::Ok) s_stat_on = enable;
+    return pf_to_err(r);
 }
 
 esp_err_t power_board_set_supply_maintain_voltage(uint16_t mv)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
-    return pf_to_err(Board.setSupplyMaintainVoltage(mv));
+    PmNoSleepBusGuard pm;
+    Result r = Board.setSupplyMaintainVoltage(mv);
+    if (r == Result::Ok) s_maintain_mv = mv;
+    return pf_to_err(r);
 }
 
 esp_err_t power_board_enable_charging(bool enable)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
-    s_charging_on = enable;
-    return pf_to_err(Board.enableBatteryCharging(enable));
+    PmNoSleepBusGuard pm;
+    Result r = Board.enableBatteryCharging(enable);
+    if (r == Result::Ok) s_charging_on = enable;
+    return pf_to_err(r);
 }
 
 esp_err_t power_board_set_charge_limit(uint16_t ma)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
-    s_charge_limit_ma = ma;
-    return pf_to_err(Board.setBatteryChargingMaxCurrent(ma));
+    PmNoSleepBusGuard pm;
+    Result r = Board.setBatteryChargingMaxCurrent(ma);
+    if (r == Result::Ok) s_charge_limit_ma = ma;
+    return pf_to_err(r);
 }
 
 esp_err_t power_board_set_alarm_low_voltage(uint16_t mv)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
-    s_alarm_low_v_mv = mv;
-    return pf_to_err(Board.setBatteryLowVoltageAlarm(mv));
+    PmNoSleepBusGuard pm;
+    Result r = Board.setBatteryLowVoltageAlarm(mv);
+    if (r == Result::Ok) s_alarm_low_v_mv = mv;
+    return pf_to_err(r);
 }
 
 esp_err_t power_board_set_alarm_high_voltage(uint16_t mv)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
-    s_alarm_high_v_mv = mv;
-    return pf_to_err(Board.setBatteryHighVoltageAlarm(mv));
+    PmNoSleepBusGuard pm;
+    Result r = Board.setBatteryHighVoltageAlarm(mv);
+    if (r == Result::Ok) s_alarm_high_v_mv = mv;
+    return pf_to_err(r);
 }
 
 esp_err_t power_board_set_alarm_low_charge(uint8_t pct)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
-    s_alarm_low_pct = pct;
-    return pf_to_err(Board.setBatteryLowChargeAlarm(pct));
+    PmNoSleepBusGuard pm;
+    Result r = Board.setBatteryLowChargeAlarm(pct);
+    if (r == Result::Ok) s_alarm_low_pct = pct;
+    return pf_to_err(r);
 }
 
 esp_err_t power_board_enter_ship_mode(void)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
+    PmNoSleepBusGuard pm;
     return pf_to_err(Board.enterShipMode());
 }
 
@@ -326,6 +412,7 @@ esp_err_t power_board_enter_shutdown_mode(void)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
+    PmNoSleepBusGuard pm;
     return pf_to_err(Board.enterShutdownMode());
 }
 
@@ -333,6 +420,7 @@ esp_err_t power_board_power_cycle(void)
 {
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
     std::lock_guard<std::mutex> guard(s_lock);
+    PmNoSleepBusGuard pm;
     return pf_to_err(Board.doPowerCycle());
 }
 

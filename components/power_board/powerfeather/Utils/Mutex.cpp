@@ -48,6 +48,12 @@ namespace PowerFeather
 
     bool Mutex::lock()
     {
+        if (_sem == nullptr)
+        {
+            ESP_LOGD(TAG, "Mutex %p not initialized.", this);
+            return false;
+        }
+
         if (xSemaphoreTakeRecursive(_sem, pdMS_TO_TICKS(_timeout)) == pdTRUE)
         {
             ESP_LOGD(TAG, "Mutex %p take succeeded.", this);
@@ -59,7 +65,10 @@ namespace PowerFeather
 
     void Mutex::unlock()
     {
-        xSemaphoreGiveRecursive(_sem);
-        ESP_LOGD(TAG, "Mutex %p released.", this);
+        if (_sem)
+        {
+            xSemaphoreGiveRecursive(_sem);
+            ESP_LOGD(TAG, "Mutex %p released.", this);
+        }
     }
 }
