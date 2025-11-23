@@ -164,7 +164,6 @@ void app_main(void)
 #endif
 
     /* Initialize IAQ data structure */
-    ESP_LOGI(TAG, "Initializing IAQ data structure");
     ESP_ERROR_CHECK(iaq_data_init());
 
     /* Initialize PowerFeather board integration (fail-soft if disabled or absent) */
