@@ -3,7 +3,6 @@ import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
-import LinearProgress from '@mui/material/LinearProgress';
 import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
 import {
@@ -99,12 +98,6 @@ export function SensorStatus({ sensorId, status, loading = false }: SensorStatus
 
   const stateColor = getSensorStateColor(status.state);
 
-  // Calculate warmup progress percentage
-  const warmupProgress =
-    status.state === 'WARMING' && status.warmup_remaining_s != null
-      ? Math.max(0, 100 - (status.warmup_remaining_s / 300) * 100) // Assume 5min max warmup
-      : null;
-
   return (
     <Card
       sx={{
@@ -147,24 +140,15 @@ export function SensorStatus({ sensorId, status, loading = false }: SensorStatus
           />
         </Box>
 
-        {/* Warmup progress bar */}
-        {status.state === 'WARMING' && warmupProgress !== null && (
-          <Box mb={2}>
-            <Box display="flex" justifyContent="space-between" mb={0.5}>
-              <Typography variant="caption" color="text.secondary">
-                Warming up...
-              </Typography>
-              <Typography variant="caption" color="text.secondary">
-                {formatSeconds(status.warmup_remaining_s || 0)} remaining
+        {/* Warmup remaining time */}
+        {status.state === 'WARMING' &&
+          status.warmup_remaining_s !== undefined &&
+          status.warmup_remaining_s > 0 && (
+            <Box mb={2}>
+              <Typography variant="body2" color="warning.main" fontWeight={500}>
+                Warming up: {formatSeconds(status.warmup_remaining_s)} remaining
               </Typography>
             </Box>
-            <LinearProgress
-              variant="determinate"
-              value={warmupProgress}
-              color="warning"
-              sx={{ height: 6, borderRadius: 3 }}
-            />
-          </Box>
         )}
 
         {/* Last successful read */}
