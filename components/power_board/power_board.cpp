@@ -9,6 +9,7 @@
 #include <mutex>
 
 #include "Mainboard/Mainboard.h"
+#include "iaq_config.h"
 #include "iaq_data.h"
 #include "power_board_internal.h"
 #include "pm_guard.h"
@@ -37,6 +38,10 @@ static std::mutex s_lock;
 static TaskHandle_t s_poll_task = NULL;
 static void power_poll_task(void *arg);
 
+/* Poll task timing constants */
+static constexpr uint32_t POLL_BASE_INTERVAL_MS = CONFIG_IAQ_POWERFEATHER_POLL_INTERVAL_MS;
+static constexpr uint32_t POLL_MAX_BACKOFF_MS = 30000;
+
 static esp_err_t pf_to_err(Result r)
 {
     switch (r) {
@@ -58,6 +63,19 @@ public:
     ~PmNoSleepBusGuard() { pm_guard_unlock_bus(); pm_guard_unlock_no_sleep(); }
 };
 
+/**
+ * Helper to wrap control function calls with init check, mutex, and PM guard.
+ * The callable should return a PowerFeather Result.
+ */
+template <typename Func>
+static esp_err_t guarded_call(Func&& fn)
+{
+    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
+    std::lock_guard<std::mutex> guard(s_lock);
+    PmNoSleepBusGuard pm;
+    return pf_to_err(fn());
+}
+
 static Mainboard::BatteryType cfg_battery_type(void)
 {
 #if CONFIG_IAQ_POWERFEATHER_BATTERY_ICR18650_26H
@@ -71,11 +89,6 @@ static Mainboard::BatteryType cfg_battery_type(void)
 
 esp_err_t power_board_init(void)
 {
-#if !CONFIG_IAQ_POWERFEATHER_ENABLE
-    ESP_LOGI(TAG, "PowerFeather support disabled (CONFIG_IAQ_POWERFEATHER_ENABLE=n)");
-    s_init_ok = false;
-    return ESP_ERR_NOT_SUPPORTED;
-#else
     std::lock_guard<std::mutex> guard(s_lock);
     uint16_t capacity = CONFIG_IAQ_POWERFEATHER_BATTERY_MAH;
     Mainboard::BatteryType type = cfg_battery_type();
@@ -116,16 +129,16 @@ esp_err_t power_board_init(void)
     s_init_ok = true;
     ESP_LOGI(TAG, "PowerFeather initialized (capacity=%u mAh, type=%d)", capacity, static_cast<int>(type));
     if (s_poll_task == NULL) {
-        BaseType_t r = xTaskCreate(power_poll_task, "pf_poll", 3072, NULL, 4, &s_poll_task);
+        BaseType_t r = xTaskCreate(power_poll_task, "pf_poll", TASK_STACK_POWER_POLL,
+                                   NULL, TASK_PRIORITY_POWER_POLL, &s_poll_task);
         if (r != pdPASS) {
             ESP_LOGE(TAG, "Failed to create PowerFeather poll task");
             s_poll_task = NULL;
         } else {
-            iaq_profiler_register_task("pf_poll", s_poll_task, 3072);
+            iaq_profiler_register_task("pf_poll", s_poll_task, TASK_STACK_POWER_POLL);
         }
     }
     return ESP_OK;
-#endif
 }
 
 bool power_board_is_enabled(void)
@@ -139,14 +152,13 @@ esp_err_t power_board_get_snapshot(power_board_snapshot_t *out)
     *out = {};
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
 
-    std::lock_guard<std::mutex> guard(s_lock);
+    /*
+     * Phase 1: Read SDK values WITHOUT holding our mutex.
+     * The SDK's Mainboard class has its own internal mutex that protects I2C operations.
+     * This avoids blocking control operations during slow I2C reads (~100ms each).
+     */
     PmNoSleepBusGuard pm;
 
-    Result r;
-    uint16_t u16 = 0;
-    int16_t s16 = 0;
-    uint8_t u8 = 0;
-    bool b = false;
     bool any_ok = false;
     esp_err_t first_err = ESP_OK;
 
@@ -160,80 +172,80 @@ esp_err_t power_board_get_snapshot(power_board_snapshot_t *out)
         }
     };
 
-    r = Board.checkSupplyGood(b);
-    if (r == Result::Ok) {
-        out->supply_good = b;
+    /* Read helpers to reduce repetition */
+    auto read_bool = [&](bool& field, Result (*getter)(bool&)) {
+        bool tmp = false;
+        Result r = getter(tmp);
+        if (r == Result::Ok) field = tmp;
+        record_err(r);
+    };
+
+    auto read_u16 = [&](uint16_t& field, Result (*getter)(uint16_t&)) {
+        uint16_t tmp = 0;
+        Result r = getter(tmp);
+        if (r == Result::Ok) field = tmp;
+        record_err(r);
+    };
+
+    auto read_s16 = [&](int16_t& field, Result (*getter)(int16_t&)) {
+        int16_t tmp = 0;
+        Result r = getter(tmp);
+        if (r == Result::Ok) field = tmp;
+        record_err(r);
+    };
+
+    auto read_u8 = [&](uint8_t& field, Result (*getter)(uint8_t&)) {
+        uint8_t tmp = 0;
+        Result r = getter(tmp);
+        if (r == Result::Ok) field = tmp;
+        record_err(r);
+    };
+
+    /* Supply readings */
+    read_bool(out->supply_good, [](bool& v) { return Board.checkSupplyGood(v); });
+    read_u16(out->supply_mv, [](uint16_t& v) { return Board.getSupplyVoltage(v); });
+    read_s16(out->supply_ma, [](int16_t& v) { return Board.getSupplyCurrent(v); });
+
+    /* Battery readings */
+    read_u16(out->batt_mv, [](uint16_t& v) { return Board.getBatteryVoltage(v); });
+    read_s16(out->batt_ma, [](int16_t& v) { return Board.getBatteryCurrent(v); });
+    read_u8(out->charge_pct, [](uint8_t& v) { return Board.getBatteryCharge(v); });
+    read_u8(out->health_pct, [](uint8_t& v) { return Board.getBatteryHealth(v); });
+    read_u16(out->cycles, [](uint16_t& v) { return Board.getBatteryCycles(v); });
+
+    /* Time left (int type) */
+    {
+        int minutes = 0;
+        Result r = Board.getBatteryTimeLeft(minutes);
+        if (r == Result::Ok) out->time_left_min = minutes;
+        record_err(r);
     }
-    record_err(r);
 
-    r = Board.getSupplyVoltage(u16);
-    if (r == Result::Ok) {
-        out->supply_mv = u16;
+    /* Temperature (float type) */
+    {
+        float temp = 0.0f;
+        Result r = Board.getBatteryTemperature(temp);
+        if (r == Result::Ok) out->batt_temp_c = temp;
+        record_err(r);
     }
-    record_err(r);
 
-    r = Board.getSupplyCurrent(s16);
-    if (r == Result::Ok) {
-        out->supply_ma = s16;
+    /*
+     * Phase 2: Briefly lock to copy cached control state.
+     * These are write-only registers that we track locally.
+     */
+    {
+        std::lock_guard<std::mutex> guard(s_lock);
+        out->en = s_en;
+        out->v3v_on = s_v3v_on;
+        out->vsqt_on = s_vsqt_on;
+        out->stat_on = s_stat_on;
+        out->charging_on = s_charging_on;
+        out->charge_limit_ma = s_charge_limit_ma;
+        out->maintain_mv = s_maintain_mv;
+        out->alarm_low_v_mv = s_alarm_low_v_mv;
+        out->alarm_high_v_mv = s_alarm_high_v_mv;
+        out->alarm_low_pct = s_alarm_low_pct;
     }
-    record_err(r);
-
-    out->maintain_mv = s_maintain_mv;
-
-    out->en = s_en;
-    out->v3v_on = s_v3v_on;
-    out->vsqt_on = s_vsqt_on;
-    out->stat_on = s_stat_on;
-
-    r = Board.getBatteryVoltage(u16);
-    if (r == Result::Ok) {
-        out->batt_mv = u16;
-    }
-    record_err(r);
-
-    r = Board.getBatteryCurrent(s16);
-    if (r == Result::Ok) {
-        out->batt_ma = s16;
-    }
-    record_err(r);
-
-    r = Board.getBatteryCharge(u8);
-    if (r == Result::Ok) {
-        out->charge_pct = u8;
-    }
-    record_err(r);
-
-    r = Board.getBatteryHealth(u8);
-    if (r == Result::Ok) {
-        out->health_pct = u8;
-    }
-    record_err(r);
-
-    r = Board.getBatteryCycles(u16);
-    if (r == Result::Ok) {
-        out->cycles = u16;
-    }
-    record_err(r);
-
-    int minutes = 0;
-    r = Board.getBatteryTimeLeft(minutes);
-    if (r == Result::Ok) {
-        out->time_left_min = minutes;
-    }
-    record_err(r);
-
-    float temp = 0.0f;
-    r = Board.getBatteryTemperature(temp);
-    if (r == Result::Ok) {
-        out->batt_temp_c = temp;
-    }
-    record_err(r);
-
-    out->charging_on = s_charging_on;
-    out->charge_limit_ma = s_charge_limit_ma;
-    out->alarm_low_v_mv = s_alarm_low_v_mv;
-    out->alarm_high_v_mv = s_alarm_high_v_mv;
-    out->alarm_low_pct = s_alarm_low_pct;
 
     out->updated_at_us = esp_timer_get_time();
 
@@ -278,15 +290,22 @@ static void power_poll_task(void *arg)
 {
     (void)arg;
     power_board_snapshot_t snap = {};
+    uint32_t delay_ms = POLL_BASE_INTERVAL_MS;
+
     while (true) {
         if (s_init_ok) {
             iaq_prof_ctx_t pctx = iaq_prof_start(IAQ_METRIC_POWER_POLL);
             if (power_board_get_snapshot(&snap) == ESP_OK) {
                 power_board_store_snapshot(&snap);
+                delay_ms = POLL_BASE_INTERVAL_MS; /* Reset on success */
             } else {
                 IAQ_DATA_WITH_LOCK() {
                     iaq_data_get()->power.available = false;
                     iaq_data_get()->power.updated_us = esp_timer_get_time();
+                }
+                /* Exponential backoff on failure, capped at max */
+                if (delay_ms < POLL_MAX_BACKOFF_MS) {
+                    delay_ms = (delay_ms * 2 > POLL_MAX_BACKOFF_MS) ? POLL_MAX_BACKOFF_MS : delay_ms * 2;
                 }
             }
             iaq_prof_end(pctx);
@@ -295,133 +314,115 @@ static void power_poll_task(void *arg)
                 iaq_data_get()->power.available = false;
                 iaq_data_get()->power.updated_us = esp_timer_get_time();
             }
+            delay_ms = POLL_BASE_INTERVAL_MS;
         }
-        vTaskDelay(pdMS_TO_TICKS(CONFIG_IAQ_POWERFEATHER_POLL_INTERVAL_MS));
+        vTaskDelay(pdMS_TO_TICKS(delay_ms));
     }
 }
 
 esp_err_t power_board_set_en(bool high)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    Result r = Board.setEN(high);
-    if (r == Result::Ok) s_en = high;
-    return pf_to_err(r);
+    return guarded_call([high] {
+        Result r = Board.setEN(high);
+        if (r == Result::Ok) s_en = high;
+        return r;
+    });
 }
 
 esp_err_t power_board_enable_3v3(bool enable)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    Result r = Board.enable3V3(enable);
-    if (r == Result::Ok) s_v3v_on = enable;
-    return pf_to_err(r);
+    return guarded_call([enable] {
+        Result r = Board.enable3V3(enable);
+        if (r == Result::Ok) s_v3v_on = enable;
+        return r;
+    });
 }
 
 esp_err_t power_board_enable_vsqt(bool enable)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    Result r = Board.enableVSQT(enable);
-    if (r == Result::Ok) s_vsqt_on = enable;
-    return pf_to_err(r);
+    return guarded_call([enable] {
+        Result r = Board.enableVSQT(enable);
+        if (r == Result::Ok) s_vsqt_on = enable;
+        return r;
+    });
 }
 
 esp_err_t power_board_enable_stat(bool enable)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    Result r = Board.enableSTAT(enable);
-    if (r == Result::Ok) s_stat_on = enable;
-    return pf_to_err(r);
+    return guarded_call([enable] {
+        Result r = Board.enableSTAT(enable);
+        if (r == Result::Ok) s_stat_on = enable;
+        return r;
+    });
 }
 
 esp_err_t power_board_set_supply_maintain_voltage(uint16_t mv)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    Result r = Board.setSupplyMaintainVoltage(mv);
-    if (r == Result::Ok) s_maintain_mv = mv;
-    return pf_to_err(r);
+    return guarded_call([mv] {
+        Result r = Board.setSupplyMaintainVoltage(mv);
+        if (r == Result::Ok) s_maintain_mv = mv;
+        return r;
+    });
 }
 
 esp_err_t power_board_enable_charging(bool enable)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    Result r = Board.enableBatteryCharging(enable);
-    if (r == Result::Ok) s_charging_on = enable;
-    return pf_to_err(r);
+    return guarded_call([enable] {
+        Result r = Board.enableBatteryCharging(enable);
+        if (r == Result::Ok) s_charging_on = enable;
+        return r;
+    });
 }
 
 esp_err_t power_board_set_charge_limit(uint16_t ma)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    Result r = Board.setBatteryChargingMaxCurrent(ma);
-    if (r == Result::Ok) s_charge_limit_ma = ma;
-    return pf_to_err(r);
+    return guarded_call([ma] {
+        Result r = Board.setBatteryChargingMaxCurrent(ma);
+        if (r == Result::Ok) s_charge_limit_ma = ma;
+        return r;
+    });
 }
 
 esp_err_t power_board_set_alarm_low_voltage(uint16_t mv)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    Result r = Board.setBatteryLowVoltageAlarm(mv);
-    if (r == Result::Ok) s_alarm_low_v_mv = mv;
-    return pf_to_err(r);
+    return guarded_call([mv] {
+        Result r = Board.setBatteryLowVoltageAlarm(mv);
+        if (r == Result::Ok) s_alarm_low_v_mv = mv;
+        return r;
+    });
 }
 
 esp_err_t power_board_set_alarm_high_voltage(uint16_t mv)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    Result r = Board.setBatteryHighVoltageAlarm(mv);
-    if (r == Result::Ok) s_alarm_high_v_mv = mv;
-    return pf_to_err(r);
+    return guarded_call([mv] {
+        Result r = Board.setBatteryHighVoltageAlarm(mv);
+        if (r == Result::Ok) s_alarm_high_v_mv = mv;
+        return r;
+    });
 }
 
 esp_err_t power_board_set_alarm_low_charge(uint8_t pct)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    Result r = Board.setBatteryLowChargeAlarm(pct);
-    if (r == Result::Ok) s_alarm_low_pct = pct;
-    return pf_to_err(r);
+    return guarded_call([pct] {
+        Result r = Board.setBatteryLowChargeAlarm(pct);
+        if (r == Result::Ok) s_alarm_low_pct = pct;
+        return r;
+    });
 }
 
 esp_err_t power_board_enter_ship_mode(void)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    return pf_to_err(Board.enterShipMode());
+    return guarded_call([] { return Board.enterShipMode(); });
 }
 
 esp_err_t power_board_enter_shutdown_mode(void)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    return pf_to_err(Board.enterShutdownMode());
+    return guarded_call([] { return Board.enterShutdownMode(); });
 }
 
 esp_err_t power_board_power_cycle(void)
 {
-    if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
-    std::lock_guard<std::mutex> guard(s_lock);
-    PmNoSleepBusGuard pm;
-    return pf_to_err(Board.doPowerCycle());
+    return guarded_call([] { return Board.doPowerCycle(); });
 }
 
 #else /* CONFIG_IAQ_POWERFEATHER_ENABLE */

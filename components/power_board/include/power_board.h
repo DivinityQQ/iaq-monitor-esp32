@@ -9,12 +9,6 @@
 extern "C" {
 #endif
 
-typedef enum {
-    POWER_BOARD_BATTERY_GENERIC_3V7 = 0,
-    POWER_BOARD_BATTERY_ICR18650_26H = 1,
-    POWER_BOARD_BATTERY_UR18650ZY = 2,
-} power_board_battery_type_t;
-
 typedef struct {
     bool supply_good;
     uint16_t supply_mv;

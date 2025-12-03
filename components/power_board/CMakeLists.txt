@@ -16,6 +16,7 @@ idf_component_register(
     PRIV_INCLUDE_DIRS
         ${PF_ROOT}
     PRIV_REQUIRES
+        app_config
         driver
         iaq_data
         iaq_profiler
