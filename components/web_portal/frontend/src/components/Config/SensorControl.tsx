@@ -69,7 +69,6 @@ const SENSOR_INFO: Record<SensorId, { name: string; icon: ReactElement; descript
 
 // Cadence slider marks (in milliseconds)
 const CADENCE_MARKS = [
-  { value: 0, label: '0' },
   { value: 1000, label: '1s' },
   { value: 5000, label: '5s' },
   { value: 10000, label: '10s' },
@@ -103,7 +102,8 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
   useEffect(() => {
     const ms = cadences?.[sensorId]?.ms;
     if (typeof ms === 'number') {
-      setCadence(ms);
+      // Clamp to minimum of 1s to avoid disabling via cadence slider
+      setCadence(Math.max(ms, 1000));
     }
   }, [cadences, sensorId]);
 
@@ -114,7 +114,7 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
 
   // Handle slider commit - only POST if value changed
   const handleCadenceCommitted = async (_: Event | React.SyntheticEvent, value: number | number[]) => {
-    const newValue = value as number;
+    const newValue = Math.max(value as number, 1000);
     const currentMs = cadences?.[sensorId]?.ms;
 
     // Don't POST if value hasn't changed
@@ -379,7 +379,7 @@ function SensorCardControl({ sensorId }: SensorCardControlProps) {
             value={cadence}
             onChange={handleCadenceSliderChange}
             onChangeCommitted={handleCadenceCommitted}
-            min={0}
+            min={1000}
             max={60000}
             step={1000}
             marks={CADENCE_MARKS}
