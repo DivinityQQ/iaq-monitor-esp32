@@ -29,13 +29,38 @@
 #include "esp_task_wdt.h"
 #include "iaq_profiler.h"
 #include "pm_guard.h"
+#include <stdatomic.h>
+
+/* ===== Configuration Constants ===== */
+
+/* Command queue depth */
+#define CMD_QUEUE_DEPTH                 8
+
+/* Hardware stabilization delay before transitioning INIT->WARMING (ms) */
+#define HARDWARE_STABILIZATION_DELAY_MS 500
+
+/* Auto-recovery exponential backoff parameters */
+#define RECOVERY_INITIAL_DELAY_MS       30000   /* 30 seconds */
+#define RECOVERY_MAX_DELAY_MS           300000  /* 5 minutes */
+#define RECOVERY_BACKOFF_MULTIPLIER     2
+
+/* SGP41 conditioning window during warmup */
+#define SGP41_CONDITIONING_WINDOW_US    (10 * 1000000LL)  /* 10 seconds */
+#define SGP41_CONDITIONING_INTERVAL_US  1000000           /* 1 Hz */
+
+/* Error threshold before transitioning to ERROR state */
+#define SENSOR_ERROR_THRESHOLD          3
+
+/* Timer periods */
+#define FUSION_TIMER_PERIOD_US          1000000   /* 1 Hz */
+#define METRICS_TIMER_PERIOD_US         5000000   /* 0.2 Hz / 5 seconds */
 
 static const char *TAG = "SENSOR_COORD";
 
 static iaq_system_context_t *s_system_ctx = NULL;
 static TaskHandle_t s_sensor_task_handle = NULL;
-static volatile bool s_initialized = false;
-static volatile bool s_running = false;
+static _Atomic bool s_initialized = false;
+static _Atomic bool s_running = false;
 
 /**
  * Internal per-sensor runtime tracking.
@@ -57,6 +82,86 @@ typedef struct {
     uint8_t retry_count;         // Number of retries since entering ERROR
     uint32_t next_retry_delay_ms; // Next retry delay (exponential: 30s, 60s, 120s, 300s)
 } sensor_recovery_t;
+
+/**
+ * Sensor operations table - function pointers for each sensor type.
+ * Eliminates switch statements by allowing indexed dispatch.
+ */
+typedef struct {
+    esp_err_t (*enable)(void);
+    esp_err_t (*disable)(void);
+    esp_err_t (*reset)(void);        /* NULL if not supported (e.g., MCU) */
+    esp_err_t (*read)(void);         /* Read wrapper that stores to iaq_data */
+    const char *name;                /* "MCU" for logs (uppercase) */
+    const char *id_name;             /* "mcu" for API (lowercase) */
+    const char *nvs_cadence_key;     /* NVS key for cadence storage */
+} sensor_ops_t;
+
+/* Forward declarations for read wrappers */
+static esp_err_t read_sensor_mcu(void);
+static esp_err_t read_sensor_sht45(void);
+static esp_err_t read_sensor_bmp280(void);
+static esp_err_t read_sensor_sgp41(void);
+static esp_err_t read_sensor_pms5003(void);
+static esp_err_t read_sensor_s8(void);
+
+/* Sensor operations table indexed by sensor_id_t */
+static const sensor_ops_t s_sensor_ops[SENSOR_ID_MAX] = {
+    [SENSOR_ID_MCU] = {
+        .enable  = mcu_temp_driver_enable,
+        .disable = mcu_temp_driver_disable,
+        .reset   = NULL,  /* MCU uses disable/enable cycle */
+        .read    = read_sensor_mcu,
+        .name    = "MCU",
+        .id_name = "mcu",
+        .nvs_cadence_key = "cad_mcu",
+    },
+    [SENSOR_ID_SHT45] = {
+        .enable  = sht45_driver_enable,
+        .disable = sht45_driver_disable,
+        .reset   = sht45_driver_reset,
+        .read    = read_sensor_sht45,
+        .name    = "SHT45",
+        .id_name = "sht45",
+        .nvs_cadence_key = "cad_sht45",
+    },
+    [SENSOR_ID_BMP280] = {
+        .enable  = bmp280_driver_enable,
+        .disable = bmp280_driver_disable,
+        .reset   = bmp280_driver_reset,
+        .read    = read_sensor_bmp280,
+        .name    = "BMP280",
+        .id_name = "bmp280",
+        .nvs_cadence_key = "cad_bmp280",
+    },
+    [SENSOR_ID_SGP41] = {
+        .enable  = sgp41_driver_enable,
+        .disable = sgp41_driver_disable,
+        .reset   = sgp41_driver_reset,
+        .read    = read_sensor_sgp41,
+        .name    = "SGP41",
+        .id_name = "sgp41",
+        .nvs_cadence_key = "cad_sgp41",
+    },
+    [SENSOR_ID_PMS5003] = {
+        .enable  = pms5003_driver_enable,
+        .disable = pms5003_driver_disable,
+        .reset   = pms5003_driver_reset,
+        .read    = read_sensor_pms5003,
+        .name    = "PMS5003",
+        .id_name = "pms5003",
+        .nvs_cadence_key = "cad_pms5003",
+    },
+    [SENSOR_ID_S8] = {
+        .enable  = s8_driver_enable,
+        .disable = s8_driver_disable,
+        .reset   = s8_driver_reset,
+        .read    = read_sensor_s8,
+        .name    = "S8",
+        .id_name = "s8",
+        .nvs_cadence_key = "cad_s8",
+    },
+};
 
 /* Per-sensor runtime state tracking */
 static sensor_runtime_t s_runtime[SENSOR_ID_MAX];
@@ -123,11 +228,7 @@ static void invalidate_sensor_data(sensor_id_t id)
     }
 }
 
-/* Error threshold before transitioning to ERROR state */
-#define ERROR_THRESHOLD 3
-
 /* Forward declarations */
-static const char* state_to_string(sensor_state_t state);
 static const char* sensor_id_to_string(sensor_id_t id);
 
 typedef enum { CMD_READ = 0, CMD_RESET, CMD_CALIBRATE, CMD_DISABLE, CMD_ENABLE } sensor_cmd_type_t;
@@ -189,14 +290,26 @@ static void save_cadence_ms(const char *key, uint32_t ms)
     }
 }
 
+/* Default cadences from Kconfig (milliseconds) */
+static const uint32_t s_default_cadence_ms[SENSOR_ID_MAX] = {
+    [SENSOR_ID_MCU]     = CONFIG_IAQ_CADENCE_MCU_MS,
+    [SENSOR_ID_SHT45]   = CONFIG_IAQ_CADENCE_SHT45_MS,
+    [SENSOR_ID_BMP280]  = CONFIG_IAQ_CADENCE_BMP280_MS,
+    [SENSOR_ID_SGP41]   = CONFIG_IAQ_CADENCE_SGP41_MS,
+    [SENSOR_ID_PMS5003] = CONFIG_IAQ_CADENCE_PMS5003_MS,
+    [SENSOR_ID_S8]      = CONFIG_IAQ_CADENCE_S8_MS,
+};
+
 static void init_schedule_from_config(void)
 {
-    s_cadence_ms[SENSOR_ID_MCU]     = load_cadence_ms("cad_mcu",     CONFIG_IAQ_CADENCE_MCU_MS,     &s_cadence_from_nvs[SENSOR_ID_MCU]);
-    s_cadence_ms[SENSOR_ID_SHT45]   = load_cadence_ms("cad_sht45",   CONFIG_IAQ_CADENCE_SHT45_MS,   &s_cadence_from_nvs[SENSOR_ID_SHT45]);
-    s_cadence_ms[SENSOR_ID_BMP280]  = load_cadence_ms("cad_bmp280",  CONFIG_IAQ_CADENCE_BMP280_MS,  &s_cadence_from_nvs[SENSOR_ID_BMP280]);
-    s_cadence_ms[SENSOR_ID_SGP41]   = load_cadence_ms("cad_sgp41",   CONFIG_IAQ_CADENCE_SGP41_MS,   &s_cadence_from_nvs[SENSOR_ID_SGP41]);
-    s_cadence_ms[SENSOR_ID_PMS5003] = load_cadence_ms("cad_pms5003", CONFIG_IAQ_CADENCE_PMS5003_MS, &s_cadence_from_nvs[SENSOR_ID_PMS5003]);
-    s_cadence_ms[SENSOR_ID_S8]      = load_cadence_ms("cad_s8",      CONFIG_IAQ_CADENCE_S8_MS,      &s_cadence_from_nvs[SENSOR_ID_S8]);
+    /* Load cadences from NVS (or defaults) using ops table for keys */
+    for (int i = 0; i < SENSOR_ID_MAX; ++i) {
+        s_cadence_ms[i] = load_cadence_ms(
+            s_sensor_ops[i].nvs_cadence_key,
+            s_default_cadence_ms[i],
+            &s_cadence_from_nvs[i]
+        );
+    }
 
     /* Stagger initial sensor reads to avoid thundering herd on boot.
      * Spread sensors evenly across first period to flatten I2C/UART load. */
@@ -220,8 +333,8 @@ static void transition_to_state(sensor_id_t id, sensor_state_t new_state)
     sensor_state_t old_state = s_runtime[id].state;
     if (old_state != new_state) {
         ESP_LOGI(TAG, "Sensor %d: %s -> %s", id,
-                 state_to_string(old_state),
-                 state_to_string(new_state));
+                 sensor_coordinator_state_to_string(old_state),
+                 sensor_coordinator_state_to_string(new_state));
         s_runtime[id].state = new_state;
 
         /* On transition to WARMING, set warm-up deadline */
@@ -242,35 +355,37 @@ static void transition_to_state(sensor_id_t id, sensor_state_t new_state)
 }
 
 /**
- * Get sensor name string for logging.
+ * Get sensor name string for logging (uppercase).
  */
 static const char* sensor_id_to_string(sensor_id_t id)
 {
-    switch (id) {
-        case SENSOR_ID_MCU:     return "MCU";
-        case SENSOR_ID_SHT45:   return "SHT45";
-        case SENSOR_ID_BMP280:  return "BMP280";
-        case SENSOR_ID_SGP41:   return "SGP41";
-        case SENSOR_ID_PMS5003: return "PMS5003";
-        case SENSOR_ID_S8:      return "S8";
-        default:                return "UNKNOWN";
+    if (id >= 0 && id < SENSOR_ID_MAX) {
+        return s_sensor_ops[id].name;
     }
+    return "UNKNOWN";
 }
 
 /**
- * Convert sensor state enum to string (internal helper).
+ * Reset a sensor using the ops table.
+ * MCU sensor lacks a reset function; uses disable/enable cycle instead.
  */
-static const char* state_to_string(sensor_state_t state)
+static esp_err_t reset_sensor(sensor_id_t id)
 {
-    switch (state) {
-        case SENSOR_STATE_UNINIT:  return "UNINIT";
-        case SENSOR_STATE_INIT:    return "INIT";
-        case SENSOR_STATE_WARMING: return "WARMING";
-        case SENSOR_STATE_READY:   return "READY";
-        case SENSOR_STATE_ERROR:   return "ERROR";
-        case SENSOR_STATE_DISABLED: return "DISABLED";
-        default:                   return "UNKNOWN";
+    if (id < 0 || id >= SENSOR_ID_MAX) {
+        return ESP_ERR_INVALID_ARG;
     }
+
+    if (s_sensor_ops[id].reset != NULL) {
+        return s_sensor_ops[id].reset();
+    }
+
+    /* Fallback for sensors without reset (MCU): disable/enable cycle */
+    if (s_sensor_ops[id].disable != NULL && s_sensor_ops[id].enable != NULL) {
+        s_sensor_ops[id].disable();
+        return s_sensor_ops[id].enable();
+    }
+
+    return ESP_ERR_NOT_SUPPORTED;
 }
 
 
@@ -299,8 +414,8 @@ static esp_err_t read_sensor_mcu(void)
         ESP_LOGD(TAG, "MCU temp: %.1f C", temp_c);
     } else {
         s_runtime[SENSOR_ID_MCU].error_count++;
-        if (s_runtime[SENSOR_ID_MCU].error_count >= ERROR_THRESHOLD) {
-            ESP_LOGW(TAG, "MCU sensor failed %d times, transitioning to ERROR", ERROR_THRESHOLD);
+        if (s_runtime[SENSOR_ID_MCU].error_count >= SENSOR_ERROR_THRESHOLD) {
+            ESP_LOGW(TAG, "MCU sensor failed %d times, transitioning to ERROR", SENSOR_ERROR_THRESHOLD);
             transition_to_state(SENSOR_ID_MCU, SENSOR_STATE_ERROR);
         }
     }
@@ -333,8 +448,8 @@ static esp_err_t read_sensor_sht45(void)
         ESP_LOGD(TAG, "SHT45: %.1f C, %.1f %%RH", temp_c, humidity_rh);
     } else if (ret != ESP_ERR_NOT_SUPPORTED) {
         s_runtime[SENSOR_ID_SHT45].error_count++;
-        if (s_runtime[SENSOR_ID_SHT45].error_count >= ERROR_THRESHOLD) {
-            ESP_LOGW(TAG, "SHT45 sensor failed %d times, transitioning to ERROR", ERROR_THRESHOLD);
+        if (s_runtime[SENSOR_ID_SHT45].error_count >= SENSOR_ERROR_THRESHOLD) {
+            ESP_LOGW(TAG, "SHT45 sensor failed %d times, transitioning to ERROR", SENSOR_ERROR_THRESHOLD);
             transition_to_state(SENSOR_ID_SHT45, SENSOR_STATE_ERROR);
         }
     }
@@ -365,8 +480,8 @@ static esp_err_t read_sensor_bmp280(void)
         ESP_LOGD(TAG, "BMP280: %.1f hPa, %.1f C", pressure_hpa, temp_c);
     } else if (ret != ESP_ERR_NOT_SUPPORTED) {
         s_runtime[SENSOR_ID_BMP280].error_count++;
-        if (s_runtime[SENSOR_ID_BMP280].error_count >= ERROR_THRESHOLD) {
-            ESP_LOGW(TAG, "BMP280 sensor failed %d times, transitioning to ERROR", ERROR_THRESHOLD);
+        if (s_runtime[SENSOR_ID_BMP280].error_count >= SENSOR_ERROR_THRESHOLD) {
+            ESP_LOGW(TAG, "BMP280 sensor failed %d times, transitioning to ERROR", SENSOR_ERROR_THRESHOLD);
             transition_to_state(SENSOR_ID_BMP280, SENSOR_STATE_ERROR);
         }
     }
@@ -407,8 +522,8 @@ static esp_err_t read_sensor_sgp41(void)
         ESP_LOGD(TAG, "SGP41: VOC=%u, NOx=%u", voc_index, nox_index);
     } else if (ret != ESP_ERR_NOT_SUPPORTED) {
         s_runtime[SENSOR_ID_SGP41].error_count++;
-        if (s_runtime[SENSOR_ID_SGP41].error_count >= ERROR_THRESHOLD) {
-            ESP_LOGW(TAG, "SGP41 sensor failed %d times, transitioning to ERROR", ERROR_THRESHOLD);
+        if (s_runtime[SENSOR_ID_SGP41].error_count >= SENSOR_ERROR_THRESHOLD) {
+            ESP_LOGW(TAG, "SGP41 sensor failed %d times, transitioning to ERROR", SENSOR_ERROR_THRESHOLD);
             transition_to_state(SENSOR_ID_SGP41, SENSOR_STATE_ERROR);
         }
     }
@@ -443,8 +558,8 @@ static esp_err_t read_sensor_pms5003(void)
         ESP_LOGD(TAG, "PMS5003: PM1.0=%.0f, PM2.5=%.0f, PM10=%.0f ug/m3", pm1_0, pm2_5, pm10);
     } else if (ret != ESP_ERR_NOT_SUPPORTED) {
         s_runtime[SENSOR_ID_PMS5003].error_count++;
-        if (s_runtime[SENSOR_ID_PMS5003].error_count >= ERROR_THRESHOLD) {
-            ESP_LOGW(TAG, "PMS5003 sensor failed %d times, transitioning to ERROR", ERROR_THRESHOLD);
+        if (s_runtime[SENSOR_ID_PMS5003].error_count >= SENSOR_ERROR_THRESHOLD) {
+            ESP_LOGW(TAG, "PMS5003 sensor failed %d times, transitioning to ERROR", SENSOR_ERROR_THRESHOLD);
             transition_to_state(SENSOR_ID_PMS5003, SENSOR_STATE_ERROR);
         }
     }
@@ -475,8 +590,8 @@ static esp_err_t read_sensor_s8(void)
         ESP_LOGD(TAG, "S8 CO2: %.0f ppm", co2_ppm);
     } else if (ret != ESP_ERR_NOT_SUPPORTED) {
         s_runtime[SENSOR_ID_S8].error_count++;
-        if (s_runtime[SENSOR_ID_S8].error_count >= ERROR_THRESHOLD) {
-            ESP_LOGW(TAG, "S8 sensor failed %d times, transitioning to ERROR", ERROR_THRESHOLD);
+        if (s_runtime[SENSOR_ID_S8].error_count >= SENSOR_ERROR_THRESHOLD) {
+            ESP_LOGW(TAG, "S8 sensor failed %d times, transitioning to ERROR", SENSOR_ERROR_THRESHOLD);
             transition_to_state(SENSOR_ID_S8, SENSOR_STATE_ERROR);
         }
     }
@@ -528,7 +643,7 @@ static void sensor_coordinator_task(void *arg)
     }
 
     /* Brief delay for hardware stabilization */
-    vTaskDelay(pdMS_TO_TICKS(500));
+    vTaskDelay(pdMS_TO_TICKS(HARDWARE_STABILIZATION_DELAY_MS));
 
     /* Transition sensors from INIT -> WARMING */
     for (int i = 0; i < SENSOR_ID_MAX; ++i) {
@@ -557,9 +672,9 @@ static void sensor_coordinator_task(void *arg)
         if (s_runtime[SENSOR_ID_SGP41].state == SENSOR_STATE_WARMING) {
             int64_t warmup_start_us = s_runtime[SENSOR_ID_SGP41].warmup_deadline_us -
                                       ((int64_t)s_warmup_ms[SENSOR_ID_SGP41] * 1000LL);
-            /* Avoid scheduling conditioning past the 10s hardware window */
-            if ((now_us - warmup_start_us) <= 10 * 1000000LL &&
-                (now_us - s_runtime[SENSOR_ID_SGP41].last_read_us) >= 1000000) {
+            /* Avoid scheduling conditioning past the hardware window */
+            if ((now_us - warmup_start_us) <= SGP41_CONDITIONING_WINDOW_US &&
+                (now_us - s_runtime[SENSOR_ID_SGP41].last_read_us) >= SGP41_CONDITIONING_INTERVAL_US) {
                 /* Use last known temp/RH for compensation; fallback defaults */
                 float temp_c = 25.0f, humidity_rh = 50.0f;
                 IAQ_DATA_WITH_LOCK() {
@@ -603,22 +718,8 @@ static void sensor_coordinator_task(void *arg)
                              sensor_id_to_string(i), s_recovery[i].retry_count + 1,
                              s_recovery[i].next_retry_delay_ms);
 
-                    esp_err_t reset_result = ESP_FAIL;
-                    /* Attempt driver reset/re-init */
-                    if (i == SENSOR_ID_MCU) {
-                        mcu_temp_driver_disable();
-                        reset_result = mcu_temp_driver_enable();
-                    } else if (i == SENSOR_ID_SHT45) {
-                        reset_result = sht45_driver_reset();
-                    } else if (i == SENSOR_ID_BMP280) {
-                        reset_result = bmp280_driver_reset();
-                    } else if (i == SENSOR_ID_SGP41) {
-                        reset_result = sgp41_driver_reset();
-                    } else if (i == SENSOR_ID_PMS5003) {
-                        reset_result = pms5003_driver_reset();
-                    } else if (i == SENSOR_ID_S8) {
-                        reset_result = s8_driver_reset();
-                    }
+                    /* Attempt driver reset via ops table */
+                    esp_err_t reset_result = reset_sensor((sensor_id_t)i);
 
                     s_recovery[i].last_retry_us = now_us;
                     s_recovery[i].retry_count++;
@@ -635,13 +736,13 @@ static void sensor_coordinator_task(void *arg)
                         invalidate_sensor_data((sensor_id_t)i);
                         /* Reset recovery tracking */
                         s_recovery[i].retry_count = 0;
-                        s_recovery[i].next_retry_delay_ms = 30000; // Reset to initial delay
+                        s_recovery[i].next_retry_delay_ms = RECOVERY_INITIAL_DELAY_MS;
                     } else {
-                        /* Recovery failed - exponential backoff: 30s, 60s, 120s, 300s (cap) */
-                        if (s_recovery[i].next_retry_delay_ms < 300000) {
-                            s_recovery[i].next_retry_delay_ms = s_recovery[i].next_retry_delay_ms * 2;
-                            if (s_recovery[i].next_retry_delay_ms > 300000) {
-                                s_recovery[i].next_retry_delay_ms = 300000; // Cap at 5 minutes
+                        /* Recovery failed - exponential backoff */
+                        if (s_recovery[i].next_retry_delay_ms < RECOVERY_MAX_DELAY_MS) {
+                            s_recovery[i].next_retry_delay_ms *= RECOVERY_BACKOFF_MULTIPLIER;
+                            if (s_recovery[i].next_retry_delay_ms > RECOVERY_MAX_DELAY_MS) {
+                                s_recovery[i].next_retry_delay_ms = RECOVERY_MAX_DELAY_MS;
                             }
                         }
                         ESP_LOGW(TAG, "%s auto-recovery failed, next retry in %d ms",
@@ -680,76 +781,33 @@ static void sensor_coordinator_task(void *arg)
             esp_err_t op_res = ESP_ERR_NOT_SUPPORTED;
             switch (cmd.type) {
                 case CMD_READ:
-                    /* Dispatch to per-sensor read handler */
-                    switch (cmd.id) {
-                        case SENSOR_ID_MCU:     op_res = read_sensor_mcu(); break;
-                        case SENSOR_ID_SHT45:   op_res = read_sensor_sht45(); break;
-                        case SENSOR_ID_BMP280:  op_res = read_sensor_bmp280(); break;
-                        case SENSOR_ID_SGP41:   op_res = read_sensor_sgp41(); break;
-                        case SENSOR_ID_PMS5003: op_res = read_sensor_pms5003(); break;
-                        case SENSOR_ID_S8:      op_res = read_sensor_s8(); break;
-                        default: op_res = ESP_ERR_INVALID_ARG; break;
+                    /* Dispatch to per-sensor read handler via ops table */
+                    if (cmd.id >= 0 && cmd.id < SENSOR_ID_MAX && s_sensor_ops[cmd.id].read) {
+                        op_res = s_sensor_ops[cmd.id].read();
+                    } else {
+                        op_res = ESP_ERR_INVALID_ARG;
                     }
                     break;
                 case CMD_RESET:
-                    /* Attempt to recover ERROR state sensors */
-                    if (cmd.id == SENSOR_ID_MCU) {
-                        mcu_temp_driver_disable();
-                        if (mcu_temp_driver_enable() == ESP_OK) {
-                            transition_to_state(SENSOR_ID_MCU, SENSOR_STATE_READY);
-                            /* After reset, mark values invalid until next read */
-                            invalidate_sensor_data(SENSOR_ID_MCU);
-                            op_res = ESP_OK;
-                        } else {
-                            op_res = ESP_FAIL;
-                        }
-                    } else if (cmd.id == SENSOR_ID_SHT45) {
-                        op_res = sht45_driver_reset();
-                        if (op_res == ESP_OK) {
-                            transition_to_state(SENSOR_ID_SHT45, SENSOR_STATE_READY);
-                            invalidate_sensor_data(SENSOR_ID_SHT45);
-                        }
-                    } else if (cmd.id == SENSOR_ID_BMP280) {
-                        op_res = bmp280_driver_reset();
-                        if (op_res == ESP_OK) {
-                            transition_to_state(SENSOR_ID_BMP280, SENSOR_STATE_READY);
-                            invalidate_sensor_data(SENSOR_ID_BMP280);
-                        }
-                    } else if (cmd.id == SENSOR_ID_SGP41) {
-                        op_res = sgp41_driver_reset();
-                        if (op_res == ESP_OK) {
-                            transition_to_state(SENSOR_ID_SGP41, SENSOR_STATE_READY);
-                            invalidate_sensor_data(SENSOR_ID_SGP41);
-                        }
-                    } else if (cmd.id == SENSOR_ID_PMS5003) {
-                        op_res = pms5003_driver_reset();
-                        if (op_res == ESP_OK) {
-                            transition_to_state(SENSOR_ID_PMS5003, SENSOR_STATE_READY);
-                            invalidate_sensor_data(SENSOR_ID_PMS5003);
-                        }
-                    } else if (cmd.id == SENSOR_ID_S8) {
-                        op_res = s8_driver_reset();
-                        if (op_res == ESP_OK) {
-                            transition_to_state(SENSOR_ID_S8, SENSOR_STATE_READY);
-                            invalidate_sensor_data(SENSOR_ID_S8);
-                        }
+                    /* Attempt to recover ERROR state sensors via ops table */
+                    op_res = reset_sensor(cmd.id);
+                    if (op_res == ESP_OK) {
+                        transition_to_state(cmd.id, SENSOR_STATE_READY);
+                        invalidate_sensor_data(cmd.id);
                     }
                     break;
                 case CMD_CALIBRATE:
+                    /* Calibration is sensor-specific (only S8 supports it currently) */
                     if (cmd.id == SENSOR_ID_S8) {
                         op_res = s8_driver_calibrate_co2(cmd.value);
                     }
                     break;
                 case CMD_DISABLE:
-                    /* Call driver disable function and transition to DISABLED state */
-                    switch (cmd.id) {
-                        case SENSOR_ID_MCU:     op_res = mcu_temp_driver_disable(); break;
-                        case SENSOR_ID_SHT45:   op_res = sht45_driver_disable(); break;
-                        case SENSOR_ID_BMP280:  op_res = bmp280_driver_disable(); break;
-                        case SENSOR_ID_SGP41:   op_res = sgp41_driver_disable(); break;
-                        case SENSOR_ID_PMS5003: op_res = pms5003_driver_disable(); break;
-                        case SENSOR_ID_S8:      op_res = s8_driver_disable(); break;
-                        default: op_res = ESP_ERR_INVALID_ARG; break;
+                    /* Call driver disable function via ops table */
+                    if (cmd.id >= 0 && cmd.id < SENSOR_ID_MAX && s_sensor_ops[cmd.id].disable) {
+                        op_res = s_sensor_ops[cmd.id].disable();
+                    } else {
+                        op_res = ESP_ERR_INVALID_ARG;
                     }
                     if (op_res == ESP_OK) {
                         transition_to_state(cmd.id, SENSOR_STATE_DISABLED);
@@ -757,15 +815,11 @@ static void sensor_coordinator_task(void *arg)
                     }
                     break;
                 case CMD_ENABLE:
-                    /* Call driver enable function and transition back to appropriate state */
-                    switch (cmd.id) {
-                        case SENSOR_ID_MCU:     op_res = mcu_temp_driver_enable(); break;
-                        case SENSOR_ID_SHT45:   op_res = sht45_driver_enable(); break;
-                        case SENSOR_ID_BMP280:  op_res = bmp280_driver_enable(); break;
-                        case SENSOR_ID_SGP41:   op_res = sgp41_driver_enable(); break;
-                        case SENSOR_ID_PMS5003: op_res = pms5003_driver_enable(); break;
-                        case SENSOR_ID_S8:      op_res = s8_driver_enable(); break;
-                        default: op_res = ESP_ERR_INVALID_ARG; break;
+                    /* Call driver enable function via ops table */
+                    if (cmd.id >= 0 && cmd.id < SENSOR_ID_MAX && s_sensor_ops[cmd.id].enable) {
+                        op_res = s_sensor_ops[cmd.id].enable();
+                    } else {
+                        op_res = ESP_ERR_INVALID_ARG;
                     }
                     if (op_res == ESP_OK) {
                         /* Transition to WARMING if warm-up needed, otherwise READY */
@@ -774,7 +828,6 @@ static void sensor_coordinator_task(void *arg)
                         } else {
                             transition_to_state(cmd.id, SENSOR_STATE_READY);
                         }
-                        /* After (re-)enable, clear any stale values until first read */
                         invalidate_sensor_data(cmd.id);
                     }
                     break;
@@ -796,15 +849,9 @@ static void sensor_coordinator_task(void *arg)
                 s_schedule[i].enabled &&
                 (int32_t)(now - s_schedule[i].next_due) >= 0) {
 
-                /* Dispatch to appropriate read handler */
-                switch (i) {
-                    case SENSOR_ID_MCU:     (void)read_sensor_mcu(); break;
-                    case SENSOR_ID_SHT45:   (void)read_sensor_sht45(); break;
-                    case SENSOR_ID_BMP280:  (void)read_sensor_bmp280(); break;
-                    case SENSOR_ID_SGP41:   (void)read_sensor_sgp41(); break;
-                    case SENSOR_ID_PMS5003: (void)read_sensor_pms5003(); break;
-                    case SENSOR_ID_S8:      (void)read_sensor_s8(); break;
-                    default: break;
+                /* Dispatch to read handler via ops table */
+                if (s_sensor_ops[i].read) {
+                    (void)s_sensor_ops[i].read();
                 }
 
                 /* Increment from previous due time to maintain cadence without drift */
@@ -843,11 +890,11 @@ esp_err_t sensor_coordinator_init(iaq_system_context_t *ctx)
         /* Initialize auto-recovery tracking */
         s_recovery[i].last_retry_us = 0;
         s_recovery[i].retry_count = 0;
-        s_recovery[i].next_retry_delay_ms = 30000; // Initial delay: 30 seconds
+        s_recovery[i].next_retry_delay_ms = RECOVERY_INITIAL_DELAY_MS;
     }
 
     /* Create command queue */
-    s_cmd_queue = xQueueCreate(8, sizeof(sensor_cmd_t));
+    s_cmd_queue = xQueueCreate(CMD_QUEUE_DEPTH, sizeof(sensor_cmd_t));
     if (s_cmd_queue == NULL) {
         ESP_LOGE(TAG, "Failed to create sensor command queue");
         return ESP_FAIL;
@@ -1035,9 +1082,9 @@ esp_err_t sensor_coordinator_start(void)
     /* Register task for stack HWM reporting */
     iaq_profiler_register_task("sensor_coord", s_sensor_task_handle, TASK_STACK_SENSOR_COORDINATOR);
 
-    /* Start fusion timer (1 Hz = 1000000 microseconds) */
+    /* Start fusion timer */
     if (s_fusion_timer) {
-        esp_err_t timer_ret = esp_timer_start_periodic(s_fusion_timer, 1000000);
+        esp_err_t timer_ret = esp_timer_start_periodic(s_fusion_timer, FUSION_TIMER_PERIOD_US);
         if (timer_ret != ESP_OK) {
             ESP_LOGW(TAG, "Failed to start fusion timer: %s", esp_err_to_name(timer_ret));
         } else {
@@ -1045,9 +1092,9 @@ esp_err_t sensor_coordinator_start(void)
         }
     }
 
-    /* Start metrics timer (0.2 Hz = 5000000 microseconds) */
+    /* Start metrics timer */
     if (s_metrics_timer) {
-        esp_err_t timer_ret = esp_timer_start_periodic(s_metrics_timer, 5000000);
+        esp_err_t timer_ret = esp_timer_start_periodic(s_metrics_timer, METRICS_TIMER_PERIOD_US);
         if (timer_ret != ESP_OK) {
             ESP_LOGW(TAG, "Failed to start metrics timer: %s", esp_err_to_name(timer_ret));
         } else {
@@ -1186,15 +1233,7 @@ esp_err_t sensor_coordinator_set_cadence(sensor_id_t id, uint32_t interval_ms)
     s_schedule[id].next_due = xTaskGetTickCount() + s_schedule[id].period_ticks;
     s_cadence_ms[id] = interval_ms;
     s_cadence_from_nvs[id] = true; /* persisted */
-    switch (id) {
-        case SENSOR_ID_MCU:      save_cadence_ms("cad_mcu", interval_ms); break;
-        case SENSOR_ID_SHT45:    save_cadence_ms("cad_sht45", interval_ms); break;
-        case SENSOR_ID_BMP280:   save_cadence_ms("cad_bmp280", interval_ms); break;
-        case SENSOR_ID_SGP41:    save_cadence_ms("cad_sgp41", interval_ms); break;
-        case SENSOR_ID_PMS5003:  save_cadence_ms("cad_pms5003", interval_ms); break;
-        case SENSOR_ID_S8:       save_cadence_ms("cad_s8", interval_ms); break;
-        default: break;
-    }
+    save_cadence_ms(s_sensor_ops[id].nvs_cadence_key, interval_ms);
     /* If SGP41 cadence changed, reinitialize algorithm sampling interval */
     if (id == SENSOR_ID_SGP41 && prev_ms != interval_ms) {
         (void)sgp41_driver_reset();
@@ -1263,13 +1302,16 @@ const char* sensor_coordinator_state_to_string(sensor_state_t state)
 
 const char* sensor_coordinator_id_to_name(sensor_id_t id)
 {
-    switch (id) {
-        case SENSOR_ID_MCU:     return "mcu";
-        case SENSOR_ID_SHT45:   return "sht45";
-        case SENSOR_ID_BMP280:  return "bmp280";
-        case SENSOR_ID_SGP41:   return "sgp41";
-        case SENSOR_ID_PMS5003: return "pms5003";
-        case SENSOR_ID_S8:      return "s8";
-        default:                return "unknown";
+    if (id >= 0 && id < SENSOR_ID_MAX) {
+        return s_sensor_ops[id].id_name;
     }
+    return "unknown";
+}
+
+uint32_t sensor_coordinator_get_warmup_ms(sensor_id_t id)
+{
+    if (id >= 0 && id < SENSOR_ID_MAX) {
+        return s_warmup_ms[id];
+    }
+    return 0;
 }

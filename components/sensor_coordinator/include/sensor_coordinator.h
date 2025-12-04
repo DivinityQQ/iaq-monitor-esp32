@@ -111,4 +111,12 @@ const char* sensor_coordinator_state_to_string(sensor_state_t state);
  */
 const char* sensor_coordinator_id_to_name(sensor_id_t id);
 
+/**
+ * Get warm-up duration for a sensor (from Kconfig).
+ *
+ * @param id Sensor ID
+ * @return Warm-up duration in milliseconds, or 0 if invalid ID
+ */
+uint32_t sensor_coordinator_get_warmup_ms(sensor_id_t id);
+
 #endif /* SENSOR_COORDINATOR_H */

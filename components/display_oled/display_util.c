@@ -125,16 +125,6 @@ bool any_sensor_warming(void)
 
 uint8_t get_warming_progress(void)
 {
-    /* Warmup durations from Kconfig (milliseconds) - must match sensor_coordinator.c */
-    static const uint32_t warmup_ms[SENSOR_ID_MAX] = {
-        [SENSOR_ID_MCU]     = CONFIG_IAQ_WARMUP_MCU_MS,
-        [SENSOR_ID_SHT45]   = CONFIG_IAQ_WARMUP_SHT45_MS,
-        [SENSOR_ID_BMP280]  = CONFIG_IAQ_WARMUP_BMP280_MS,
-        [SENSOR_ID_SGP41]   = CONFIG_IAQ_WARMUP_SGP41_MS,
-        [SENSOR_ID_PMS5003] = CONFIG_IAQ_WARMUP_PMS5003_MS,
-        [SENSOR_ID_S8]      = CONFIG_IAQ_WARMUP_S8_MS,
-    };
-
     int64_t now = esp_timer_get_time();
     int64_t max_remaining_us = 0;
     int64_t max_total_us = 1;  /* Avoid divide by zero */
@@ -148,8 +138,8 @@ uint8_t get_warming_progress(void)
                 int64_t remaining = info.warmup_deadline_us - now;
                 if (remaining < 0) remaining = 0;
 
-                /* Get total warmup time from config */
-                int64_t total = (int64_t)warmup_ms[id] * 1000LL;
+                /* Get total warmup time from coordinator */
+                int64_t total = (int64_t)sensor_coordinator_get_warmup_ms(id) * 1000LL;
 
                 /* Track sensor with longest remaining time */
                 if (remaining > max_remaining_us) {
