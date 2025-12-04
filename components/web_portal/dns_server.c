@@ -13,6 +13,11 @@
 #define DNS_PORT 53
 #define DNS_MAX_LEN 256
 
+/* DNS record types and classes */
+#define DNS_TYPE_A      1   /* A record (IPv4 address) */
+#define DNS_CLASS_IN    1   /* Internet class */
+#define DNS_TTL_SEC     60  /* TTL for responses */
+
 typedef struct __attribute__((__packed__)) {
     uint16_t id, flags, qd_count, an_count, ns_count, ar_count;
 } dns_header_t;
@@ -38,15 +43,27 @@ struct dns_server_handle {
 
 static const char *TAG = "DNS_SRV";
 
-static char* parse_dns_name(char *raw, char *out, size_t out_len)
+static char* parse_dns_name(char *raw, char *pkt_end, char *out, size_t out_len)
 {
-    char *label = raw, *w = out; size_t used = 0;
-    while (*label) {
-        int len = *label;
+    char *label = raw, *w = out;
+    size_t used = 0;
+    /* Iterate through labels until null terminator or bounds exceeded */
+    while (label < pkt_end && *label) {
+        uint8_t len = (uint8_t)*label;
+        /* Bounds check: label data must fit within packet */
+        if (label + 1 + len > pkt_end) return NULL;
+        /* Output buffer check */
         if (used + len + 1 >= out_len) return NULL;
-        memcpy(w, label + 1, len); w += len; *w++ = '.'; used += len + 1; label += len + 1;
+        memcpy(w, label + 1, len);
+        w += len;
+        *w++ = '.';
+        used += len + 1;
+        label += len + 1;
     }
-    if (used) out[used - 1] = '\0'; else out[0] = '\0';
+    /* Ensure we found a null terminator within bounds */
+    if (label >= pkt_end) return NULL;
+    if (used) out[used - 1] = '\0';
+    else out[0] = '\0';
     return label + 1;
 }
 
@@ -55,7 +72,7 @@ static int build_dns_reply(char *req, int req_len, char *resp, int resp_max, uin
     if (req_len > resp_max) return -1;
     memcpy(resp, req, req_len);
     dns_header_t *hdr = (dns_header_t *)resp;
-    hdr->flags = htons(ntohs(hdr->flags) | 0x8000); // QR=1
+    hdr->flags = htons(ntohs(hdr->flags) | 0x8000); /* QR=1 (response) */
     int qd = ntohs(hdr->qd_count);
     hdr->an_count = hdr->qd_count;
     char *p = resp + sizeof(dns_header_t);
@@ -63,17 +80,18 @@ static int build_dns_reply(char *req, int req_len, char *resp, int resp_max, uin
     char *ans = end;
     for (int i = 0; i < qd; ++i) {
         char name[128];
-        char *after = parse_dns_name(p, name, sizeof(name));
+        char *after = parse_dns_name(p, end, name, sizeof(name));
         if (!after) return -1;
         if (after + sizeof(dns_question_t) > end) return -1;
         dns_question_t *q = (dns_question_t *)after;
         uint16_t qtype = ntohs(q->type), qclass = ntohs(q->class);
         bool match = (strcmp(name_pat, "*") == 0) || (strcasecmp(name, name_pat) == 0);
-        if (match && qtype == 1 && qclass == 1) { // A, IN
+        if (match && qtype == DNS_TYPE_A && qclass == DNS_CLASS_IN) {
             dns_answer_t *a = (dns_answer_t *)ans;
             a->ptr_offset = htons(0xC000 | (uint16_t)(p - resp));
-            a->type = htons(1); a->class = htons(1);
-            a->ttl = htonl(60);
+            a->type = htons(DNS_TYPE_A);
+            a->class = htons(DNS_CLASS_IN);
+            a->ttl = htonl(DNS_TTL_SEC);
             a->addr_len = htons(4);
             a->ip_addr = ip_addr;
             ans += sizeof(dns_answer_t);
@@ -88,10 +106,24 @@ static void dns_task(void *arg)
     dns_server_handle_t h = (dns_server_handle_t)arg;
     char rx[DNS_MAX_LEN], tx[DNS_MAX_LEN], addr_str[64];
     int s = socket(AF_INET, SOCK_DGRAM, IPPROTO_IP);
-    if (s < 0) { ESP_LOGE(TAG, "socket failed"); vTaskDelete(NULL); return; }
+    if (s < 0) {
+        ESP_LOGE(TAG, "socket failed");
+        h->started = false;
+        h->task = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
     h->sock = s;
     struct sockaddr_in bind_addr = { .sin_family = AF_INET, .sin_port = htons(DNS_PORT), .sin_addr.s_addr = htonl(INADDR_ANY) };
-    if (bind(s, (struct sockaddr*)&bind_addr, sizeof(bind_addr)) < 0) { ESP_LOGE(TAG, "bind failed"); close(s); vTaskDelete(NULL); return; }
+    if (bind(s, (struct sockaddr*)&bind_addr, sizeof(bind_addr)) < 0) {
+        ESP_LOGE(TAG, "bind failed");
+        close(s);
+        h->sock = -1;
+        h->started = false;
+        h->task = NULL;
+        vTaskDelete(NULL);
+        return;
+    }
     /* Set a recv timeout so we can check h->started periodically */
     struct timeval tv = { .tv_sec = 1, .tv_usec = 0 };
     (void)setsockopt(s, SOL_SOCKET, SO_RCVTIMEO, &tv, sizeof(tv));
@@ -128,7 +160,19 @@ dns_server_handle_t dns_server_start(const dns_server_config_t *cfg)
     strlcpy(h->name_pat, cfg->queried_name, sizeof(h->name_pat));
     strlcpy(h->if_key, cfg->netif_key, sizeof(h->if_key));
     h->sock = -1;
-    xTaskCreatePinnedToCore(dns_task, "dns_server", 4096, h, 4, &h->task, 1);
+    BaseType_t ret = xTaskCreatePinnedToCore(dns_task, "dns_server", 4096, h, 4, &h->task, 1);
+    if (ret != pdPASS) {
+        ESP_LOGE(TAG, "Failed to create DNS task");
+        free(h);
+        return NULL;
+    }
+    /* Brief delay to let task initialize; check for early failure */
+    vTaskDelay(pdMS_TO_TICKS(50));
+    if (!h->started || h->task == NULL) {
+        ESP_LOGE(TAG, "DNS task failed during initialization");
+        free(h);
+        return NULL;
+    }
     return h;
 }
 

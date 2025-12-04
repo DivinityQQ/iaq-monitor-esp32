@@ -268,6 +268,15 @@ menu "IAQ Monitor Configuration"
             range 0 86400
             default 600
 
+        config IAQ_WEB_PORTAL_STATIC_CHUNK_SIZE
+            int "Static file chunk size (bytes)"
+            range 512 8192
+            default 2048
+            help
+                Buffer size for reading and sending static files.
+                Larger values improve throughput. The HTTPD task stack size
+                is automatically adjusted to accommodate this buffer.
+
         config IAQ_WEB_PORTAL_DEBUG_LOGS
             bool "Enable verbose Web Portal logs (WS/TLS)"
             default n

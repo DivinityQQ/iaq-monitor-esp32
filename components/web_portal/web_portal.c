@@ -38,6 +38,22 @@ static const char *TAG = "WEB_PORTAL";
 /* LittleFS mount base */
 #define WEB_MOUNT_POINT "/www"
 
+/* Buffer size constants */
+#define WEB_MAX_JSON_BODY_SIZE      4096    /* Max size for JSON request bodies */
+#define WEB_ACCEPT_ENCODING_BUFSIZE 256     /* Buffer for Accept-Encoding header */
+#define WEB_MAX_TLS_CERT_SIZE       40960   /* Max size for TLS cert/key files */
+#ifndef CONFIG_IAQ_WEB_PORTAL_STATIC_CHUNK_SIZE
+#define CONFIG_IAQ_WEB_PORTAL_STATIC_CHUNK_SIZE 2048  /* Default static file chunk size */
+#endif
+#define WEB_STATIC_CHUNK_SIZE CONFIG_IAQ_WEB_PORTAL_STATIC_CHUNK_SIZE
+
+/* Minimum stack size: base overhead + static chunk buffer + safety margin
+ * Base covers: HTTPD framework, TLS (if HTTPS), handler locals (path buffers, stat structs)
+ * static_handler uses ~800 bytes beyond chunk for path[128+], gz_path[132+], cc[64], stats */
+#define WEB_HTTPD_STACK_BASE    6144
+#define WEB_HTTPD_STACK_MARGIN  1024
+#define WEB_HTTPD_STACK_MIN     (WEB_HTTPD_STACK_BASE + WEB_STATIC_CHUNK_SIZE + WEB_HTTPD_STACK_MARGIN)
+
 /* WebSocket state */
 #ifndef CONFIG_IAQ_WEB_PORTAL_MAX_WS_CLIENTS
 #define CONFIG_IAQ_WEB_PORTAL_MAX_WS_CLIENTS 8
@@ -155,16 +171,24 @@ static void ws_broadcast_json(const char *type, cJSON *payload)
     if (!s_server || !payload) { if (payload) cJSON_Delete(payload); return; }
     uint64_t t0 = iaq_prof_tic();
 
+    /* JSON serialization with CPU lock (CPU-intensive work) */
     pm_guard_lock_cpu();
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", type);
     cJSON_AddItemToObject(root, "data", payload); /* takes ownership */
     char *txt = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
+    pm_guard_unlock_cpu(); /* Release CPU lock after serialization */
+
     if (!txt) {
-        pm_guard_unlock_cpu();
         return;
     }
+
+    /* Copy active client sockets under mutex, then release before sending */
+    int active_socks[MAX_WS_CLIENTS];
+    int stale_socks[MAX_WS_CLIENTS];
+    int active_count = 0;
+    int stale_count = 0;
 
     if (s_ws_mutex) xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_WS_CLIENTS; ++i) {
@@ -172,28 +196,33 @@ static void ws_broadcast_json(const char *type, cJSON *payload)
         int sock = s_ws_clients[i].sock;
         if (httpd_ws_get_fd_info(s_server, sock) != HTTPD_WS_CLIENT_WEBSOCKET) {
             ESP_LOGD(TAG, "WS fd %d not in WEBSOCKET state during broadcast; removing", sock);
-            int old = s_ws_clients[i].sock;
+            stale_socks[stale_count++] = sock;
             s_ws_clients[i].active = false;
             s_ws_clients[i].sock = -1;
             s_ws_clients[i].last_pong_us = 0;
-            /* Proactively close the underlying HTTPD session to free socket */
-            if (s_server && old >= 0) {
-                httpd_sess_trigger_close(s_server, old);
-            }
             continue;
         }
-        httpd_ws_frame_t frame = { 0 };
-        frame.type = HTTPD_WS_TYPE_TEXT;
-        frame.payload = (uint8_t*)txt;
-        frame.len = strlen(txt);
-        esp_err_t er = httpd_ws_send_frame_async(s_server, sock, &frame);
-        if (er != ESP_OK) {
-            ESP_LOGW(TAG, "WS: enqueue broadcast to %d failed: %s", sock, esp_err_to_name(er));
-        }
+        active_socks[active_count++] = sock;
     }
     if (s_ws_mutex) xSemaphoreGive(s_ws_mutex);
 
-    pm_guard_unlock_cpu();
+    /* Close stale sessions outside mutex */
+    for (int i = 0; i < stale_count; ++i) {
+        if (s_server && stale_socks[i] >= 0) {
+            httpd_sess_trigger_close(s_server, stale_socks[i]);
+        }
+    }
+
+    /* Send to all active clients WITHOUT holding mutex */
+    size_t txt_len = strlen(txt);
+    httpd_ws_frame_t frame = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)txt, .len = txt_len };
+    for (int i = 0; i < active_count; ++i) {
+        esp_err_t er = httpd_ws_send_frame_async(s_server, active_socks[i], &frame);
+        if (er != ESP_OK) {
+            ESP_LOGW(TAG, "WS: enqueue broadcast to %d failed: %s", active_socks[i], esp_err_to_name(er));
+        }
+    }
+
     free(txt);
     iaq_prof_toc(IAQ_METRIC_WEB_WS_BROADCAST, t0);
 }
@@ -202,26 +231,26 @@ static void ws_broadcast_json(const char *type, cJSON *payload)
 static void ws_send_json_to_fd(int fd, const char *type, cJSON *payload)
 {
     if (!s_server || !payload) { if (payload) cJSON_Delete(payload); return; }
+
+    /* JSON serialization with CPU lock */
     pm_guard_lock_cpu();
     cJSON *root = cJSON_CreateObject();
     cJSON_AddStringToObject(root, "type", type);
     cJSON_AddItemToObject(root, "data", payload); /* takes ownership */
     char *txt = cJSON_PrintUnformatted(root);
     cJSON_Delete(root);
+    pm_guard_unlock_cpu(); /* Release CPU lock after serialization */
+
     if (!txt) {
-        pm_guard_unlock_cpu();
         return;
     }
 
-    httpd_ws_frame_t frame = (httpd_ws_frame_t){ 0 };
-    frame.type = HTTPD_WS_TYPE_TEXT;
-    frame.payload = (uint8_t*)txt;
-    frame.len = strlen(txt);
+    /* Network I/O outside CPU lock */
+    httpd_ws_frame_t frame = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)txt, .len = strlen(txt) };
     esp_err_t er = httpd_ws_send_frame_async(s_server, fd, &frame);
     if (er != ESP_OK) {
         ESP_LOGW(TAG, "WS: enqueue send to %d failed: %s", fd, esp_err_to_name(er));
     }
-    pm_guard_unlock_cpu();
     free(txt);
 }
 
@@ -238,45 +267,55 @@ static void ws_ping_and_prune(void)
 {
     const int64_t now = esp_timer_get_time();
     if (!s_ws_mutex) return;
+
+    /* Collect sockets to ping and stale sockets to close under mutex */
+    int ping_socks[MAX_WS_CLIENTS];
+    int stale_socks[MAX_WS_CLIENTS];
+    int ping_count = 0;
+    int stale_count = 0;
+
     xSemaphoreTake(s_ws_mutex, portMAX_DELAY);
     for (int i = 0; i < MAX_WS_CLIENTS; ++i) {
         if (!s_ws_clients[i].active) continue;
         int sock = s_ws_clients[i].sock;
         if (httpd_ws_get_fd_info(s_server, sock) != HTTPD_WS_CLIENT_WEBSOCKET) {
             ESP_LOGD(TAG, "WS fd %d not in WEBSOCKET state during ping; removing", sock);
+            stale_socks[stale_count++] = sock;
             s_ws_clients[i].active = false;
             s_ws_clients[i].sock = -1;
             s_ws_clients[i].last_pong_us = 0;
-            /* Also close the HTTPD session to reclaim socket */
-            if (s_server && sock >= 0) {
-                httpd_sess_trigger_close(s_server, sock);
-            }
             continue;
         }
         int64_t last = s_ws_clients[i].last_pong_us;
         if (last > 0 && (now - last) > ((int64_t)CONFIG_IAQ_WEB_PORTAL_WS_PONG_TIMEOUT_SEC * 1000000LL)) {
             ESP_LOGW(TAG, "WS: client %d stale (> %ds), removing", sock, CONFIG_IAQ_WEB_PORTAL_WS_PONG_TIMEOUT_SEC);
+            stale_socks[stale_count++] = sock;
             s_ws_clients[i].active = false;
             s_ws_clients[i].sock = -1;
             s_ws_clients[i].last_pong_us = 0;
-            /* Close the underlying session so resources are freed promptly */
-            if (s_server && sock >= 0) {
-                httpd_sess_trigger_close(s_server, sock);
-            }
             continue;
         }
-        httpd_ws_frame_t ping = { 0 };
-        ping.type = HTTPD_WS_TYPE_PING;
-        ping.payload = (uint8_t*)"ping";
-        ping.len = 4;
-        esp_err_t pr = httpd_ws_send_frame_async(s_server, sock, &ping);
-        if (pr != ESP_OK) {
-            ESP_LOGW(TAG, "WS: failed to enqueue PING to %d: %s", sock, esp_err_to_name(pr));
-        } else {
-            ESP_LOGD(TAG, "WS: sent PING to %d", sock);
-        }
+        ping_socks[ping_count++] = sock;
     }
     xSemaphoreGive(s_ws_mutex);
+
+    /* Close stale sessions outside mutex */
+    for (int i = 0; i < stale_count; ++i) {
+        if (s_server && stale_socks[i] >= 0) {
+            httpd_sess_trigger_close(s_server, stale_socks[i]);
+        }
+    }
+
+    /* Send pings outside mutex */
+    httpd_ws_frame_t ping = { .type = HTTPD_WS_TYPE_PING, .payload = (uint8_t*)"ping", .len = 4 };
+    for (int i = 0; i < ping_count; ++i) {
+        esp_err_t pr = httpd_ws_send_frame_async(s_server, ping_socks[i], &ping);
+        if (pr != ESP_OK) {
+            ESP_LOGW(TAG, "WS: failed to enqueue PING to %d: %s", ping_socks[i], esp_err_to_name(pr));
+        } else {
+            ESP_LOGD(TAG, "WS: sent PING to %d", ping_socks[i]);
+        }
+    }
 }
 
 static void ws_health_timer_cb(void *arg)
@@ -361,7 +400,7 @@ static esp_err_t api_options_handler(httpd_req_t *req)
 static bool read_req_json(httpd_req_t *req, cJSON **out)
 {
     int total = req->content_len;
-    if (total <= 0 || total > 4096) return false;
+    if (total <= 0 || total > WEB_MAX_JSON_BODY_SIZE) return false;
     char *buf = (char *)malloc(total + 1);
     if (!buf) return false;
     int recvd = 0;
@@ -447,8 +486,8 @@ static esp_err_t static_handler(httpd_req_t *req)
     /* Determine if client accepts gzip */
     bool client_accepts_gzip = false;
     size_t ae_len = httpd_req_get_hdr_value_len(req, "Accept-Encoding");
-    if (ae_len > 0 && ae_len < 256) {
-        char ae[256];
+    if (ae_len > 0 && ae_len < WEB_ACCEPT_ENCODING_BUFSIZE) {
+        char ae[WEB_ACCEPT_ENCODING_BUFSIZE];
         if (httpd_req_get_hdr_value_str(req, "Accept-Encoding", ae, sizeof(ae)) == ESP_OK) {
             if (strstr(ae, "gzip") != NULL) client_accepts_gzip = true;
         }
@@ -548,7 +587,7 @@ static esp_err_t static_handler(httpd_req_t *req)
     }
     httpd_resp_set_hdr(req, "Cache-Control", cc);
 
-    char buf[1024];
+    char buf[WEB_STATIC_CHUNK_SIZE];
     size_t n;
     while ((n = fread(buf, 1, sizeof(buf), f)) > 0) {
         if (httpd_resp_send_chunk(req, buf, n) != ESP_OK) break;
@@ -1217,7 +1256,7 @@ esp_err_t web_portal_start(void)
         scfg.httpd.max_open_sockets = MAX_WS_CLIENTS + 4; /* WS clients + few HTTP fetches */
         scfg.httpd.stack_size = TASK_STACK_WEB_SERVER;
         scfg.httpd.core_id = TASK_CORE_WEB_SERVER;
-        if (scfg.httpd.stack_size < 6144) scfg.httpd.stack_size = 6144;
+        if (scfg.httpd.stack_size < WEB_HTTPD_STACK_MIN) scfg.httpd.stack_size = WEB_HTTPD_STACK_MIN;
         /* Try to load cert/key from LittleFS, fallback to built-in dev cert */
         extern const unsigned char servercert_pem_start[] asm("_binary_servercert_pem_start");
         extern const unsigned char prvtkey_pem_start[] asm("_binary_prvtkey_pem_start");
@@ -1231,7 +1270,7 @@ esp_err_t web_portal_start(void)
             FILE *cf = fopen(WEB_MOUNT_POINT "/cert.pem", "rb");
             if (cf) {
                 fseek(cf, 0, SEEK_END); long l = ftell(cf); fseek(cf, 0, SEEK_SET);
-                if (l > 0 && l < 40960) {
+                if (l > 0 && l < WEB_MAX_TLS_CERT_SIZE) {
                     file_cert = malloc((size_t)l + 1);
                     if (file_cert) { fread(file_cert, 1, (size_t)l, cf); file_cert[(size_t)l] = '\0'; file_cert_len = (size_t)l + 1; }
                 }
@@ -1240,7 +1279,7 @@ esp_err_t web_portal_start(void)
             FILE *kf = fopen(WEB_MOUNT_POINT "/key.pem", "rb");
             if (kf) {
                 fseek(kf, 0, SEEK_END); long l = ftell(kf); fseek(kf, 0, SEEK_SET);
-                if (l > 0 && l < 40960) {
+                if (l > 0 && l < WEB_MAX_TLS_CERT_SIZE) {
                     file_key = malloc((size_t)l + 1);
                     if (file_key) { fread(file_key, 1, (size_t)l, kf); file_key[(size_t)l] = '\0'; file_key_len = (size_t)l + 1; }
                 }
@@ -1299,7 +1338,7 @@ esp_err_t web_portal_start(void)
         cfg.max_open_sockets = MAX_WS_CLIENTS + 4; /* WS clients + few HTTP fetches */
         cfg.stack_size = TASK_STACK_WEB_SERVER;
         cfg.core_id = TASK_CORE_WEB_SERVER;
-        if (cfg.stack_size < 6144) cfg.stack_size = 6144;
+        if (cfg.stack_size < WEB_HTTPD_STACK_MIN) cfg.stack_size = WEB_HTTPD_STACK_MIN;
         ESP_LOGD(TAG, "HTTP httpd cfg: port=%d, recv_to=%d, send_to=%d, backlog=%d, max_socks=%d, max_uris=%d",
                  cfg.server_port, cfg.recv_wait_timeout, cfg.send_wait_timeout,
                  cfg.backlog_conn, cfg.max_open_sockets, cfg.max_uri_handlers);
