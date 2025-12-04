@@ -75,7 +75,7 @@ void iaq_profiler_record(int metric_id, uint32_t duration_us);
 static inline iaq_prof_ctx_t iaq_prof_start(int id)
 {
 #if CONFIG_IAQ_PROFILING
-    iaq_prof_ctx_t ctx = { .start_us = esp_timer_get_time(), .id = id };
+    iaq_prof_ctx_t ctx = { .start_us = (uint64_t)esp_timer_get_time(), .id = id };
     return ctx;
 #else
     (void)id; iaq_prof_ctx_t ctx = { 0, 0 }; return ctx;
@@ -85,7 +85,7 @@ static inline iaq_prof_ctx_t iaq_prof_start(int id)
 static inline void iaq_prof_end(iaq_prof_ctx_t ctx)
 {
 #if CONFIG_IAQ_PROFILING
-    uint64_t now = esp_timer_get_time();
+    uint64_t now = (uint64_t)esp_timer_get_time();
     if (ctx.id >= 0) {
         iaq_profiler_record(ctx.id, (uint32_t)(now - ctx.start_us));
     }
@@ -98,7 +98,7 @@ static inline void iaq_prof_end(iaq_prof_ctx_t ctx)
 static inline uint64_t iaq_prof_tic(void)
 {
 #if CONFIG_IAQ_PROFILING
-    return esp_timer_get_time();
+    return (uint64_t)esp_timer_get_time();
 #else
     return 0;
 #endif
@@ -107,7 +107,7 @@ static inline uint64_t iaq_prof_tic(void)
 static inline void iaq_prof_toc(int id, uint64_t t0)
 {
 #if CONFIG_IAQ_PROFILING
-    uint64_t dt = esp_timer_get_time() - t0;
+    uint64_t dt = (uint64_t)esp_timer_get_time() - t0;
     iaq_profiler_record(id, (uint32_t)dt);
 #else
     (void)id; (void)t0;
