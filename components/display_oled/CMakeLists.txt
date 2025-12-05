@@ -2,6 +2,7 @@ idf_component_register(
     SRCS
         "display_driver.c"
         "display_graphics.c"
+        "display_screens.c"
         "display_ui.c"
         "display_input.c"
         "display_util.c"

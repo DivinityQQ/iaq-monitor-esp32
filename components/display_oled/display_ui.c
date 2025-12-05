@@ -2,6 +2,7 @@
 #include "display_oled/display_ui.h"
 #include "display_oled/display_driver.h"
 #include "display_oled/display_graphics.h"
+#include "display_oled/display_screens.h"
 #include "display_oled/display_input.h"
 #include "display_oled/display_util.h"
 
@@ -10,7 +11,6 @@
 #include "system_context.h"
 #include "time_sync.h"
 #include "sensor_coordinator.h"
-#include "icons.h"
 
 #include "esp_event.h"
 #include "esp_log.h"
@@ -23,23 +23,11 @@
 #include <math.h>
 #include <string.h>
 
-/* Fonts (u8x8) */
-#include "fonts/u8x8_font_chroma48medium8_r.h"
-#include "fonts/u8x8_font_amstrad_cpc_extended_r.h"
-
 #if CONFIG_IAQ_OLED_ENABLE
 static const char *TAG = "OLED_UI";
 #endif
 
 #if CONFIG_IAQ_OLED_ENABLE
-
-typedef void (*screen_render_fn_t)(uint8_t page, uint8_t *buf, bool full_redraw);
-
-typedef struct {
-    screen_render_fn_t render;
-    const char *name;
-    uint16_t refresh_ms; /* 0 = global */
-} screen_t;
 
 /* Screen cache for dirty tracking */
 typedef struct {
@@ -82,12 +70,12 @@ static volatile bool s_enabled = true;
 /* Track night mode and whether we powered off due to night */
 static bool s_prev_night = false;
 static bool s_night_forced_off = false;
-static volatile int s_screen_idx = 0;
+static int s_screen_idx = 0;
+static portMUX_TYPE s_screen_mux = portMUX_INITIALIZER_UNLOCKED;
 static volatile int64_t s_last_activity_us = 0;
-static display_font_t s_font_large = { .u8x8_font = u8x8_font_chroma48medium8_r };
-static display_font_t s_font_label = { .u8x8_font = u8x8_font_amstrad_cpc_extended_r };
 static bool s_invert = false;
-static screen_cache_t s_cache[6];
+#define MAX_SCREENS 8
+static screen_cache_t s_cache[MAX_SCREENS];
 static volatile bool s_force_redraw = false;
 static display_driver_health_t s_driver_health = {
     .state = DISPLAY_DRV_STATE_UNINIT,
@@ -105,29 +93,18 @@ static display_driver_health_t s_driver_health = {
 static void display_health_record_success(void);
 static void display_health_report_failure(const char *scope, esp_err_t err);
 static void display_health_try_recover(void);
+static void collect_display_snapshot(display_snapshot_t *snap);
 
-/* Forward renders */
-static void render_overview(uint8_t page, uint8_t *buf, bool full);
-static void render_environment(uint8_t page, uint8_t *buf, bool full);
-static void render_air_quality(uint8_t page, uint8_t *buf, bool full);
-static void render_co2_detail(uint8_t page, uint8_t *buf, bool full);
-static void render_particulate(uint8_t page, uint8_t *buf, bool full);
-static void render_system(uint8_t page, uint8_t *buf, bool full);
-
-static const screen_t s_screens[] = {
-    { render_overview,     "Overview",    0 },
-    { render_environment,  "Environment", 0 },
-    { render_air_quality,  "Air Quality", 0 },
-    { render_co2_detail,   "CO2",         0 },
-    { render_particulate,  "PM",          0 },
-    { render_system,       "System",      1000 },
-};
-
-#define NUM_SCREENS (sizeof(s_screens) / sizeof(s_screens[0]))
-
-static inline uint16_t get_refresh_ms(void)
+static inline size_t get_num_screens(void)
 {
-    uint16_t ms = s_screens[s_screen_idx].refresh_ms;
+    return display_screens_get_count();
+}
+
+static inline uint16_t get_refresh_ms(int idx)
+{
+    const screen_def_t *screens = display_screens_get_table();
+    if (!screens) return (uint16_t)CONFIG_IAQ_OLED_REFRESH_MS;
+    uint16_t ms = screens[idx].refresh_ms;
     return ms ? ms : (uint16_t)CONFIG_IAQ_OLED_REFRESH_MS;
 }
 
@@ -269,6 +246,96 @@ static void display_health_try_recover(void)
              esp_err_to_name(err), s_driver_health.retry_delay_ms);
 }
 
+/**
+ * Collect all display-relevant data into a snapshot under a single lock.
+ * This eliminates repeated locking in each render function.
+ */
+static void collect_display_snapshot(display_snapshot_t *snap)
+{
+    memset(snap, 0, sizeof(*snap));
+
+    /* Initialize floats to NAN */
+    snap->co2 = NAN;
+    snap->temp = NAN;
+    snap->rh = NAN;
+    snap->pm25 = NAN;
+    snap->pm10 = NAN;
+    snap->pm1 = NAN;
+    snap->pressure_pa = NAN;
+    snap->dewpt = NAN;
+    snap->co2_rate = NAN;
+    snap->pm1_pm25_ratio = NAN;
+
+    /* Copy data under single lock */
+    IAQ_DATA_WITH_LOCK() {
+        iaq_data_t *d = iaq_data_get();
+
+        /* Sensor readings */
+        if (d->valid.co2_ppm) snap->co2 = d->fused.co2_ppm;
+        if (d->valid.temp_c) snap->temp = d->fused.temp_c;
+        if (d->valid.rh_pct) snap->rh = d->fused.rh_pct;
+        if (d->valid.pm25_ugm3) snap->pm25 = d->fused.pm25_ugm3;
+        if (d->valid.pm10_ugm3) snap->pm10 = d->fused.pm10_ugm3;
+        if (d->valid.pm1_ugm3) snap->pm1 = d->fused.pm1_ugm3;
+        if (d->valid.pressure_pa) snap->pressure_pa = d->fused.pressure_pa;
+
+        /* Metrics */
+        snap->aqi = d->metrics.aqi_value;
+        snap->dewpt = d->metrics.dew_point_c;
+        snap->comfort = d->metrics.comfort_score;
+        snap->mold = d->metrics.mold_risk_score;
+        snap->co2_score = d->metrics.co2_score;
+        snap->co2_rate = d->metrics.co2_rate_ppm_hr;
+        snap->iaq_score = d->metrics.overall_iaq_score;
+        snap->trend = d->metrics.pressure_trend;
+        snap->spike = d->metrics.pm25_spike_detected;
+
+        /* Category strings (static, safe to copy pointers) */
+        snap->aqi_cat = d->metrics.aqi_category;
+        snap->comfort_cat = d->metrics.comfort_category;
+        snap->mold_cat = d->metrics.mold_risk_category;
+        snap->voc_cat = d->metrics.voc_category;
+        snap->nox_cat = d->metrics.nox_category;
+
+        /* Diagnostics */
+        snap->abc_baseline = d->fusion_diag.co2_abc_baseline_ppm;
+        snap->abc_conf = d->fusion_diag.co2_abc_confidence_pct;
+        snap->pm_quality = d->fusion_diag.pm25_quality;
+        snap->pm1_pm25_ratio = d->fusion_diag.pm1_pm25_ratio;
+        snap->s8_valid = d->hw_diag.s8_diag_valid;
+
+        /* System status */
+        snap->wifi = d->system.wifi_connected;
+        snap->mqtt = d->system.mqtt_connected;
+        snap->rssi = d->system.wifi_rssi;
+        snap->uptime = d->system.uptime_seconds;
+        snap->heap = d->system.free_heap;
+        snap->min_heap = d->system.min_free_heap;
+    }
+
+    /* Time sync status (outside data lock) */
+    if (s_ctx && s_ctx->event_group) {
+        EventBits_t bits = xEventGroupGetBits(s_ctx->event_group);
+        snap->time_synced = (bits & TIME_SYNCED_BIT) != 0;
+    }
+
+    /* Get current time if synced */
+    if (snap->time_synced) {
+        time_t now;
+        time(&now);
+        struct tm t;
+        localtime_r(&now, &t);
+        snap->hour = t.tm_hour;
+        snap->min = t.tm_min;
+        snap->sec = t.tm_sec;
+    }
+
+    /* Sensor warmup status (uses cached utility functions) */
+    snap->warming = any_sensor_warming();
+    snap->warmup_progress = get_warming_progress();
+    snap->sensor_status = get_sensor_status_text();
+}
+
 void display_ui_wake_for_seconds(uint32_t seconds)
 {
     display_ui_set_enabled(true);
@@ -322,25 +389,32 @@ bool display_ui_is_enabled(void) { return s_enabled; }
 
 void display_ui_next_screen(void)
 {
-    s_screen_idx = (s_screen_idx + 1) % (int)NUM_SCREENS;
+    portENTER_CRITICAL(&s_screen_mux);
+    s_screen_idx = (s_screen_idx + 1) % (int)get_num_screens();
+    portEXIT_CRITICAL(&s_screen_mux);
     mark_activity();
     s_force_redraw = true;
 }
 
 void display_ui_prev_screen(void)
 {
-    s_screen_idx = (s_screen_idx - 1);
-    if (s_screen_idx < 0) s_screen_idx = (int)NUM_SCREENS - 1;
+    portENTER_CRITICAL(&s_screen_mux);
+    int idx = s_screen_idx - 1;
+    if (idx < 0) idx = (int)get_num_screens() - 1;
+    s_screen_idx = idx;
+    portEXIT_CRITICAL(&s_screen_mux);
     mark_activity();
     s_force_redraw = true;
 }
 
 esp_err_t display_ui_set_screen(int idx)
 {
-    if (idx < 0 || idx >= (int)NUM_SCREENS) {
+    if (idx < 0 || idx >= (int)get_num_screens()) {
         return ESP_ERR_INVALID_ARG;
     }
+    portENTER_CRITICAL(&s_screen_mux);
     s_screen_idx = idx;
+    portEXIT_CRITICAL(&s_screen_mux);
     mark_activity();
     s_force_redraw = true;
     return ESP_OK;
@@ -348,7 +422,10 @@ esp_err_t display_ui_set_screen(int idx)
 
 int display_ui_get_screen(void)
 {
-    return s_screen_idx;
+    portENTER_CRITICAL(&s_screen_mux);
+    int idx = s_screen_idx;
+    portEXIT_CRITICAL(&s_screen_mux);
+    return idx;
 }
 
 bool display_ui_is_wake_active(void)
@@ -480,7 +557,10 @@ static void display_task(void *arg)
             wait_ticks = ticks_until_next_night_boundary();
         } else {
             /* Active rendering: wait up to next refresh, but notifications wake immediately. */
-            wait_ticks = pdMS_TO_TICKS(get_refresh_ms());
+            portENTER_CRITICAL(&s_screen_mux);
+            int cur_idx = s_screen_idx;
+            portEXIT_CRITICAL(&s_screen_mux);
+            wait_ticks = pdMS_TO_TICKS(get_refresh_ms(cur_idx));
         }
 
         /* Wait for button/timer notifications or timeout for periodic work */
@@ -564,7 +644,9 @@ static void display_task(void *arg)
         }
 
         /* Check if screen needs redraw */
+        portENTER_CRITICAL(&s_screen_mux);
         int idx = s_screen_idx;
+        portEXIT_CRITICAL(&s_screen_mux);
         bool screen_changed = (idx != last_drawn_screen);
         bool needs_redraw = check_screen_dirty(idx) || screen_changed;
 
@@ -577,11 +659,21 @@ static void display_task(void *arg)
         bool frame_failed = false;
         s_force_redraw = false;
 
+        /* Collect data snapshot once before rendering all pages */
+        display_snapshot_t snap;
+        collect_display_snapshot(&snap);
+
+        /* Get screen table */
+        const screen_def_t *screens = display_screens_get_table();
+        if (!screens) {
+            continue;
+        }
+
         /* Render all pages with hash skip */
         iaq_prof_ctx_t prof = iaq_prof_start(IAQ_METRIC_DISPLAY_FRAME);
         for (uint8_t page = 0; page < 8; ++page) {
             display_gfx_clear(page_buf);
-            s_screens[idx].render(page, page_buf, true);
+            screens[idx].render(page, page_buf, &snap);
 
             /* Check page hash - skip I2C write if unchanged */
             uint16_t hash = display_gfx_page_hash(page_buf);
@@ -612,504 +704,6 @@ static void display_task(void *arg)
     }
 }
 
-/* ===== Screen Implementations ===== */
-
-static void render_overview(uint8_t page, uint8_t *buf, bool full)
-{
-    (void)full;
-
-    char str[32];
-    float co2 = NAN, pm25 = NAN, temp = NAN, rh = NAN, pressure_pa = NAN;
-    uint16_t aqi = 0;
-    bool wifi = false, mqtt = false, time_synced = false;
-    int hour = 0, min = 0, sec = 0;
-
-    /* Copy data under lock */
-    IAQ_DATA_WITH_LOCK() {
-        iaq_data_t *d = iaq_data_get();
-        if (d->valid.co2_ppm) co2 = d->fused.co2_ppm;
-        if (d->valid.pm25_ugm3) pm25 = d->fused.pm25_ugm3;
-        if (d->valid.temp_c) temp = d->fused.temp_c;
-        if (d->valid.rh_pct) rh = d->fused.rh_pct;
-        if (d->valid.pressure_pa) pressure_pa = d->fused.pressure_pa;
-        aqi = d->metrics.aqi_value;
-        wifi = d->system.wifi_connected;
-        mqtt = d->system.mqtt_connected;
-    }
-
-    if (s_ctx && s_ctx->event_group) {
-        EventBits_t bits = xEventGroupGetBits(s_ctx->event_group);
-        time_synced = (bits & TIME_SYNCED_BIT) != 0;
-    }
-
-    if (time_synced) {
-        time_t now; time(&now);
-        struct tm t; localtime_r(&now, &t);
-        hour = t.tm_hour;
-        min = t.tm_min;
-        sec = t.tm_sec;
-    }
-
-    /* Page 0: Time (8×8, left) + WiFi/MQTT icons (right) */
-    if (page == 0) {
-        if (time_synced) {
-            snprintf(str, sizeof(str), "%02d:%02d:%02d", hour, min, sec);
-        } else {
-            snprintf(str, sizeof(str), "--:--:--");
-        }
-        display_gfx_draw_text_8x8_page(page, buf, 0, 0, str, &s_font_label);
-
-        /* Status icons on right */
-        display_draw_icon_at(page, buf, 96, 0, wifi ? ICON_WIFI : ICON_WIFI_OFF, false);
-        display_draw_icon_at(page, buf, 112, 0, mqtt ? ICON_MQTT : ICON_MQTT_OFF, false);
-    }
-
-    /* Page 1: CO2 (8×8): "CO2: 1234 ppm" */
-    if (page == 1) {
-        char co2_str[12];
-        fmt_float(co2_str, sizeof(co2_str), co2, 0, "---");
-        snprintf(str, sizeof(str), "CO2:%s ppm", co2_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 8, str, &s_font_label);
-    }
-
-    /* Page 2: AQI (show "--" if UINT16_MAX or 0) */
-    if (page == 2) {
-        if (aqi == UINT16_MAX) {
-            snprintf(str, sizeof(str), "AQI: --");
-        } else {
-            snprintf(str, sizeof(str), "AQI:%u %s", aqi, get_aqi_short(aqi));
-        }
-        display_gfx_draw_text_8x8_page(page, buf, 0, 16, str, &s_font_label);
-    }
-
-    /* Page 3: PM2.5 with 1 decimal */
-    if (page == 3) {
-        char pm_str[12];
-        fmt_float(pm_str, sizeof(pm_str), pm25, 1, "---");
-        snprintf(str, sizeof(str), "PM2.5:%s ug/m3", pm_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 24, str, &s_font_label);
-    }
-
-    /* Page 4: Temperature with C */
-    if (page == 4) {
-        char temp_str[12];
-        fmt_float(temp_str, sizeof(temp_str), temp, 1, "--");
-        snprintf(str, sizeof(str), "Temp:%s C", temp_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 32, str, &s_font_label);
-    }
-
-    /* Page 5: Humidity with % */
-    if (page == 5) {
-        char rh_str[12];
-        fmt_float(rh_str, sizeof(rh_str), rh, 1, "--");
-        snprintf(str, sizeof(str), "RH:%s %%", rh_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 40, str, &s_font_label);
-    }
-
-    /* Page 6: Pressure with hPa and 1 decimal */
-    if (page == 6) {
-        char press_str[12];
-        float pressure_hpa = pressure_pa / 100.0f;  /* Convert Pa to hPa */
-        fmt_float(press_str, sizeof(press_str), pressure_hpa, 1, "----");
-        snprintf(str, sizeof(str), "P:%s hPa", press_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 48, str, &s_font_label);
-    }
-
-    /* Page 7: Sensor status with progress bar during warming */
-    if (page == 7) {
-        const char *status = get_sensor_status_text();
-        uint8_t progress = get_warming_progress();
-
-        /* Draw progress bar with status text overlay */
-        display_gfx_draw_progress_bar(buf, 0, 128, progress, status, &s_font_label);
-    }
-}
-
-static void render_environment(uint8_t page, uint8_t *buf, bool full)
-{
-    (void)full;
-
-    char str[32];
-    float temp = NAN, rh = NAN, pressure = NAN, dewpt = NAN;
-    int comfort = 0, mold = 0;
-    const char *comfort_cat = "", *mold_cat = "";
-    pressure_trend_t trend = PRESSURE_TREND_UNKNOWN;
-
-    IAQ_DATA_WITH_LOCK() {
-        iaq_data_t *d = iaq_data_get();
-        if (d->valid.temp_c) temp = d->fused.temp_c;
-        if (d->valid.rh_pct) rh = d->fused.rh_pct;
-        if (d->valid.pressure_pa) pressure = d->fused.pressure_pa / 100.0f; // Pa → hPa
-        dewpt = d->metrics.dew_point_c;
-        comfort = d->metrics.comfort_score;
-        comfort_cat = d->metrics.comfort_category;
-        mold = d->metrics.mold_risk_score;
-        mold_cat = d->metrics.mold_risk_category;
-        trend = d->metrics.pressure_trend;
-    }
-
-    /* Page 0: Header */
-    if (page == 0) {
-        display_gfx_draw_text_8x8_page(page, buf, 0, 0, "Environment", &s_font_label);
-    }
-
-    /* Page 1-2: Temperature (8×16) */
-    if (page >= 1 && page <= 2) {
-        char tmp[16];
-        fmt_float(tmp, sizeof(tmp), temp, 1, "---");
-        snprintf(str, sizeof(str), "%s C", tmp);
-        display_gfx_draw_text_8x16_page(page, buf, 0, 8, str, &s_font_large);
-    }
-
-    /* Page 3: RH + Dewpoint */
-    if (page == 3) {
-        char rh_str[12], dew_str[12];
-        fmt_float(rh_str, sizeof(rh_str), rh, 1, "--");
-        fmt_float(dew_str, sizeof(dew_str), dewpt, 1, "--");
-        snprintf(str, sizeof(str), "RH:%s%% Dew:%s", rh_str, dew_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 24, str, &s_font_label);
-    }
-
-    /* Page 4: Pressure + trend icon */
-    if (page == 4) {
-        char p_str[12];
-        fmt_float(p_str, sizeof(p_str), pressure, 0, "----");
-        snprintf(str, sizeof(str), "P:%s hPa", p_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 32, str, &s_font_label);
-        display_draw_icon_at(page, buf, 100, 32, get_pressure_trend_icon(trend), false);
-    }
-
-    /* Page 5: Comfort */
-    if (page == 5) {
-        snprintf(str, sizeof(str), "Comfort:%d %s", comfort, comfort_cat);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 40, str, &s_font_label);
-    }
-
-    /* Page 6: Mold risk */
-    if (page == 6) {
-        snprintf(str, sizeof(str), "Mold:%d %s", mold, mold_cat);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 48, str, &s_font_label);
-    }
-}
-
-static void render_air_quality(uint8_t page, uint8_t *buf, bool full)
-{
-    (void)full;
-
-    char str[32];
-    uint16_t aqi = 0;
-    float pm25 = NAN, pm10 = NAN;
-    const char *aqi_cat = "", *voc_cat = "", *nox_cat = "";
-    int iaq_score = 0;
-
-    IAQ_DATA_WITH_LOCK() {
-        iaq_data_t *d = iaq_data_get();
-        aqi = d->metrics.aqi_value;
-        aqi_cat = d->metrics.aqi_category;
-        if (d->valid.pm25_ugm3) pm25 = d->fused.pm25_ugm3;
-        if (d->valid.pm10_ugm3) pm10 = d->fused.pm10_ugm3;
-        voc_cat = d->metrics.voc_category;
-        nox_cat = d->metrics.nox_category;
-        iaq_score = d->metrics.overall_iaq_score;
-    }
-
-    /* Page 0: Header */
-    if (page == 0) {
-        display_gfx_draw_text_8x8_page(page, buf, 0, 0, "Air Quality", &s_font_label);
-    }
-
-    /* Page 1-2: AQI (8×16) */
-    if (page >= 1 && page <= 2) {
-        snprintf(str, sizeof(str), "AQI:%u", aqi);
-        display_gfx_draw_text_8x16_page(page, buf, 0, 8, str, &s_font_large);
-    }
-
-    /* Page 3: AQI category + PM values */
-    if (page == 3) {
-        snprintf(str, sizeof(str), "%s", aqi_cat);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 24, str, &s_font_label);
-    }
-
-    /* Page 4: PM2.5 bar (0-50 scale) with label on the same page (left label, right bar) */
-    if (page == 4) {
-        /* Reserve left area for label text (9 chars * 8px ~= 72px). Bar starts after label. */
-        const int label_x = 0;
-        const int bar_x = 72;                 /* start of bar area */
-        const int bar_w_max = 128 - bar_x;    /* available width for bar */
-
-        /* Label */
-        char pm_str[12];
-        fmt_float(pm_str, sizeof(pm_str), pm25, 0, "--");
-        snprintf(str, sizeof(str), "PM2.5:%s", pm_str);
-        display_gfx_draw_text_8x8_page(page, buf, label_x, 32, str, &s_font_label);
-
-        /* Bar mapped to available region */
-        int bar_width = (int)(pm25 * (float)bar_w_max / 50.0f);
-        if (bar_width > bar_w_max) bar_width = bar_w_max;
-        if (bar_width < 0) bar_width = 0;
-        display_gfx_draw_hbar(buf, bar_x, bar_width, 0xFF);  /* full page height */
-    }
-
-    /* Page 5: PM10 bar (0-100 scale) with label on the same page (left label, right bar) */
-    if (page == 5) {
-        const int label_x = 0;
-        const int bar_x = 72;                 /* start of bar area */
-        const int bar_w_max = 128 - bar_x;    /* available width for bar */
-
-        /* Label */
-        char pm_str[12];
-        fmt_float(pm_str, sizeof(pm_str), pm10, 0, "--");
-        snprintf(str, sizeof(str), "PM10:%s", pm_str);
-        display_gfx_draw_text_8x8_page(page, buf, label_x, 40, str, &s_font_label);
-
-        /* Bar mapped to available region */
-        int bar_width = (int)(pm10 * (float)bar_w_max / 100.0f);
-        if (bar_width > bar_w_max) bar_width = bar_w_max;
-        if (bar_width < 0) bar_width = 0;
-        display_gfx_draw_hbar(buf, bar_x, bar_width, 0xFF);  /* full page height */
-    }
-
-    /* Page 6: VOC + NOx */
-    if (page == 6) {
-        snprintf(str, sizeof(str), "VOC:%s NOx:%s", voc_cat, nox_cat);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 48, str, &s_font_label);
-    }
-
-    /* Page 7: IAQ score */
-    if (page == 7) {
-        snprintf(str, sizeof(str), "IAQ:%d/100", iaq_score);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 56, str, &s_font_label);
-    }
-}
-
-static void render_co2_detail(uint8_t page, uint8_t *buf, bool full)
-{
-    (void)full;
-
-    char str[32];
-    float co2 = NAN, rate = NAN;
-    int score = 0;
-    uint16_t abc_baseline = 0;
-    uint8_t abc_conf = 0;
-    bool s8_valid = false;
-
-    IAQ_DATA_WITH_LOCK() {
-        iaq_data_t *d = iaq_data_get();
-        if (d->valid.co2_ppm) co2 = d->fused.co2_ppm;
-        rate = d->metrics.co2_rate_ppm_hr;
-        score = d->metrics.co2_score;
-        abc_baseline = d->fusion_diag.co2_abc_baseline_ppm;
-        abc_conf = d->fusion_diag.co2_abc_confidence_pct;
-        s8_valid = d->hw_diag.s8_diag_valid;
-    }
-
-    /* Page 0: Header */
-    if (page == 0) {
-        display_gfx_draw_text_8x8_page(page, buf, 0, 0, "CO2 Detail", &s_font_label);
-    }
-
-    /* Page 1-3: Large CO2 (8×16, spans 2 pages) */
-    if (page >= 1 && page <= 3) {
-        char tmp[16];
-        fmt_float(tmp, sizeof(tmp), co2, 0, "---");
-        snprintf(str, sizeof(str), "%s ppm", tmp);
-        display_gfx_draw_text_8x16_page(page, buf, 0, 8, str, &s_font_large);
-    }
-
-    /* Page 4: Rate */
-    if (page == 4) {
-        char rate_str[12];
-        fmt_float(rate_str, sizeof(rate_str), rate, 0, "---");
-        snprintf(str, sizeof(str), "Rate:%s ppm/h", rate_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 32, str, &s_font_label);
-    }
-
-    /* Page 5: Score */
-    if (page == 5) {
-        snprintf(str, sizeof(str), "Score:%d/100", score);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 40, str, &s_font_label);
-    }
-
-    /* Page 6: ABC info */
-    if (page == 6) {
-        snprintf(str, sizeof(str), "ABC:%u (%u%%)", abc_baseline, abc_conf);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 48, str, &s_font_label);
-    }
-
-    /* Page 7: S8 status */
-    if (page == 7) {
-        snprintf(str, sizeof(str), "S8:%s", s8_valid ? "OK" : "N/A");
-        display_gfx_draw_text_8x8_page(page, buf, 0, 56, str, &s_font_label);
-    }
-}
-
-static void render_particulate(uint8_t page, uint8_t *buf, bool full)
-{
-    (void)full;
-
-    char str[32];
-    float pm1 = NAN, pm25 = NAN, pm10 = NAN, ratio = NAN;
-    int quality = 0;
-    bool spike = false;
-
-    IAQ_DATA_WITH_LOCK() {
-        iaq_data_t *d = iaq_data_get();
-        if (d->valid.pm1_ugm3) pm1 = d->fused.pm1_ugm3;
-        if (d->valid.pm25_ugm3) pm25 = d->fused.pm25_ugm3;
-        if (d->valid.pm10_ugm3) pm10 = d->fused.pm10_ugm3;
-        quality = d->fusion_diag.pm25_quality;
-        ratio = d->fusion_diag.pm1_pm25_ratio;
-        spike = d->metrics.pm25_spike_detected;
-    }
-
-    /* Page 0: Header */
-    if (page == 0) {
-        display_gfx_draw_text_8x8_page(page, buf, 0, 0, "Particulate", &s_font_label);
-        if (spike) {
-            display_draw_icon_at(page, buf, 112, 0, ICON_ALERT, false);
-        }
-    }
-
-    /* Page 1: PM1.0 */
-    if (page == 1) {
-        char pm_str[12];
-        fmt_float(pm_str, sizeof(pm_str), pm1, 0, "---");
-        snprintf(str, sizeof(str), "PM1.0: %s ug/m3", pm_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 8, str, &s_font_label);
-    }
-
-    /* Page 2: PM2.5 */
-    if (page == 2) {
-        char pm_str[12];
-        fmt_float(pm_str, sizeof(pm_str), pm25, 0, "---");
-        snprintf(str, sizeof(str), "PM2.5: %s ug/m3", pm_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 16, str, &s_font_label);
-    }
-
-    /* Page 3: PM10 */
-    if (page == 3) {
-        char pm_str[12];
-        fmt_float(pm_str, sizeof(pm_str), pm10, 0, "---");
-        snprintf(str, sizeof(str), "PM10:  %s ug/m3", pm_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 24, str, &s_font_label);
-    }
-
-    /* Page 4: Quality */
-    if (page == 4) {
-        snprintf(str, sizeof(str), "Quality: %d%%", quality);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 32, str, &s_font_label);
-    }
-
-    /* Page 5: PM1/PM2.5 ratio */
-    if (page == 5) {
-        char ratio_str[12];
-        fmt_float(ratio_str, sizeof(ratio_str), ratio, 2, "---");
-        snprintf(str, sizeof(str), "PM1/PM2.5: %s", ratio_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 40, str, &s_font_label);
-    }
-}
-
-static void render_system(uint8_t page, uint8_t *buf, bool full)
-{
-    (void)full;
-
-    char str[64];
-    bool wifi = false, mqtt = false, time_synced = false;
-    int32_t rssi = 0;
-    uint32_t uptime = 0, heap = 0, min_heap = 0;
-    int hour = 0, min = 0, sec = 0;
-
-    IAQ_DATA_WITH_LOCK() {
-        iaq_data_t *d = iaq_data_get();
-        wifi = d->system.wifi_connected;
-        mqtt = d->system.mqtt_connected;
-        rssi = d->system.wifi_rssi;
-        uptime = d->system.uptime_seconds;
-        heap = d->system.free_heap / 1024;
-        min_heap = d->system.min_free_heap / 1024;
-    }
-
-    if (s_ctx && s_ctx->event_group) {
-        EventBits_t bits = xEventGroupGetBits(s_ctx->event_group);
-        time_synced = (bits & TIME_SYNCED_BIT) != 0;
-    }
-
-    if (time_synced) {
-        time_t now; time(&now);
-        struct tm t; localtime_r(&now, &t);
-        hour = t.tm_hour;
-        min = t.tm_min;
-        sec = t.tm_sec;
-    }
-
-    /* Page 0: Header */
-    if (page == 0) {
-        display_gfx_draw_text_8x8_page(page, buf, 0, 0, "System", &s_font_label);
-    }
-
-    /* Page 1: WiFi */
-    if (page == 1) {
-        display_draw_icon_at(page, buf, 0, 8, wifi ? ICON_WIFI : ICON_WIFI_OFF, false);
-        if (wifi) {
-            snprintf(str, sizeof(str), "RSSI:%ld dBm", (long)rssi);
-        } else {
-            snprintf(str, sizeof(str), "Down");
-        }
-        display_gfx_draw_text_8x8_page(page, buf, 16, 8, str, &s_font_label);
-    }
-
-    /* Page 2: MQTT */
-    if (page == 2) {
-        display_draw_icon_at(page, buf, 0, 16, mqtt ? ICON_MQTT : ICON_MQTT_OFF, false);
-        snprintf(str, sizeof(str), "%s", mqtt ? "Connected" : "Down");
-        display_gfx_draw_text_8x8_page(page, buf, 16, 16, str, &s_font_label);
-    }
-
-    /* Page 3: Time */
-    if (page == 3) {
-        display_draw_icon_at(page, buf, 0, 24, ICON_CLOCK, false);
-        if (time_synced) {
-            snprintf(str, sizeof(str), "%02d:%02d:%02d", hour, min, sec);
-        } else {
-            snprintf(str, sizeof(str), "No sync");
-        }
-        display_gfx_draw_text_8x8_page(page, buf, 16, 24, str, &s_font_label);
-    }
-
-    /* Page 4: Uptime */
-    if (page == 4) {
-        char uptime_str[24];
-        fmt_uptime(uptime_str, sizeof(uptime_str), uptime);
-        snprintf(str, sizeof(str), "Up: %s", uptime_str);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 32, str, &s_font_label);
-    }
-
-    /* Page 5: Heap */
-    if (page == 5) {
-        snprintf(str, sizeof(str), "Heap: %lu kB", (unsigned long)heap);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 40, str, &s_font_label);
-    }
-
-    /* Page 6: Min heap */
-    if (page == 6) {
-        snprintf(str, sizeof(str), "Min: %lu kB", (unsigned long)min_heap);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 48, str, &s_font_label);
-    }
-
-    /* Page 7: Sensor status */
-    if (page == 7) {
-        int ready = 0, total = SENSOR_ID_MAX;
-        for (sensor_id_t id = 0; id < SENSOR_ID_MAX; id++) {
-            sensor_runtime_info_t info;
-            if (sensor_coordinator_get_runtime_info(id, &info) == ESP_OK) {
-                if (info.state == SENSOR_STATE_READY) ready++;
-            }
-        }
-        snprintf(str, sizeof(str), "Sensors: %d/%d", ready, total);
-        display_gfx_draw_text_8x8_page(page, buf, 0, 56, str, &s_font_label);
-    }
-}
-
 /* ===== Event Handler ===== */
 
 static void iaq_event_handler(void *arg, esp_event_base_t base, int32_t id, void *data)
@@ -1122,14 +716,14 @@ static void iaq_event_handler(void *arg, esp_event_base_t base, int32_t id, void
         case IAQ_EVENT_WIFI_CONNECTED:
         case IAQ_EVENT_WIFI_DISCONNECTED:
             ESP_LOGI(TAG, "WiFi event, marking screens dirty");
-            for (int i = 0; i < (int)NUM_SCREENS; i++) {
+            for (int i = 0; i < (int)get_num_screens(); i++) {
                 s_cache[i].wifi = !s_cache[i].wifi; // Toggle to force dirty
             }
             break;
 
         case IAQ_EVENT_TIME_SYNCED:
             ESP_LOGI(TAG, "Time synced, marking screens dirty");
-            for (int i = 0; i < (int)NUM_SCREENS; i++) {
+            for (int i = 0; i < (int)get_num_screens(); i++) {
                 s_cache[i].time_synced = !s_cache[i].time_synced;
             }
             break;

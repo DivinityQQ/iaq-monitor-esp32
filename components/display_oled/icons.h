@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include "display_oled/display_graphics.h"
 
 #ifdef __cplusplus
 extern "C" {
@@ -25,14 +26,14 @@ static const uint8_t ICON_WIFI_OFF[8] = {
     0x81, 0x42, 0x24, 0x18, 0x18, 0x24, 0x42, 0x81
 };
 
-/* MQTT broker online */
+/* MQTT broker online (diamond/node shape) */
 static const uint8_t ICON_MQTT[8] = {
     0x00, 0x08, 0x14, 0x22, 0x22, 0x14, 0x08, 0x00
 };
 
-/* MQTT broker offline (empty) */
+/* MQTT broker offline (X pattern) */
 static const uint8_t ICON_MQTT_OFF[8] = {
-    0x00, 0x08, 0x14, 0x22, 0x22, 0x14, 0x08, 0x00
+    0x00, 0x41, 0x22, 0x14, 0x14, 0x22, 0x41, 0x00
 };
 
 /* Clock (time synced) */
@@ -86,16 +87,7 @@ static inline void display_draw_icon_at(uint8_t page, uint8_t *page_buf,
                                         const uint8_t *icon, bool invert)
 {
     if ((y_px / 8) != page) return;
-    if (x_px < 0 || x_px > 120) return;
-
-    for (int col = 0; col < 8; ++col) {
-        int x = x_px + col;
-        if ((unsigned)x < 128U) {
-            uint8_t byte = icon[col];
-            if (invert) byte = ~byte;
-            page_buf[x] |= byte;
-        }
-    }
+    display_gfx_draw_icon(page_buf, x_px, icon, invert);
 }
 
 #ifdef __cplusplus

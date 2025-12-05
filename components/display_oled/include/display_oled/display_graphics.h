@@ -4,6 +4,7 @@
 
 #include <stdint.h>
 #include <stdbool.h>
+#include <string.h>
 
 #ifdef __cplusplus
 extern "C" {
@@ -15,13 +16,15 @@ extern "C" {
  * - Text rendering uses u8x8 tile fonts (8x8 per glyph) from u8g2
  */
 
+#define DISPLAY_PAGE_WIDTH  128
+
 typedef struct {
     const uint8_t *u8x8_font;  /* Pointer to u8x8 font array (2019 format) */
 } display_font_t;
 
 /* Clear a page buffer (fill with 0). */
 static inline void display_gfx_clear(uint8_t *page_buf) {
-    for (int i = 0; i < 128; ++i) page_buf[i] = 0;
+    memset(page_buf, 0, DISPLAY_PAGE_WIDTH);
 }
 
 /* Draw a raw 8x8 tile at pixel X (0..127) into the current page buffer. */
