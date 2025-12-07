@@ -1,5 +1,6 @@
 ﻿/* components/console_commands/console_commands.c */
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 #include <math.h>
 #include "freertos/FreeRTOS.h"
@@ -857,35 +858,196 @@ static int cmd_version(int argc, char **argv)
 }
 
 /* ==================== POWER COMMAND (PowerFeather) ==================== */
-static int cmd_power(int argc, char **argv)
+static bool power_parse_on_off(const char *arg, bool *out)
+{
+    if (!arg || !out) return false;
+    if (strcmp(arg, "on") == 0) { *out = true; return true; }
+    if (strcmp(arg, "off") == 0) { *out = false; return true; }
+    return false;
+}
+
+static bool power_snapshot(iaq_power_snapshot_t *out)
+{
+    if (!out) return false;
+    IAQ_DATA_WITH_LOCK() {
+        *out = iaq_data_get()->power;
+    }
+    if (!out->available) {
+        printf("PowerFeather support is not enabled or not initialized.\n");
+        return false;
+    }
+    return true;
+}
+
+static void power_print_status(const iaq_power_snapshot_t *snap)
+{
+    if (!snap) return;
+    printf("\n=== PowerFeather ===\n");
+    printf("Supply: %s, %u mV, %d mA (maintain %u mV)\n",
+           snap->supply_good ? "good" : "not good",
+           (unsigned)snap->supply_mv, (int)snap->supply_ma, (unsigned)snap->maintain_mv);
+    printf("Rails: EN=%s, 3V3=%s, VSQT=%s, STAT=%s\n",
+           snap->en ? "on" : "off",
+           snap->v3v_on ? "on" : "off",
+           snap->vsqt_on ? "on" : "off",
+           snap->stat_on ? "on" : "off");
+    printf("Charger: %s, limit=%u mA\n",
+           snap->charging_on ? "enabled" : "disabled",
+           (unsigned)snap->charge_limit_ma);
+    printf("Battery: %u mV, %d mA, %u%% charge, %u%% health, cycles=%u, time_left=%d min, temp=%.1f C\n",
+           (unsigned)snap->batt_mv, (int)snap->batt_ma, (unsigned)snap->charge_pct,
+           (unsigned)snap->health_pct, (unsigned)snap->cycles, snap->time_left_min, snap->batt_temp_c);
+    printf("Alarms: low_v=%u mV, high_v=%u mV, low_pct=%u%%\n",
+           (unsigned)snap->alarm_low_v_mv, (unsigned)snap->alarm_high_v_mv, (unsigned)snap->alarm_low_pct);
+    printf("\n");
+}
+
+static int cmd_power_status(void)
 {
     iaq_power_snapshot_t snap = {0};
-    IAQ_DATA_WITH_LOCK() {
-        snap = iaq_data_get()->power;
-    }
-    if (!snap.available) {
+    if (!power_snapshot(&snap)) return 1;
+    power_print_status(&snap);
+    return 0;
+}
+
+static int cmd_power_rails(int argc, char **argv)
+{
+    if (!power_board_is_enabled()) {
         printf("PowerFeather support is not enabled or not initialized.\n");
         return 1;
     }
-    printf("\n=== PowerFeather ===\n");
-    printf("Supply: %s, %u mV, %d mA (maintain %u mV)\n",
-           snap.supply_good ? "good" : "not good",
-           (unsigned)snap.supply_mv, (int)snap.supply_ma, (unsigned)snap.maintain_mv);
-    printf("Rails: EN=%s, 3V3=%s, VSQT=%s, STAT=%s\n",
-           snap.en ? "on" : "off",
-           snap.v3v_on ? "on" : "off",
-           snap.vsqt_on ? "on" : "off",
-           snap.stat_on ? "on" : "off");
-    printf("Charger: %s, limit=%u mA\n",
-           snap.charging_on ? "enabled" : "disabled",
-           (unsigned)snap.charge_limit_ma);
-    printf("Battery: %u mV, %d mA, %u%% charge, %u%% health, cycles=%u, time_left=%d min, temp=%.1f C\n",
-           (unsigned)snap.batt_mv, (int)snap.batt_ma, (unsigned)snap.charge_pct,
-           (unsigned)snap.health_pct, (unsigned)snap.cycles, snap.time_left_min, snap.batt_temp_c);
-    printf("Alarms: low_v=%u mV, high_v=%u mV, low_pct=%u%%\n",
-           (unsigned)snap.alarm_low_v_mv, (unsigned)snap.alarm_high_v_mv, (unsigned)snap.alarm_low_pct);
+    if (argc < 3) {
+        printf("Usage: power rails <en|3v3|vsqt|stat> <on|off>\n");
+        return 1;
+    }
+
+    const char *rail = argv[1];
+    bool on = false;
+    if (!power_parse_on_off(argv[2], &on)) {
+        printf("Error: state must be on/off\n");
+        return 1;
+    }
+
+    esp_err_t err = ESP_ERR_INVALID_ARG;
+    if (strcmp(rail, "en") == 0) {
+        err = power_board_set_en(on);
+    } else if (strcmp(rail, "3v3") == 0) {
+        err = power_board_enable_3v3(on);
+    } else if (strcmp(rail, "vsqt") == 0) {
+        err = power_board_enable_vsqt(on);
+    } else if (strcmp(rail, "stat") == 0) {
+        err = power_board_enable_stat(on);
+    } else {
+        printf("Error: rail must be en, 3v3, vsqt, or stat\n");
+        return 1;
+    }
+
+    if (err != ESP_OK) {
+        printf("Failed to set %s: %s\n", rail, esp_err_to_name(err));
+        return 1;
+    }
+    printf("Set %s %s\n", rail, on ? "on" : "off");
+    return cmd_power_status();
+}
+
+static int cmd_power_charger(int argc, char **argv)
+{
+    if (!power_board_is_enabled()) {
+        printf("PowerFeather support is not enabled or not initialized.\n");
+        return 1;
+    }
+    if (argc < 2) {
+        printf("Usage: power charger <on|off> [limit_ma]\n");
+        return 1;
+    }
+
+    bool enable = false;
+    if (!power_parse_on_off(argv[1], &enable)) {
+        printf("Error: state must be on/off\n");
+        return 1;
+    }
+
+    bool has_limit = false;
+    uint16_t limit_ma = 0;
+    if (argc >= 3) {
+        int limit = atoi(argv[2]);
+        if (limit < 0 || limit > 2000) {
+            printf("Error: limit must be 0-2000 mA\n");
+            return 1;
+        }
+        has_limit = true;
+        limit_ma = (uint16_t)limit;
+    }
+
+    esp_err_t err = power_board_enable_charging(enable);
+    if (err == ESP_OK && has_limit) {
+        err = power_board_set_charge_limit(limit_ma);
+    }
+    if (err != ESP_OK) {
+        printf("Failed to update charger: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+
+    printf("Charger %s", enable ? "enabled" : "disabled");
+    if (has_limit) printf(" (limit=%u mA)", (unsigned)limit_ma);
     printf("\n");
-    return 0;
+    return cmd_power_status();
+}
+
+static int cmd_power_limit(int argc, char **argv)
+{
+    if (!power_board_is_enabled()) {
+        printf("PowerFeather support is not enabled or not initialized.\n");
+        return 1;
+    }
+    if (argc < 2) {
+        printf("Usage: power limit <mA>\n");
+        return 1;
+    }
+    int limit = atoi(argv[1]);
+    if (limit < 0 || limit > 2000) {
+        printf("Error: limit must be 0-2000 mA\n");
+        return 1;
+    }
+    esp_err_t err = power_board_set_charge_limit((uint16_t)limit);
+    if (err != ESP_OK) {
+        printf("Failed to set charge limit: %s\n", esp_err_to_name(err));
+        return 1;
+    }
+    printf("Charge limit set to %d mA\n", limit);
+    return cmd_power_status();
+}
+
+static void power_print_usage(void)
+{
+    printf("Usage: power <status|rails|charger|limit>\n");
+    printf("  status                         Show power/charger snapshot\n");
+    printf("  rails <en|3v3|vsqt|stat> <on|off>  Toggle PowerFeather rails\n");
+    printf("  charger <on|off> [limit_ma]    Enable/disable charging (optional limit)\n");
+    printf("  limit <mA>                     Set charge current limit (0-2000)\n");
+}
+
+static int cmd_power(int argc, char **argv)
+{
+    if (argc < 2) {
+        power_print_usage();
+        return 0; /* usage only */
+    }
+    if (strcmp(argv[1], "status") == 0) {
+        return cmd_power_status();
+    }
+
+    const char *sub = argv[1];
+    if (strcmp(sub, "rails") == 0) {
+        return cmd_power_rails(argc - 1, &argv[1]);
+    } else if (strcmp(sub, "charger") == 0) {
+        return cmd_power_charger(argc - 1, &argv[1]);
+    } else if (strcmp(sub, "limit") == 0) {
+        return cmd_power_limit(argc - 1, &argv[1]);
+    }
+
+    printf("Unknown power command: %s\n", sub);
+    return 1;
 }
 
 /* ==================== DISPLAY COMMAND ==================== */
@@ -1104,7 +1266,7 @@ esp_err_t console_commands_init(void)
     /* Register power command (PowerFeather) */
     const esp_console_cmd_t power_cmd = {
         .command = "power",
-        .help = "PowerFeather power status",
+        .help = "PowerFeather power status/control",
         .hint = NULL,
         .func = &cmd_power,
     };
