@@ -8,6 +8,7 @@ import {
   stateAtom,
   metricsAtom,
   healthAtom,
+  powerAtom,
 } from '../store/atoms';
 import { logger } from '../utils/logger';
 
@@ -44,6 +45,7 @@ export function useWebSocketConnection() {
   const setState = useSetAtom(stateAtom);
   const setMetrics = useSetAtom(metricsAtom);
   const setHealth = useSetAtom(healthAtom);
+  const setPower = useSetAtom(powerAtom);
 
   // WebSocket connection with react-use-websocket
   const { sendMessage, lastMessage, readyState } = useWebSocket(
@@ -108,6 +110,9 @@ export function useWebSocketConnection() {
         break;
       case 'health':
         setHealth(message.data);
+        break;
+      case 'power':
+        setPower(message.data);
         break;
       default:
         logger.warn('[WebSocket] Unknown message type:', message);

@@ -184,13 +184,63 @@ export interface MQTTConfig {
 }
 
 // ============================================================================
+// POWER (1Hz WebSocket updates - PowerFeather only)
+// ============================================================================
+
+export interface Power {
+  available: boolean;
+  supply_good: boolean;
+  supply_mv: number;
+  supply_ma: number;
+  maintain_mv: number;
+  en: boolean;
+  v3v_on: boolean;
+  vsqt_on: boolean;
+  stat_on: boolean;
+  charging_on: boolean;
+  charge_limit_ma: number;
+  batt_mv: number;
+  batt_ma: number;
+  charge_pct: number;
+  health_pct: number;
+  cycles: number;
+  time_left_min: number;
+  batt_temp_c: number;
+  alarm_low_v_mv: number;
+  alarm_high_v_mv: number;
+  alarm_low_pct: number;
+  updated_at_us: number;
+  error?: string;
+}
+
+export interface PowerOutputsConfig {
+  en?: boolean;
+  v3v_on?: boolean;
+  vsqt_on?: boolean;
+  stat_on?: boolean;
+}
+
+export interface ChargerConfig {
+  enable?: boolean;
+  limit_ma?: number;
+  maintain_mv?: number;
+}
+
+export interface PowerAlarmsConfig {
+  low_v_mv?: number;
+  high_v_mv?: number;
+  low_pct?: number;
+}
+
+// ============================================================================
 // WEBSOCKET MESSAGES
 // ============================================================================
 
 export type WSMessage =
   | { type: 'state'; data: State }
   | { type: 'metrics'; data: Metrics }
-  | { type: 'health'; data: Health };
+  | { type: 'health'; data: Health }
+  | { type: 'power'; data: Power };
 
 // ============================================================================
 // API RESPONSES

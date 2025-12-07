@@ -3,6 +3,7 @@ import type {
   State,
   Metrics,
   Health,
+  Power,
   WiFiStatus,
   WiFiScanResult,
   WiFiConfig,
@@ -12,6 +13,9 @@ import type {
   CadenceResponse,
   ApiSuccess,
   SensorId,
+  PowerOutputsConfig,
+  ChargerConfig,
+  PowerAlarmsConfig,
 } from './types';
 
 class ApiClient {
@@ -116,6 +120,26 @@ class ApiClient {
 
   async disableSensor(sensorId: SensorId): Promise<ApiSuccess> {
     return this.fetch(`/sensor/${sensorId}/disable`, { method: 'POST' });
+  }
+
+  // ============================================================================
+  // POWER (PowerFeather only)
+  // ============================================================================
+
+  async getPower(): Promise<Power> {
+    return this.fetch('/power');
+  }
+
+  async setPowerOutputs(config: PowerOutputsConfig): Promise<ApiSuccess> {
+    return this.fetch('/power/outputs', { method: 'POST', body: config });
+  }
+
+  async setCharger(config: ChargerConfig): Promise<ApiSuccess> {
+    return this.fetch('/power/charger', { method: 'POST', body: config });
+  }
+
+  async setPowerAlarms(config: PowerAlarmsConfig): Promise<ApiSuccess> {
+    return this.fetch('/power/alarms', { method: 'POST', body: config });
   }
 
   // ============================================================================

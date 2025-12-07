@@ -9,6 +9,7 @@ import DashboardIcon from '@mui/icons-material/Dashboard';
 import ShowChartIcon from '@mui/icons-material/ShowChart';
 import SettingsIcon from '@mui/icons-material/Settings';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
+import BatteryChargingFullIcon from '@mui/icons-material/BatteryChargingFull';
 import { useLocation } from 'wouter';
 
 interface NavDrawerProps {
@@ -23,6 +24,7 @@ const navItems = [
   { label: 'Charts', icon: <ShowChartIcon />, path: '/charts' },
   { label: 'Configuration', icon: <SettingsIcon />, path: '/config' },
   { label: 'Health', icon: <HealthAndSafetyIcon />, path: '/health' },
+  { label: 'Power', icon: <BatteryChargingFullIcon />, path: '/power' },
 ];
 
 export function NavDrawer({ open, onClose }: NavDrawerProps) {

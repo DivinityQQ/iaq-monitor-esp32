@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { selectAtom } from 'jotai/utils';
-import type { State, Metrics, Health, DeviceInfo, SensorId, SensorCadence, MQTTStatus } from '../api/types';
+import type { State, Metrics, Health, Power, DeviceInfo, SensorId, SensorCadence, MQTTStatus } from '../api/types';
 // Color derivations moved to components using theme CSS variables for live updates
 import { getBuffersVersion } from '../utils/streamBuffers';
 import { apiClient } from '../api/client';
@@ -24,6 +24,7 @@ export const wsReconnectingAtom = atom<boolean>(false);
 export const stateAtom = atom<State | null>(null);
 export const metricsAtom = atom<Metrics | null>(null);
 export const healthAtom = atom<Health | null>(null);
+export const powerAtom = atom<Power | null>(null);
 /** Timestamp (seconds) when latest health WS update was applied */
 
 /**

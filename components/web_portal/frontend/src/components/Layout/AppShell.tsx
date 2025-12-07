@@ -20,6 +20,10 @@ const ConfigView = lazy(() =>
   import('../Config/ConfigView').then(module => ({ default: module.ConfigView }))
 );
 
+const PowerDashboard = lazy(() =>
+  import('../Power/PowerDashboard').then(module => ({ default: module.PowerDashboard }))
+);
+
 const ChartsView = () => (
   <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={400}><CircularProgress /></Box>}>
     <ChartContainer />
@@ -35,6 +39,12 @@ const HealthView = () => (
 const ConfigViewRoute = () => (
   <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={400}><CircularProgress /></Box>}>
     <ConfigView />
+  </Suspense>
+);
+
+const PowerView = () => (
+  <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={400}><CircularProgress /></Box>}>
+    <PowerDashboard />
   </Suspense>
 );
 
@@ -54,6 +64,7 @@ export function AppShell() {
           <Route path="/charts" component={ChartsView} />
           <Route path="/config" component={ConfigViewRoute} />
           <Route path="/health" component={HealthView} />
+          <Route path="/power" component={PowerView} />
           <Route>
             <Box p={3}>
               <Typography variant="h4" gutterBottom>404 - Not Found</Typography>
