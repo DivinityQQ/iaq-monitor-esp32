@@ -1,10 +1,10 @@
 # IAQ Monitor (ESP32-S3, ESP-IDF)
 Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, runtime power management, a built‑in web portal, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery. Optional PowerFeather board support adds charger/fuel‑gauge telemetry and power rail control.
-Current version: 0.9.0
+Current version: 0.10.0
 ## Features
 - Connectivity & automation: Wi‑Fi station mode with NVS‑stored credentials, captive‑portal provisioning that lands on the dashboard, MQTT 5.0 with HA auto‑discovery, HTTP/S REST API + WebSocket streaming, and a console for on‑device setup.
 - Sensors & fusion: Six real sensor drivers (MCU temp, SHT45, BMP280, SGP41, PMS5003, Senseair S8) with cross‑sensor compensation, derived metrics (AQI, comfort, CO₂ rate, PM spikes, mold risk, pressure trends), and full simulation mode for hardware‑free testing.
-- Power & platform: Runtime power management (DFS + light sleep) guarded by shared PM locks; optional PowerFeather board integration via the official SDK with rail control, charger/fuel‑gauge telemetry, MQTT `/power` topic, REST/WebSocket `/power`, and a console `power` view.
+- Power & platform: Runtime power management (DFS + light sleep) guarded by shared PM locks; optional PowerFeather board integration via the official SDK with rail control, charger/fuel‑gauge telemetry, MQTT `/power` topic, REST/WebSocket `/power`, console `power` controls, and a portal Power dashboard for battery/rails/alarms.
 - UI: SH1106 OLED with smooth warm‑up indicator, night schedule, and button navigation; on‑device SPA web portal served from LittleFS with consistent dashboard/config/health panels, charts, and notifications.
 - Security: MQTT TLS (custom CA, mutual TLS, AWS IoT ALPN) and HTTPS with built‑in or user‑provided certificates plus gzip static serving and SPA fallback.
 - Reliability & observability: Central data model with explicit "no data" sentinels, per‑sensor cadences/warm‑up countdowns, staggered timers, error recovery, time sync events, watchdog integration, profiling hooks, and non‑blocking MQTT publishing with queue coalescing.
@@ -72,6 +72,7 @@ mqtt restart
   - `curl http://<ip>/api/v1/metrics`
   - `curl http://<ip>/api/v1/health`
   - `curl http://<ip>/api/v1/power`
+- Power controls (PowerFeather): `POST /api/v1/power/outputs`, `/power/charger`, `/power/alarms`, `/power/ship`, `/power/shutdown`, `/power/cycle`.
 
 HTTPS & certificates
 - Default: a built‑in self‑signed development certificate is used.
@@ -238,7 +239,7 @@ sensor cadence set <sensor> <ms>
 - For new settings, consider Kconfig defaults and NVS persistence
 - Follow CONTRIBUTING.md for coding and component guidelines
 ## Development Status
-**Current Status (v0.9.0)**
+**Current Status (v0.10.0)**
 - ✅ Core infrastructure (Wi‑Fi, MQTT 5.0, Home Assistant auto‑discovery)
 - ✅ 6 sensor drivers with real hardware support (MCU, SHT45, BMP280, SGP41, PMS5003, S8)
 - ✅ Full simulation mode for testing without hardware
@@ -249,12 +250,12 @@ sensor cadence set <sensor> <ms>
 - ✅ Timer‑based publishing with event coalescing and staggered starts
 - ✅ Task Watchdog integration for deadlock detection
 - ✅ Runtime power management (DFS + light sleep) with shared PM guards around I/O and compute hotspots
-- ✅ Optional PowerFeather board support (rails, charger/fuel gauge telemetry, MQTT/WebSocket/REST/console `/power`)
+- ✅ Optional PowerFeather board support (rails, charger/fuel gauge telemetry, MQTT/WebSocket/REST/console `/power`, portal Power dashboard/controls)
 - ✅ Console commands for configuration, diagnostics, and sensor control (including S8 ABC)
 - ✅ SNTP time sync with TZ support
 - ✅ OLED display (SH1106) with 6 screens, button navigation, night mode
 - ✅ Enhanced MQTT TLS (custom CA, mutual TLS, AWS IoT support)
-- ✅ Web Portal: HTTPS‑capable SPA with dashboard, charts, and configuration (Wi‑Fi/MQTT/Sensors)
+- ✅ Web Portal: HTTPS‑capable SPA with dashboard, charts, configuration (Wi‑Fi/MQTT/Sensors), and Power view
 - 📋 Future: LED status indicators
 ## Changelog
 

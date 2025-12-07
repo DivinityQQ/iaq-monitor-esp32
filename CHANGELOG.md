@@ -4,6 +4,25 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog, and the project adheres to Semantic Versioning.
 
+## [0.10.0] - 2025-12-07
+
+Power-focused release: dedicated portal power dashboard with live controls, PowerFeather tuning, and UI/sensor polish.
+
+Added:
+- Power view in the web portal with WebSocket-fed battery/supply telemetry, rail states, charger metrics, time-left/health estimates, and alarm thresholds.
+- Power control APIs plus UI for rails (EN/3V3/VSQT/STAT), charger enable/current + maintain voltage, and battery alarm limits; console power command now covers rail toggles and charger current.
+- REST actions for PowerFeather: ship mode, shutdown, and power-cycle.
+
+Changed:
+- PowerFeather integration tuned: faster BQ2562x ADC locking with a 400 kHz bus, poll guard refinements, and pinout/default updates (PowerFeather pins, onboard LED GPIO46, USB console default, optional charging-on-boot).
+- Display stack reorganized (split screen renderer, cached formatting) to cut redraw work; warm-up progress is now a simple countdown starting at 1s.
+- Sensor coordinator refactored for clarity and consistent warm-up tracking; SGP41 conditioning confined to the first 10s window to save cycles.
+- Web portal/DNS tightened: configurable static chunk size with matching HTTPD stack bump, resilient DNS parsing/startup, and state timer now also drives the power WebSocket stream.
+
+Fixed:
+- Corrected a narrowing conversion build error.
+- Hardened DNS handling to reject malformed names without crashing the task.
+
 ## [0.9.0] - 2025-11-23
 
 Major milestone: introduces runtime power management and first-class PowerFeather board support with power telemetry, controls, and portal polish.
