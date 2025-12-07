@@ -642,7 +642,7 @@ namespace PowerFeather
         Mainboard() {}
 
         static constexpr int _i2cPort = 1;
-        static constexpr uint32_t _i2cFreq = 100000;
+        static constexpr uint32_t _i2cFreq = 400000; // Raise PF bus to 400 kHz for faster polls
         static constexpr uint32_t _i2cTimeout = 1000;
 
         static constexpr uint16_t _minBatteryCapacity = LC709204F::MinBatteryCapacity; // higher of charger and fuel gauge limit
@@ -653,7 +653,7 @@ namespace PowerFeather
         static_assert(_minBatteryCapacity >= BQ2562x::MinChargingCurrent);
         static_assert(_minBatteryCapacity >= BQ2562x::MinChargingCurrent);
 
-        static constexpr uint16_t _chargerADCWaitTime = 100; // 80 ms actual
+        static constexpr uint16_t _chargerADCWaitTime = 80; // shorten ADC wait (was 100 ms)
         static constexpr uint16_t _batfetCtrlWaitTime = 30; // 30 ms actual
 
 #ifdef ARDUINO

@@ -124,7 +124,22 @@ esp_err_t power_board_init(void)
             s_charge_limit_ma = 0;
         }
     }
-    /* Charging default: SDK defaults to disabled; keep that unless we explicitly enable later */
+
+    /*
+     * Set charging state explicitly on init to ensure consistent state.
+     * The charger IC preserves register state across soft resets, so we can't
+     * rely on SDK defaults.
+     */
+    {
+        bool enable_charging = CONFIG_IAQ_POWERFEATHER_CHARGING_ON_BOOT;
+        Result rr = Board.enableBatteryCharging(enable_charging);
+        if (rr == Result::Ok) {
+            s_charging_on = enable_charging;
+            ESP_LOGI(TAG, "Charging %s on init", enable_charging ? "enabled" : "disabled");
+        } else {
+            ESP_LOGW(TAG, "Failed to set charging state: %d", static_cast<int>(rr));
+        }
+    }
 
     s_init_ok = true;
     ESP_LOGI(TAG, "PowerFeather initialized (capacity=%u mAh, type=%d)", capacity, static_cast<int>(type));

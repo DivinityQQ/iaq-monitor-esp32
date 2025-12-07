@@ -156,7 +156,7 @@ namespace PowerFeather
             RET_IF_FALSE(getCharger().setupADC(true, BQ2562x::ADCRate::Oneshot, BQ2562x::ADCSampling::Bits_10), Result::Failure);
             vTaskDelay(pdMS_TO_TICKS(_chargerADCWaitTime));
             RET_IF_FALSE(getCharger().getADCDone(done) && done, Result::Failure);
-            _chargerADCTime = now;
+            _chargerADCTime = esp_timer_get_time();
             ESP_LOGD(TAG, "Updated charger ADC.");
         }
         return Result::Ok;
