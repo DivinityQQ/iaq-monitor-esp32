@@ -166,13 +166,15 @@ export function ChargingConfig() {
             value={chargeLimit}
             onChange={(e) => setChargeLimit(e.target.value)}
             placeholder="Enter new value"
-            InputProps={{
-              endAdornment: <InputAdornment position="end">mA</InputAdornment>,
-            }}
-            inputProps={{
-              min: 0,
-              max: 2000,
-              step: 50,
+            slotProps={{
+              input: {
+                endAdornment: <InputAdornment position="end">mA</InputAdornment>,
+              },
+              htmlInput: {
+                min: 0,
+                max: 2000,
+                step: 50,
+              },
             }}
             size="small"
           />
@@ -197,12 +199,14 @@ export function ChargingConfig() {
             value={maintainVoltage}
             onChange={(e) => setMaintainVoltage(e.target.value)}
             placeholder="Enter new value"
-            InputProps={{
-              endAdornment: <InputAdornment position="end">mV</InputAdornment>,
-            }}
-            inputProps={{
-              min: 0,
-              step: 100,
+            slotProps={{
+              input: {
+                endAdornment: <InputAdornment position="end">mV</InputAdornment>,
+              },
+              htmlInput: {
+                min: 0,
+                step: 100,
+              },
             }}
             size="small"
           />

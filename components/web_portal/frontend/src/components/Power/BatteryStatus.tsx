@@ -190,8 +190,8 @@ export function BatteryStatus() {
                 <Chip
                   icon={<DischargingIcon />}
                   label="Discharging"
-                  color="warning"
-                  variant="filled"
+                  color="default"
+                  variant="outlined"
                   size="small"
                 />
               ) : (

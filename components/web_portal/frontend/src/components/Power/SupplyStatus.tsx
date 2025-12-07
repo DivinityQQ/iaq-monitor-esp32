@@ -71,7 +71,7 @@ export function SupplyStatus() {
 
         <Grid container spacing={2}>
           {/* Supply Voltage */}
-          <Grid size={{ xs: 12, sm: 4 }}>
+          <Grid size={4}>
             <Box display="flex" alignItems="center" gap={1}>
               <VoltageIcon fontSize="small" color="action" />
               <Box>
@@ -86,7 +86,7 @@ export function SupplyStatus() {
           </Grid>
 
           {/* Supply Current */}
-          <Grid size={{ xs: 12, sm: 4 }}>
+          <Grid size={4}>
             <Box display="flex" alignItems="center" gap={1}>
               <CurrentIcon fontSize="small" color="action" />
               <Box>
@@ -101,7 +101,7 @@ export function SupplyStatus() {
           </Grid>
 
           {/* Maintain Voltage (MPP) */}
-          <Grid size={{ xs: 12, sm: 4 }}>
+          <Grid size={4}>
             <Box display="flex" alignItems="center" gap={1}>
               <MaintainIcon fontSize="small" color="action" />
               <Box>

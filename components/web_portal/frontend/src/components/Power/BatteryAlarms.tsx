@@ -149,12 +149,14 @@ export function BatteryAlarms() {
             value={lowVoltage}
             onChange={(e) => setLowVoltage(e.target.value)}
             placeholder="Enter new value"
-            InputProps={{
-              endAdornment: <InputAdornment position="end">mV</InputAdornment>,
-            }}
-            inputProps={{
-              min: 0,
-              step: 100,
+            slotProps={{
+              input: {
+                endAdornment: <InputAdornment position="end">mV</InputAdornment>,
+              },
+              htmlInput: {
+                min: 0,
+                step: 100,
+              },
             }}
             size="small"
           />
@@ -176,12 +178,14 @@ export function BatteryAlarms() {
             value={highVoltage}
             onChange={(e) => setHighVoltage(e.target.value)}
             placeholder="Enter new value"
-            InputProps={{
-              endAdornment: <InputAdornment position="end">mV</InputAdornment>,
-            }}
-            inputProps={{
-              min: 0,
-              step: 100,
+            slotProps={{
+              input: {
+                endAdornment: <InputAdornment position="end">mV</InputAdornment>,
+              },
+              htmlInput: {
+                min: 0,
+                step: 100,
+              },
             }}
             size="small"
           />
@@ -203,13 +207,15 @@ export function BatteryAlarms() {
             value={lowPercent}
             onChange={(e) => setLowPercent(e.target.value)}
             placeholder="Enter new value"
-            InputProps={{
-              endAdornment: <InputAdornment position="end">%</InputAdornment>,
-            }}
-            inputProps={{
-              min: 0,
-              max: 100,
-              step: 5,
+            slotProps={{
+              input: {
+                endAdornment: <InputAdornment position="end">%</InputAdornment>,
+              },
+              htmlInput: {
+                min: 0,
+                max: 100,
+                step: 5,
+              },
             }}
             size="small"
           />
