@@ -333,9 +333,10 @@ menu "IAQ Monitor Configuration"
     menu "System & Debug"
         config IAQ_STATUS_LED_GPIO
             int "Status LED GPIO number"
-            default 48
+            default 46
             help
-                GPIO number for status LED (RGB LED data pin for WS2812)
+                GPIO number for status LED.
+                Default: GPIO46 (PowerFeather onboard green LED).
 
         config IAQ_ENABLE_CONSOLE_COMMANDS
             bool "Enable console commands"
@@ -411,21 +412,21 @@ menu "IAQ Monitor Configuration"
         menu "I2C Bus Configuration"
             config IAQ_I2C_SDA_GPIO
                 int "I2C SDA GPIO"
-                default 8
+                default 35
                 range 0 48
                 help
                     GPIO number for I2C SDA (Serial Data Line).
                     Shared by SHT4x (SHT45), BMP280, and SGP41 sensors.
-                    Default: GPIO8 (safe for ESP32-S3 DevKit).
+                    Default: GPIO35 (PowerFeather SDA pin).
 
             config IAQ_I2C_SCL_GPIO
                 int "I2C SCL GPIO"
-                default 9
+                default 36
                 range 0 48
                 help
                     GPIO number for I2C SCL (Serial Clock Line).
                     Shared by SHT4x (SHT45), BMP280, and SGP41 sensors.
-                    Default: GPIO9 (safe for ESP32-S3 DevKit).
+                    Default: GPIO36 (PowerFeather SCL pin).
 
             config IAQ_I2C_FREQ_HZ
                 int "I2C Clock Frequency (Hz)"
@@ -528,12 +529,12 @@ menu "IAQ Monitor Configuration"
 
                 config IAQ_PMS5003_SET_GPIO
                     int "SET Pin GPIO (Sleep/Wake Control)"
-                    default 6
+                    default 37
                     range -1 48
                     help
                         GPIO for PMS5003 SET pin (optional).
                         -1 disables power management.
-                        Default: -1 (disabled).
+                        Default: GPIO37 (PowerFeather D7).
 
                 config IAQ_PMS5003_RX_BUF_SIZE
                     int "RX Buffer Size (bytes)"
@@ -547,12 +548,13 @@ menu "IAQ Monitor Configuration"
 
                 config IAQ_PMS5003_RST_GPIO
                     int "RESET Pin GPIO (active LOW)"
-                    default 7
+                    default 6
                     range -1 48
                     help
                         Optional hardware RESET pin for PMS5003.
                         -1 disables hardware reset control.
                         Active LOW: driver pulses LOW then HIGH during reset.
+                        Default: GPIO6 (PowerFeather D8).
 
                 config IAQ_PMS5003_RST_PULSE_MS
                     int "RESET pulse width (ms)"
@@ -626,19 +628,19 @@ menu "IAQ Monitor Configuration"
 
                 config IAQ_S8_TX_GPIO
                     int "TX GPIO"
-                    default 47
+                    default 15
                     range 0 48
                     help
                         GPIO for UART TX to S8.
-                        Default: GPIO47 (avoids conflict with USB D-/D+ on 19/20).
+                        Default: GPIO15 (PowerFeather D5).
 
                 config IAQ_S8_RX_GPIO
                     int "RX GPIO"
-                    default 48
+                    default 16
                     range 0 48
                     help
                         GPIO for UART RX from S8.
-                        Default: GPIO48 (avoids conflict with USB D-/D+ on 19/20).
+                        Default: GPIO16 (PowerFeather D6).
 
                 config IAQ_S8_RX_BUF_SIZE
                     int "RX Buffer Size (bytes)"
@@ -773,7 +775,7 @@ menu "IAQ Monitor Configuration"
 
                 config IAQ_OLED_BUTTON_GPIO
                     int "Button GPIO (-1 to disable)"
-                    default -1
+                    default 0
                     range -1 48
                 config IAQ_OLED_BUTTON_ACTIVE_LOW
                     bool "Button is active low"
@@ -1208,6 +1210,14 @@ menu "IAQ Monitor Configuration"
             depends on IAQ_POWERFEATHER_ENABLE
             help
                 Maximum battery charge current in mA. Set to 0 to use SDK default (50 mA).
+
+        config IAQ_POWERFEATHER_CHARGING_ON_BOOT
+            bool "Enable battery charging on boot"
+            default y
+            depends on IAQ_POWERFEATHER_ENABLE
+            help
+                Automatically enable battery charging during initialization.
+                If disabled, charging must be enabled explicitly via console or API.
 
         config IAQ_POWERFEATHER_POLL_INTERVAL_MS
             int "Power poll interval (ms)"
