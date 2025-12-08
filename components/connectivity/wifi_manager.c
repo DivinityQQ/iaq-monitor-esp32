@@ -568,6 +568,11 @@ wifi_mode_t wifi_manager_get_mode(void)
     return s_current_mode;
 }
 
+bool wifi_manager_is_ap_active(void)
+{
+    return (s_current_mode == WIFI_MODE_AP || s_current_mode == WIFI_MODE_APSTA);
+}
+
 int32_t wifi_manager_get_rssi(void)
 {
     wifi_ap_record_t ap_info;

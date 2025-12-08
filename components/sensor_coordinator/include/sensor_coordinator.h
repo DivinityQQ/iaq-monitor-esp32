@@ -104,6 +104,11 @@ esp_err_t sensor_coordinator_get_runtime_info(sensor_id_t id, sensor_runtime_inf
 const char* sensor_coordinator_state_to_string(sensor_state_t state);
 
 /**
+ * Returns true if any sensor has reached READY state.
+ */
+bool sensor_coordinator_any_ready(void);
+
+/**
  * Convert sensor ID to name string.
  *
  * @param id Sensor ID

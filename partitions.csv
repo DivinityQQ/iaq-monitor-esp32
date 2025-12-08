@@ -1,15 +1,10 @@
-# Name,     Type, SubType,  Offset,   Size,     Flags
-# NVS partition for WiFi/BT and application data
-nvs,        data, nvs,      0x9000,   0x6000,
-# OTA data partition
-otadata,    data, ota,      0xf000,   0x2000,
-# PHY initialization data
-phy_init,   data, phy,      0x11000,  0x1000,
-# Main application (1.5MB)
-factory,    app,  factory,  0x20000,  0x180000,
-# Storage for configuration and sensor data
-storage,    data, nvs,      0x1A0000, 0x40000,
-# Filesystem for web server files (LittleFS)
-www,        data, littlefs, 0x1E0000, 0x200000,
-# Core dump partition
-coredump,   data, coredump, 0x3E0000, 0x40000,
+# 8MB flash, dual OTA layout (0x10000 aligned offsets)
+# Name,     Type, SubType,  Offset,    Size
+nvs,        data, nvs,      0x9000,    0x6000
+otadata,    data, ota,      0xf000,    0x2000
+phy_init,   data, phy,      0x11000,   0x1000
+ota_0,      app,  ota_0,    0x20000,   0x200000
+ota_1,      app,  ota_1,    0x220000,  0x200000
+storage,    data, nvs,      0x420000,  0x40000
+www,        data, littlefs, 0x460000,  0x200000
+coredump,   data, coredump, 0x660000,  0x40000

@@ -25,6 +25,7 @@
 #include "web_portal.h"
 #include "pm_guard.h"
 #include "power_board.h"
+#include "ota_manager.h"
 
 static const char *TAG = "IAQ_MAIN";
 
@@ -147,6 +148,47 @@ static esp_err_t init_core_system(void)
     return ESP_OK;
 }
 
+static void ota_validation_task(void *arg)
+{
+    (void)arg;
+    const uint64_t timeout_us = (uint64_t)CONFIG_IAQ_OTA_VALIDATION_TIMEOUT_MIN * 60ULL * 1000000ULL;
+    const uint64_t start_us = esp_timer_get_time();
+    while (1) {
+        bool wifi_ok = wifi_manager_is_connected() || wifi_manager_is_ap_active();
+        bool sensors_ok = sensor_coordinator_any_ready();
+        bool web_ok = web_portal_is_running();
+        if (wifi_ok && sensors_ok && web_ok) {
+            esp_err_t r = ota_manager_mark_valid();
+            if (r == ESP_OK) {
+                ESP_LOGI(TAG, "OTA self-test passed, firmware marked valid");
+                break;
+            }
+        }
+        if ((esp_timer_get_time() - start_us) >= timeout_us) {
+            esp_err_t r = ota_manager_mark_valid();
+            ESP_LOGW(TAG, "OTA self-test timeout reached; marking firmware valid (r=%s)", esp_err_to_name(r));
+            break;
+        }
+        vTaskDelay(pdMS_TO_TICKS(1000));
+    }
+    vTaskDelete(NULL);
+}
+
+static void start_ota_validation_if_needed(void)
+{
+    ota_runtime_info_t info = {0};
+    if (ota_manager_get_runtime(&info) != ESP_OK) return;
+    if (!info.pending_verify) return;
+
+    ESP_LOGW(TAG, "Pending firmware verification detected; starting validation task");
+    BaseType_t rc = xTaskCreate(ota_validation_task, "ota_valid",
+                                CONFIG_IAQ_OTA_VALIDATION_TASK_STACK, NULL,
+                                CONFIG_IAQ_OTA_VALIDATION_TASK_PRIO, NULL);
+    if (rc != pdPASS) {
+        ESP_LOGE(TAG, "Failed to start OTA validation task");
+    }
+}
+
 /**
  * Main application entry point.
  * Initializes all components and lets them work independently.
@@ -165,6 +207,9 @@ void app_main(void)
 
     /* Initialize IAQ data structure */
     ESP_ERROR_CHECK(iaq_data_init());
+
+    /* Initialize OTA manager (handles OTA state + pending verify bookkeeping) */
+    ESP_ERROR_CHECK(ota_manager_init());
 
     /* Initialize PowerFeather board integration (fail-soft if disabled or absent) */
     esp_err_t pf_ret = power_board_init();
@@ -245,6 +290,9 @@ void app_main(void)
     /* Start web portal after Wi‑Fi begin to make protocol choice simpler.
      * It will start HTTP by default and switch to HTTPS once STA connects. */
     ESP_ERROR_CHECK(web_portal_start());
+
+    /* If bootloader marked this image for verification, validate once services are healthy */
+    start_ota_validation_if_needed();
 
     /* MQTT will be started automatically by iaq_event_handler when WiFi connects */
     if (mqtt_manager_is_configured()) {

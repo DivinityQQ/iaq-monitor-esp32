@@ -22,6 +22,7 @@ idf_component_register(
         app_config
         iaq_profiler
         web_portal
+        ota_manager
 )
 
 # Create LittleFS image for the web portal if source dir exists

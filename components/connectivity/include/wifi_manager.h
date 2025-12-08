@@ -113,4 +113,9 @@ bool wifi_manager_is_provisioned(void);
  */
 wifi_mode_t wifi_manager_get_mode(void);
 
+/**
+ * Returns true if SoftAP is currently active (AP or APSTA mode).
+ */
+bool wifi_manager_is_ap_active(void);
+
 #endif /* WIFI_MANAGER_H */

@@ -1,5 +1,6 @@
 /* components/web_portal/web_portal.c */
 #include <string.h>
+#include <stdlib.h>
 #include <sys/stat.h>
 #include <sys/param.h>
 #include <strings.h>
@@ -18,6 +19,8 @@
 #include "sdkconfig.h"
 #include "esp_netif.h"
 #include "lwip/inet.h"
+#include "esp_ota_ops.h"
+#include "esp_partition.h"
 
 #include "iaq_config.h"
 #include "iaq_data.h"
@@ -32,6 +35,7 @@
 #include "iaq_profiler.h"
 #include "pm_guard.h"
 #include "power_board.h"
+#include "ota_manager.h"
 
 static const char *TAG = "WEB_PORTAL";
 
@@ -42,6 +46,7 @@ static const char *TAG = "WEB_PORTAL";
 #define WEB_MAX_JSON_BODY_SIZE      4096    /* Max size for JSON request bodies */
 #define WEB_ACCEPT_ENCODING_BUFSIZE 256     /* Buffer for Accept-Encoding header */
 #define WEB_MAX_TLS_CERT_SIZE       40960   /* Max size for TLS cert/key files */
+#define OTA_UPLOAD_CHUNK_SIZE       4096    /* Chunk size for OTA uploads */
 #ifndef CONFIG_IAQ_WEB_PORTAL_STATIC_CHUNK_SIZE
 #define CONFIG_IAQ_WEB_PORTAL_STATIC_CHUNK_SIZE 2048  /* Default static file chunk size */
 #endif
@@ -254,6 +259,91 @@ static void ws_send_json_to_fd(int fd, const char *type, cJSON *payload)
     free(txt);
 }
 
+static const char* ota_type_to_string(ota_type_t type)
+{
+    switch (type) {
+        case OTA_TYPE_FIRMWARE: return "firmware";
+        case OTA_TYPE_FRONTEND: return "frontend";
+        default: return "none";
+    }
+}
+
+static const char* ota_state_to_string(ota_state_t st)
+{
+    switch (st) {
+        case OTA_STATE_RECEIVING: return "receiving";
+        case OTA_STATE_VALIDATING: return "validating";
+        case OTA_STATE_COMPLETE: return "complete";
+        case OTA_STATE_ERROR: return "error";
+        case OTA_STATE_IDLE:
+        default: return "idle";
+    }
+}
+
+static uint8_t ota_progress_pct(size_t received, size_t total)
+{
+    if (total == 0) return 0;
+    uint64_t pct = ((uint64_t)received * 100ULL) / (uint64_t)total;
+    if (pct > 100) pct = 100;
+    return (uint8_t)pct;
+}
+
+static cJSON* build_ota_progress_json(ota_type_t type, ota_state_t state, uint8_t progress,
+                                      size_t received, size_t total, const char *error_msg)
+{
+    cJSON *obj = cJSON_CreateObject();
+    cJSON_AddStringToObject(obj, "update_type", ota_type_to_string(type));
+    cJSON_AddStringToObject(obj, "state", ota_state_to_string(state));
+    cJSON_AddNumberToObject(obj, "progress", progress);
+    cJSON_AddNumberToObject(obj, "received", (double)received);
+    cJSON_AddNumberToObject(obj, "total", (double)total);
+    if (error_msg && error_msg[0]) {
+        cJSON_AddStringToObject(obj, "error", error_msg);
+    }
+    return obj;
+}
+
+static void ota_progress_ws_cb(ota_type_t type, ota_state_t state, uint8_t progress,
+                               size_t received, size_t total, const char *error_msg)
+{
+    static ota_type_t last_type = OTA_TYPE_NONE;
+    static ota_state_t last_state = OTA_STATE_IDLE;
+    static uint8_t last_progress = 255;
+    static char last_err[64] = {0};
+    bool err_changed = false;
+    if (error_msg) {
+        err_changed = (strncmp(last_err, error_msg, sizeof(last_err)) != 0);
+    } else {
+        err_changed = (last_err[0] != '\0');
+    }
+    if (progress == last_progress && state == last_state && type == last_type && !err_changed) {
+        return;
+    }
+    if (error_msg) {
+        strlcpy(last_err, error_msg, sizeof(last_err));
+    } else {
+        last_err[0] = '\0';
+    }
+    last_progress = progress;
+    last_state = state;
+    last_type = type;
+
+    ws_broadcast_json("ota_progress",
+                      build_ota_progress_json(type, state, progress, received, total, error_msg));
+}
+
+static void ws_send_ota_progress_snapshot(int fd)
+{
+    ota_runtime_info_t rt = {0};
+    if (ota_manager_get_runtime(&rt) != ESP_OK) return;
+    if (rt.state == OTA_STATE_IDLE && rt.last_error[0] == '\0') return;
+    uint8_t pct = ota_progress_pct(rt.received, rt.total);
+    ws_send_json_to_fd(fd, "ota_progress",
+                       build_ota_progress_json(rt.active_type, rt.state, pct,
+                                               rt.received, rt.total,
+                                               rt.last_error[0] ? rt.last_error : NULL));
+}
+
 /* Timers to push live data (offload work to HTTP server task) */
 static void ws_work_send_state(void *arg) { (void)arg; iaq_data_t snap = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){ snap = *iaq_data_get(); } ws_broadcast_json("state", iaq_json_build_state(&snap)); }
 static void ws_work_send_metrics(void *arg) { (void)arg; iaq_data_t snap = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){ snap = *iaq_data_get(); } ws_broadcast_json("metrics", iaq_json_build_metrics(&snap)); }
@@ -359,6 +449,7 @@ static void set_status_code(httpd_req_t *req, int status)
         case 403: httpd_resp_set_status(req, "403 Forbidden"); break;
         case 404: httpd_resp_set_status(req, "404 Not Found"); break;
         case 409: httpd_resp_set_status(req, "409 Conflict"); break;
+        case 413: httpd_resp_set_status(req, "413 Payload Too Large"); break;
         case 500: httpd_resp_set_status(req, "500 Internal Server Error"); break;
         default:  httpd_resp_set_status(req, "400 Bad Request"); break;
     }
@@ -612,16 +703,21 @@ static esp_err_t api_info_get(httpd_req_t *req)
     cJSON_AddStringToObject(device, "manufacturer", "Homemade");
     cJSON_AddItemToObject(root, "device", device);
 
-    /* Firmware information */
-    cJSON *firmware = cJSON_CreateObject();
-    char ver_str[16];
-    snprintf(ver_str, sizeof(ver_str), "%d.%d.%d", IAQ_VERSION_MAJOR, IAQ_VERSION_MINOR, IAQ_VERSION_PATCH);
-    cJSON_AddStringToObject(firmware, "version", ver_str);
-    cJSON_AddStringToObject(firmware, "build_date", __DATE__);
-    cJSON_AddStringToObject(firmware, "build_time", __TIME__);
-    cJSON_AddStringToObject(firmware, "idf_version", esp_get_idf_version());
-    cJSON_AddStringToObject(firmware, "license", "Apache-2.0");
-    cJSON_AddItemToObject(root, "firmware", firmware);
+    /* Firmware + frontend information (single source of truth from ota_manager) */
+    ota_version_info_t oti = {0};
+    if (ota_manager_get_version_info(&oti) == ESP_OK) {
+        cJSON *firmware = cJSON_CreateObject();
+        cJSON_AddStringToObject(firmware, "version", oti.firmware.version);
+        cJSON_AddStringToObject(firmware, "build_date", oti.firmware.build_date);
+        cJSON_AddStringToObject(firmware, "build_time", oti.firmware.build_time);
+        cJSON_AddStringToObject(firmware, "idf_version", oti.firmware.idf_version);
+        cJSON_AddStringToObject(firmware, "license", "Apache-2.0");
+        cJSON_AddItemToObject(root, "firmware", firmware);
+
+        cJSON *frontend = cJSON_CreateObject();
+        cJSON_AddStringToObject(frontend, "version", oti.frontend.version);
+        cJSON_AddItemToObject(root, "frontend", frontend);
+    }
 
     /* Hardware information */
     esp_chip_info_t chip_info;
@@ -685,6 +781,229 @@ static esp_err_t api_health_get(httpd_req_t *req)
     iaq_data_t s = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){s=*iaq_data_get();}
     respond_json(req, iaq_json_build_health(&s), 200);
     iaq_prof_toc(IAQ_METRIC_WEB_API_HEALTH, t0);
+    return ESP_OK;
+}
+
+static esp_err_t api_ota_info_get(httpd_req_t *req)
+{
+    ota_version_info_t info = {0};
+    if (ota_manager_get_version_info(&info) != ESP_OK) {
+        respond_error(req, 500, "OTA_INFO", "Failed to read OTA info");
+        return ESP_OK;
+    }
+
+    cJSON *root = cJSON_CreateObject();
+    cJSON *fw = cJSON_CreateObject();
+    cJSON_AddStringToObject(fw, "version", info.firmware.version);
+    cJSON_AddStringToObject(fw, "build_date", info.firmware.build_date);
+    cJSON_AddStringToObject(fw, "build_time", info.firmware.build_time);
+    cJSON_AddStringToObject(fw, "idf_version", info.firmware.idf_version);
+    cJSON_AddItemToObject(root, "firmware", fw);
+
+    cJSON *fe = cJSON_CreateObject();
+    cJSON_AddStringToObject(fe, "version", info.frontend.version);
+    cJSON_AddItemToObject(root, "frontend", fe);
+
+    cJSON *ota = cJSON_CreateObject();
+    cJSON_AddStringToObject(ota, "state", ota_state_to_string(info.ota.state));
+    cJSON_AddStringToObject(ota, "update_type", ota_type_to_string(info.ota.active_type));
+    cJSON_AddNumberToObject(ota, "active_slot", info.ota.active_slot);
+    cJSON_AddBoolToObject(ota, "rollback_available", info.ota.rollback_available);
+    cJSON_AddBoolToObject(ota, "pending_verify", info.ota.pending_verify);
+    cJSON_AddNumberToObject(ota, "received", (double)info.ota.received);
+    cJSON_AddNumberToObject(ota, "total", (double)info.ota.total);
+    if (info.ota.last_error[0]) {
+        cJSON_AddStringToObject(ota, "error", info.ota.last_error);
+    }
+    cJSON_AddItemToObject(root, "ota", ota);
+
+    respond_json(req, root, 200);
+    return ESP_OK;
+}
+
+static esp_err_t api_ota_firmware_post(httpd_req_t *req)
+{
+    if (ota_manager_is_busy()) {
+        respond_error(req, 409, "OTA_BUSY", "Another OTA update is in progress");
+        return ESP_OK;
+    }
+    if (req->content_len <= 0) {
+        respond_error(req, 400, "OTA_NO_BODY", "Missing firmware payload");
+        return ESP_OK;
+    }
+
+    const esp_partition_t *update = esp_ota_get_next_update_partition(NULL);
+    if (!update) {
+        respond_error(req, 500, "OTA_NO_PARTITION", "No OTA partition available");
+        return ESP_OK;
+    }
+    if ((size_t)req->content_len > update->size) {
+        respond_error(req, 413, "OTA_TOO_LARGE", "Firmware image is larger than OTA partition");
+        return ESP_OK;
+    }
+
+    esp_err_t r = ota_firmware_begin((size_t)req->content_len, ota_progress_ws_cb);
+    if (r != ESP_OK) {
+        respond_error(req, 500, "OTA_BEGIN_FAILED", esp_err_to_name(r));
+        return ESP_OK;
+    }
+
+    uint8_t *buf = (uint8_t *)malloc(OTA_UPLOAD_CHUNK_SIZE);
+    if (!buf) {
+        ota_firmware_abort();
+        respond_error(req, 500, "OTA_OOM", "Failed to allocate buffer");
+        return ESP_OK;
+    }
+
+    size_t remaining = (size_t)req->content_len;
+    while (remaining > 0) {
+        size_t chunk = MIN(remaining, (size_t)OTA_UPLOAD_CHUNK_SIZE);
+        int rcvd = httpd_req_recv(req, (char *)buf, (int)chunk);
+        if (rcvd <= 0) {
+            free(buf);
+            ota_firmware_abort();
+            respond_error(req, 500, "OTA_RECV", "Failed to receive firmware data");
+            return ESP_OK;
+        }
+        remaining -= (size_t)rcvd;
+        r = ota_firmware_write(buf, (size_t)rcvd);
+        if (r != ESP_OK) {
+            free(buf);
+            respond_error(req, 500, "OTA_WRITE", "Failed to write firmware");
+            return ESP_OK;
+        }
+    }
+    free(buf);
+
+    r = ota_firmware_end(false);
+    if (r != ESP_OK) {
+        respond_error(req, 500, "OTA_END", "Failed to finalize firmware OTA");
+        return ESP_OK;
+    }
+
+    cJSON *ok = cJSON_CreateObject();
+    cJSON_AddStringToObject(ok, "status", "ok");
+    cJSON_AddStringToObject(ok, "message", "Firmware update complete. Reboot to activate.");
+    cJSON_AddBoolToObject(ok, "reboot_required", true);
+    respond_json(req, ok, 200);
+    return ESP_OK;
+}
+
+static esp_err_t api_ota_frontend_post(httpd_req_t *req)
+{
+    if (ota_manager_is_busy()) {
+        respond_error(req, 409, "OTA_BUSY", "Another OTA update is in progress");
+        return ESP_OK;
+    }
+    if (req->content_len <= 0) {
+        respond_error(req, 400, "OTA_NO_BODY", "Missing frontend image payload");
+        return ESP_OK;
+    }
+
+    const esp_partition_t *www = esp_partition_find_first(
+        ESP_PARTITION_TYPE_DATA, ESP_PARTITION_SUBTYPE_DATA_LITTLEFS, CONFIG_IAQ_OTA_WWW_PARTITION_LABEL);
+    if (!www) {
+        respond_error(req, 500, "OTA_NO_WWW", "Frontend partition not found");
+        return ESP_OK;
+    }
+    if ((size_t)req->content_len > www->size) {
+        respond_error(req, 413, "OTA_TOO_LARGE", "Frontend image is larger than filesystem partition");
+        return ESP_OK;
+    }
+
+    esp_err_t r = ota_frontend_begin((size_t)req->content_len, ota_progress_ws_cb);
+    if (r != ESP_OK) {
+        respond_error(req, 500, "OTA_BEGIN_FAILED", esp_err_to_name(r));
+        return ESP_OK;
+    }
+
+    uint8_t *buf = (uint8_t *)malloc(OTA_UPLOAD_CHUNK_SIZE);
+    if (!buf) {
+        ota_frontend_abort();
+        respond_error(req, 500, "OTA_OOM", "Failed to allocate buffer");
+        return ESP_OK;
+    }
+
+    size_t remaining = (size_t)req->content_len;
+    while (remaining > 0) {
+        size_t chunk = MIN(remaining, (size_t)OTA_UPLOAD_CHUNK_SIZE);
+        int rcvd = httpd_req_recv(req, (char *)buf, (int)chunk);
+        if (rcvd <= 0) {
+            free(buf);
+            ota_frontend_abort();
+            respond_error(req, 500, "OTA_RECV", "Failed to receive frontend image");
+            return ESP_OK;
+        }
+        remaining -= (size_t)rcvd;
+        r = ota_frontend_write(buf, (size_t)rcvd);
+        if (r != ESP_OK) {
+            free(buf);
+            respond_error(req, 500, "OTA_WRITE", "Failed to write frontend image");
+            return ESP_OK;
+        }
+    }
+    free(buf);
+
+    r = ota_frontend_end();
+    if (r != ESP_OK) {
+        respond_error(req, 500, "OTA_END", "Failed to finalize frontend OTA");
+        return ESP_OK;
+    }
+
+    cJSON *ok = cJSON_CreateObject();
+    cJSON_AddStringToObject(ok, "status", "ok");
+    cJSON_AddStringToObject(ok, "message", "Frontend update complete");
+    cJSON_AddBoolToObject(ok, "reboot_required", false);
+    respond_json(req, ok, 200);
+    return ESP_OK;
+}
+
+static esp_err_t api_ota_rollback_post(httpd_req_t *req)
+{
+    if (ota_manager_is_busy()) {
+        respond_error(req, 409, "OTA_BUSY", "OTA update in progress");
+        return ESP_OK;
+    }
+    ota_runtime_info_t rt = {0};
+    (void)ota_manager_get_runtime(&rt);
+    if (!rt.rollback_available) {
+        respond_error(req, 400, "ROLLBACK_UNAVAILABLE", "No rollback image available");
+        return ESP_OK;
+    }
+    esp_err_t r = ota_manager_rollback();
+    if (r != ESP_OK) {
+        respond_error(req, 500, "ROLLBACK_FAILED", esp_err_to_name(r));
+        return ESP_OK;
+    }
+    cJSON *ok = cJSON_CreateObject();
+    cJSON_AddStringToObject(ok, "status", "restarting");
+    cJSON_AddStringToObject(ok, "message", "Rolling back to previous firmware");
+    respond_json(req, ok, 200);
+    return ESP_OK;
+}
+
+static esp_err_t api_ota_abort_post(httpd_req_t *req)
+{
+    ota_runtime_info_t rt = {0};
+    (void)ota_manager_get_runtime(&rt);
+    if (rt.state == OTA_STATE_IDLE) {
+        respond_error(req, 400, "OTA_IDLE", "No OTA in progress");
+        return ESP_OK;
+    }
+
+    if (rt.active_type == OTA_TYPE_FIRMWARE) {
+        ota_firmware_abort();
+    } else if (rt.active_type == OTA_TYPE_FRONTEND) {
+        ota_frontend_abort();
+    } else {
+        respond_error(req, 400, "OTA_UNKNOWN", "No active OTA to abort");
+        return ESP_OK;
+    }
+
+    cJSON *ok = cJSON_CreateObject();
+    cJSON_AddStringToObject(ok, "status", "ok");
+    cJSON_AddStringToObject(ok, "message", "OTA update aborted");
+    respond_json(req, ok, 200);
     return ESP_OK;
 }
 
@@ -1067,6 +1386,7 @@ static esp_err_t ws_handler(httpd_req_t *req)
         ws_send_json_to_fd(sock, "state", iaq_json_build_state(&snap));
         ws_send_json_to_fd(sock, "metrics", iaq_json_build_metrics(&snap));
         ws_send_json_to_fd(sock, "health", iaq_json_build_health(&snap));
+        ws_send_ota_progress_snapshot(sock);
         return ESP_OK;
     }
 
@@ -1306,6 +1626,7 @@ esp_err_t web_portal_start(void)
         scfg.prvtkey_pem = key_ptr;
         scfg.prvtkey_len = key_len;
 
+        scfg.httpd.recv_wait_timeout = 30;
         ESP_LOGD(TAG, "HTTPS httpd cfg: port=%d, recv_to=%d, send_to=%d, backlog=%d, max_socks=%d, max_uris=%d",
                  scfg.httpd.server_port, scfg.httpd.recv_wait_timeout, scfg.httpd.send_wait_timeout,
                  scfg.httpd.backlog_conn, scfg.httpd.max_open_sockets, scfg.httpd.max_uri_handlers);
@@ -1339,6 +1660,7 @@ esp_err_t web_portal_start(void)
         cfg.stack_size = TASK_STACK_WEB_SERVER;
         cfg.core_id = TASK_CORE_WEB_SERVER;
         if (cfg.stack_size < WEB_HTTPD_STACK_MIN) cfg.stack_size = WEB_HTTPD_STACK_MIN;
+        cfg.recv_wait_timeout = 30;
         ESP_LOGD(TAG, "HTTP httpd cfg: port=%d, recv_to=%d, send_to=%d, backlog=%d, max_socks=%d, max_uris=%d",
                  cfg.server_port, cfg.recv_wait_timeout, cfg.send_wait_timeout,
                  cfg.backlog_conn, cfg.max_open_sockets, cfg.max_uri_handlers);
@@ -1366,6 +1688,11 @@ esp_err_t web_portal_start(void)
     const httpd_uri_t uri_state = { .uri = "/api/v1/state", .method = HTTP_GET, .handler = api_state_get, .user_ctx = NULL };
     const httpd_uri_t uri_metrics = { .uri = "/api/v1/metrics", .method = HTTP_GET, .handler = api_metrics_get, .user_ctx = NULL };
     const httpd_uri_t uri_health = { .uri = "/api/v1/health", .method = HTTP_GET, .handler = api_health_get, .user_ctx = NULL };
+    const httpd_uri_t uri_ota_info = { .uri = "/api/v1/ota/info", .method = HTTP_GET, .handler = api_ota_info_get, .user_ctx = NULL };
+    const httpd_uri_t uri_ota_firmware = { .uri = "/api/v1/ota/firmware", .method = HTTP_POST, .handler = api_ota_firmware_post, .user_ctx = NULL };
+    const httpd_uri_t uri_ota_frontend = { .uri = "/api/v1/ota/frontend", .method = HTTP_POST, .handler = api_ota_frontend_post, .user_ctx = NULL };
+    const httpd_uri_t uri_ota_rollback = { .uri = "/api/v1/ota/rollback", .method = HTTP_POST, .handler = api_ota_rollback_post, .user_ctx = NULL };
+    const httpd_uri_t uri_ota_abort = { .uri = "/api/v1/ota/abort", .method = HTTP_POST, .handler = api_ota_abort_post, .user_ctx = NULL };
     const httpd_uri_t uri_power = { .uri = "/api/v1/power", .method = HTTP_GET, .handler = api_power_get, .user_ctx = NULL };
     const httpd_uri_t uri_power_outputs = { .uri = "/api/v1/power/outputs", .method = HTTP_POST, .handler = api_power_outputs_post, .user_ctx = NULL };
     const httpd_uri_t uri_power_charger = { .uri = "/api/v1/power/charger", .method = HTTP_POST, .handler = api_power_charger_post, .user_ctx = NULL };
@@ -1397,6 +1724,11 @@ esp_err_t web_portal_start(void)
     httpd_register_uri_handler(s_server, &uri_state);
     httpd_register_uri_handler(s_server, &uri_metrics);
     httpd_register_uri_handler(s_server, &uri_health);
+    httpd_register_uri_handler(s_server, &uri_ota_info);
+    httpd_register_uri_handler(s_server, &uri_ota_firmware);
+    httpd_register_uri_handler(s_server, &uri_ota_frontend);
+    httpd_register_uri_handler(s_server, &uri_ota_rollback);
+    httpd_register_uri_handler(s_server, &uri_ota_abort);
     httpd_register_uri_handler(s_server, &uri_power);
     httpd_register_uri_handler(s_server, &uri_power_outputs);
     httpd_register_uri_handler(s_server, &uri_power_charger);
@@ -1458,6 +1790,11 @@ esp_err_t web_portal_stop(void)
     ESP_LOGI(TAG, "Web portal stopped");
     /* Keep LittleFS mounted for potential reuse; callers can reboot or unmount if needed */
     return ESP_OK;
+}
+
+bool web_portal_is_running(void)
+{
+    return s_server != NULL;
 }
 /* ===== Captive portal helpers ===== */
 static void dhcp_set_captiveportal_uri(void)

@@ -1287,6 +1287,21 @@ esp_err_t sensor_coordinator_get_runtime_info(sensor_id_t id, sensor_runtime_inf
     return ESP_OK;
 }
 
+bool sensor_coordinator_any_ready(void)
+{
+    if (!s_initialized) return false;
+    bool ready = false;
+    portENTER_CRITICAL(&s_runtime_spinlock);
+    for (int i = 0; i < SENSOR_ID_MAX; ++i) {
+        if (s_runtime[i].state == SENSOR_STATE_READY) {
+            ready = true;
+            break;
+        }
+    }
+    portEXIT_CRITICAL(&s_runtime_spinlock);
+    return ready;
+}
+
 const char* sensor_coordinator_state_to_string(sensor_state_t state)
 {
     switch (state) {

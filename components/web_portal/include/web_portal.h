@@ -18,6 +18,9 @@ esp_err_t web_portal_start(void);
 /* Stop portal server (filesystem stays mounted). */
 esp_err_t web_portal_stop(void);
 
+/* Return true if HTTP/HTTPS server is currently running. */
+bool web_portal_is_running(void);
+
 #ifdef __cplusplus
 }
 #endif

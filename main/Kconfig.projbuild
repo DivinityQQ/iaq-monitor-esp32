@@ -306,6 +306,41 @@ menu "IAQ Monitor Configuration"
             default 3600000
     endmenu
 
+    menu "OTA Updates"
+        config IAQ_OTA_VALIDATION_TASK_STACK
+            int "OTA validation task stack size"
+            default 4096
+            help
+                Stack size for the OTA boot validation task that confirms a newly
+                flashed firmware image and cancels rollback once basic health checks pass.
+
+        config IAQ_OTA_VALIDATION_TASK_PRIO
+            int "OTA validation task priority"
+            default 4
+            help
+                Priority for the OTA boot validation task.
+
+        config IAQ_OTA_VALIDATION_TIMEOUT_MIN
+            int "OTA validation timeout (minutes)"
+            default 5
+            help
+                Maximum time to wait after boot before marking firmware valid even if
+                peripherals are still initializing. Prevents rollback loops when boot
+                succeeded but dependencies are slow.
+
+        config IAQ_OTA_WWW_PARTITION_LABEL
+            string "Frontend filesystem partition label"
+            default "www"
+            help
+                Partition label for the LittleFS image that hosts the web portal assets.
+
+        config IAQ_OTA_WWW_MOUNT_POINT
+            string "Frontend filesystem mount point"
+            default "/www"
+            help
+                Mount point used when remounting the frontend LittleFS image after an update.
+    endmenu
+
     menu "Time & Region"
         config IAQ_TZ_STRING
             string "Time zone (POSIX TZ string)"
