@@ -24,6 +24,10 @@ const PowerDashboard = lazy(() =>
   import('../Power/PowerDashboard').then(module => ({ default: module.PowerDashboard }))
 );
 
+const OTADashboard = lazy(() =>
+  import('../OTA/OTADashboard').then(module => ({ default: module.OTADashboard }))
+);
+
 const ChartsView = () => (
   <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={400}><CircularProgress /></Box>}>
     <ChartContainer />
@@ -48,6 +52,12 @@ const PowerView = () => (
   </Suspense>
 );
 
+const UpdateView = () => (
+  <Suspense fallback={<Box display="flex" justifyContent="center" alignItems="center" minHeight={400}><CircularProgress /></Box>}>
+    <OTADashboard />
+  </Suspense>
+);
+
 export function AppShell() {
   const [drawerOpen, setDrawerOpen] = useState(false);
 
@@ -65,6 +75,7 @@ export function AppShell() {
           <Route path="/config" component={ConfigViewRoute} />
           <Route path="/health" component={HealthView} />
           <Route path="/power" component={PowerView} />
+          <Route path="/update" component={UpdateView} />
           <Route>
             <Box p={3}>
               <Typography variant="h4" gutterBottom>404 - Not Found</Typography>

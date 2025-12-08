@@ -47,6 +47,15 @@ function InfoDialogComponent({ open, onClose }: InfoDialogProps) {
             <InfoRow label="License" value={deviceInfo.firmware.license} />
           </InfoSection>
 
+          {deviceInfo.frontend?.version && (
+            <>
+              <Divider />
+              <InfoSection title="Frontend">
+                <InfoRow label="Version" value={deviceInfo.frontend.version} />
+              </InfoSection>
+            </>
+          )}
+
           <Divider />
 
           {/* Hardware Information */}

@@ -124,6 +124,9 @@ export interface DeviceInfo {
     idf_version: string;
     license: string;
   };
+  frontend?: {
+    version?: string;
+  };
   hardware: {
     chip: string;
     cores: number;
@@ -233,6 +236,56 @@ export interface PowerAlarmsConfig {
 }
 
 // ============================================================================
+// OTA UPDATE
+// ============================================================================
+
+export type OTAState = 'idle' | 'receiving' | 'validating' | 'complete' | 'error';
+export type OTAUpdateType = 'firmware' | 'frontend' | 'none';
+
+export interface OTAProgress {
+  update_type: OTAUpdateType;
+  state: OTAState;
+  progress: number;
+  received: number;
+  total: number;
+  error?: string;
+}
+
+export interface OTAFirmwareInfo {
+  version: string;
+  build_date: string;
+  build_time: string;
+  idf_version: string;
+}
+
+export interface OTAFrontendInfo {
+  version: string;
+}
+
+export interface OTARuntimeInfo {
+  state: OTAState;
+  update_type: OTAUpdateType;
+  active_slot: number;
+  rollback_available: boolean;
+  pending_verify: boolean;
+  received: number;
+  total: number;
+  error?: string;
+}
+
+export interface OTAVersionInfo {
+  firmware: OTAFirmwareInfo;
+  frontend: OTAFrontendInfo;
+  ota: OTARuntimeInfo;
+}
+
+export interface OTAUploadResponse {
+  status: 'ok' | 'rebooting';
+  message: string;
+  reboot_required: boolean;
+}
+
+// ============================================================================
 // WEBSOCKET MESSAGES
 // ============================================================================
 
@@ -240,7 +293,8 @@ export type WSMessage =
   | { type: 'state'; data: State }
   | { type: 'metrics'; data: Metrics }
   | { type: 'health'; data: Health }
-  | { type: 'power'; data: Power };
+  | { type: 'power'; data: Power }
+  | { type: 'ota_progress'; data: OTAProgress };
 
 // ============================================================================
 // API RESPONSES

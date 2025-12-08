@@ -1,6 +1,6 @@
 import { atom } from 'jotai';
 import { selectAtom } from 'jotai/utils';
-import type { State, Metrics, Health, Power, DeviceInfo, SensorId, SensorCadence, MQTTStatus } from '../api/types';
+import type { State, Metrics, Health, Power, DeviceInfo, SensorId, SensorCadence, MQTTStatus, OTAProgress, OTAVersionInfo } from '../api/types';
 // Color derivations moved to components using theme CSS variables for live updates
 import { getBuffersVersion } from '../utils/streamBuffers';
 import { apiClient } from '../api/client';
@@ -36,6 +36,17 @@ export const deviceInfoAtom = atom<DeviceInfo | null>(null);
  * MQTT status (fetched once via REST API on mount)
  */
 export const mqttStatusAtom = atom<MQTTStatus | null>(null);
+
+/**
+ * OTA update progress (updated via WebSocket during OTA)
+ * Sticky across reconnects - keeps last progress state
+ */
+export const otaProgressAtom = atom<OTAProgress | null>(null);
+
+/**
+ * OTA version info (fetched via REST API)
+ */
+export const otaVersionInfoAtom = atom<OTAVersionInfo | null>(null);
 
 /**
  * Sensor cadences (fetched once on Sensors tab)
@@ -136,6 +147,11 @@ export const refreshDeviceInfoAtom = atom(null, async (_get, set) => {
 export const refreshMQTTStatusAtom = atom(null, async (_get, set) => {
   const status = await apiClient.getMQTTStatus();
   set(mqttStatusAtom, status);
+});
+
+export const refreshOTAInfoAtom = atom(null, async (_get, set) => {
+  const info = await apiClient.getOTAInfo();
+  set(otaVersionInfoAtom, info);
 });
 
 // ============================================================================

@@ -9,6 +9,7 @@ import {
   metricsAtom,
   healthAtom,
   powerAtom,
+  otaProgressAtom,
 } from '../store/atoms';
 import { logger } from '../utils/logger';
 
@@ -46,6 +47,7 @@ export function useWebSocketConnection() {
   const setMetrics = useSetAtom(metricsAtom);
   const setHealth = useSetAtom(healthAtom);
   const setPower = useSetAtom(powerAtom);
+  const setOTAProgress = useSetAtom(otaProgressAtom);
 
   // WebSocket connection with react-use-websocket
   const { sendMessage, lastMessage, readyState } = useWebSocket(
@@ -113,6 +115,9 @@ export function useWebSocketConnection() {
         break;
       case 'power':
         setPower(message.data);
+        break;
+      case 'ota_progress':
+        setOTAProgress(message.data);
         break;
       default:
         logger.warn('[WebSocket] Unknown message type:', message);

@@ -16,6 +16,8 @@ import type {
   PowerOutputsConfig,
   ChargerConfig,
   PowerAlarmsConfig,
+  OTAVersionInfo,
+  OTAUploadResponse,
 } from './types';
 
 class ApiClient {
@@ -140,6 +142,69 @@ class ApiClient {
 
   async setPowerAlarms(config: PowerAlarmsConfig): Promise<ApiSuccess> {
     return this.fetch('/power/alarms', { method: 'POST', body: config });
+  }
+
+  // ============================================================================
+  // OTA UPDATE
+  // ============================================================================
+
+  async getOTAInfo(): Promise<OTAVersionInfo> {
+    return this.fetch('/ota/info');
+  }
+
+  async uploadFirmware(
+    file: File,
+    onProgress?: (progress: number) => void
+  ): Promise<OTAUploadResponse> {
+    return this.uploadBinary('/ota/firmware', file, onProgress);
+  }
+
+  async uploadFrontend(
+    file: File,
+    onProgress?: (progress: number) => void
+  ): Promise<OTAUploadResponse> {
+    return this.uploadBinary('/ota/frontend', file, onProgress);
+  }
+
+  async rollbackFirmware(): Promise<ApiSuccess> {
+    return this.fetch('/ota/rollback', { method: 'POST' });
+  }
+
+  private uploadBinary(
+    path: string,
+    file: File,
+    onProgress?: (progress: number) => void
+  ): Promise<OTAUploadResponse> {
+    return new Promise((resolve, reject) => {
+      const xhr = new XMLHttpRequest();
+      xhr.open('POST', this.baseUrl + path);
+
+      xhr.upload.onprogress = (event) => {
+        if (event.lengthComputable && onProgress) {
+          onProgress(Math.round((event.loaded / event.total) * 100));
+        }
+      };
+
+      xhr.onload = () => {
+        try {
+          const response = JSON.parse(xhr.responseText);
+          if (xhr.status >= 200 && xhr.status < 300) {
+            resolve(response as OTAUploadResponse);
+          } else {
+            reject(new Error(response.error?.message || response.message || 'Upload failed'));
+          }
+        } catch {
+          reject(new Error(xhr.statusText || 'Upload failed'));
+        }
+      };
+
+      xhr.onerror = () => reject(new Error('Network error during upload'));
+      xhr.ontimeout = () => reject(new Error('Upload timed out'));
+
+      // No timeout for large uploads - let it complete
+      xhr.setRequestHeader('Content-Type', 'application/octet-stream');
+      xhr.send(file);
+    });
   }
 
   // ============================================================================
