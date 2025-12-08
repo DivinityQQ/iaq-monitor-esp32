@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog, and the project adheres to Semantic Versioning.
 
+## [0.11.0] - 2025-12-08
+
+OTA-focused release: dual-slot firmware/frontend OTA with rollback, new portal Update tab, and power UI polish.
+
+Added:
+- OTA manager covering firmware and frontend uploads with header checks, LittleFS remounting, rollback awareness, progress callbacks, and runtime version reporting (reads `www/version.txt`).
+- HTTP/S OTA endpoints (`/api/v1/ota/info|firmware|frontend|rollback|abort`) with WebSocket `ota_progress` broadcasts; the info endpoint now surfaces firmware + frontend versions.
+- Web portal "System Update" page with version/slot display, firmware + www upload cards, live progress, reboot/rollback actions, and Info dialog showing frontend version; frontend build emits `version.txt` (pkg version + git SHA) into the `www` image.
+
+Changed:
+- Flash layout switched to dual OTA slots (`ota_0`/`ota_1`) with `www` retained; bootloader rollback enabled plus new OTA validation task/Kconfig to mark images valid after Wi‑Fi/sensor/web readiness or timeout; HTTP server receive timeout raised to 30s for large uploads.
+- Power dashboard form inputs refreshed (slotProps) for cleaner alignment on MUI v7.
+
+Upgrade notes:
+- Flash the updated `partitions.csv` (8MB dual-OTA layout) and rebuild the `www` image before attempting OTA updates; frontend uploads expect a LittleFS image (e.g., `www.bin`).
+
 ## [0.10.0] - 2025-12-07
 
 Power-focused release: dedicated portal power dashboard with live controls, PowerFeather tuning, and UI/sensor polish.
