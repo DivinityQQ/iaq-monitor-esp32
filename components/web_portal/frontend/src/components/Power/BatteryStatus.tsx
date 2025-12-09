@@ -32,11 +32,13 @@ const getBatteryColor = (pct: number): 'success' | 'warning' | 'error' => {
 
 /**
  * Format time remaining in hours and minutes
+ * Handles both positive (charging) and negative (discharging) values
  */
 const formatTimeRemaining = (minutes: number): string => {
-  if (minutes <= 0) return '--';
-  const hours = Math.floor(minutes / 60);
-  const mins = minutes % 60;
+  const absMinutes = Math.abs(minutes);
+  if (absMinutes === 0) return '--';
+  const hours = Math.floor(absMinutes / 60);
+  const mins = absMinutes % 60;
   if (hours > 0 && mins > 0) return `${hours}h ${mins}m`;
   if (hours > 0) return `${hours}h`;
   return `${mins}m`;
@@ -295,7 +297,11 @@ export function BatteryStatus() {
                   <TimeIcon fontSize="small" color="action" />
                   <Box>
                     <Typography variant="caption" color="text.secondary">
-                      Time Left
+                      {power.time_left_min === 0
+                        ? 'Time remaining'
+                        : power.time_left_min < 0
+                          ? 'Time until empty'
+                          : 'Time until full'}
                     </Typography>
                     <Typography variant="body2" fontWeight={500}>
                       {formatTimeRemaining(power.time_left_min)}
