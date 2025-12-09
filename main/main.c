@@ -23,6 +23,7 @@
 #include "display_oled/display_ui.h"
 #include "iaq_profiler.h"
 #include "web_portal.h"
+#include "web_console.h"
 #include "pm_guard.h"
 #include "power_board.h"
 #include "ota_manager.h"
@@ -181,9 +182,10 @@ static void start_ota_validation_if_needed(void)
     if (!info.pending_verify) return;
 
     ESP_LOGW(TAG, "Pending firmware verification detected; starting validation task");
-    BaseType_t rc = xTaskCreate(ota_validation_task, "ota_valid",
-                                CONFIG_IAQ_OTA_VALIDATION_TASK_STACK, NULL,
-                                CONFIG_IAQ_OTA_VALIDATION_TASK_PRIO, NULL);
+    BaseType_t rc = xTaskCreatePinnedToCore(ota_validation_task, "ota_valid",
+                                            TASK_STACK_OTA_VALIDATION, NULL,
+                                            TASK_PRIORITY_OTA_VALIDATION, NULL,
+                                            TASK_CORE_OTA_VALIDATION);
     if (rc != pdPASS) {
         ESP_LOGE(TAG, "Failed to start OTA validation task");
     }
@@ -286,6 +288,13 @@ void app_main(void)
         ESP_LOGW(TAG, "WiFi not provisioned. SoftAP '%s' is active for setup.", CONFIG_IAQ_AP_SSID);
         ESP_LOGW(TAG, "You can also use console: wifi set <ssid> <password> and then wifi restart");
     }
+
+#if CONFIG_IAQ_WEB_CONSOLE_ENABLE
+    esp_err_t wc_err = web_console_init();
+    if (wc_err != ESP_OK) {
+        ESP_LOGW(TAG, "Web console init failed: %s", esp_err_to_name(wc_err));
+    }
+#endif
 
     /* Start web portal after Wi‑Fi begin to make protocol choice simpler.
      * It will start HTTP by default and switch to HTTPS once STA connects. */

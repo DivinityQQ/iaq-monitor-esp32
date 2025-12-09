@@ -144,8 +144,9 @@ esp_err_t power_board_init(void)
     s_init_ok = true;
     ESP_LOGI(TAG, "PowerFeather initialized (capacity=%u mAh, type=%d)", capacity, static_cast<int>(type));
     if (s_poll_task == NULL) {
-        BaseType_t r = xTaskCreate(power_poll_task, "pf_poll", TASK_STACK_POWER_POLL,
-                                   NULL, TASK_PRIORITY_POWER_POLL, &s_poll_task);
+        BaseType_t r = xTaskCreatePinnedToCore(power_poll_task, "pf_poll", TASK_STACK_POWER_POLL,
+                                               NULL, TASK_PRIORITY_POWER_POLL, &s_poll_task,
+                                               TASK_CORE_POWER_POLL);
         if (r != pdPASS) {
             ESP_LOGE(TAG, "Failed to create PowerFeather poll task");
             s_poll_task = NULL;

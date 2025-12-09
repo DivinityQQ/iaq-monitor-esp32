@@ -306,20 +306,60 @@ menu "IAQ Monitor Configuration"
             default 3600000
     endmenu
 
-    menu "OTA Updates"
-        config IAQ_OTA_VALIDATION_TASK_STACK
-            int "OTA validation task stack size"
-            default 4096
+    menu "Web Console"
+        config IAQ_WEB_CONSOLE_ENABLE
+            bool "Enable web console"
+            default y
             help
-                Stack size for the OTA boot validation task that confirms a newly
-                flashed firmware image and cancels rollback once basic health checks pass.
+                Enable WebSocket-based console access via /ws/log and /ws/console.
 
-        config IAQ_OTA_VALIDATION_TASK_PRIO
-            int "OTA validation task priority"
+        config IAQ_WEB_CONSOLE_TOKEN
+            string "Console authentication token"
+            default ""
+            depends on IAQ_WEB_CONSOLE_ENABLE
+            help
+                Shared secret for WebSocket authentication. MUST be set to a non-empty
+                value to enable console access. Send via Authorization: Bearer <token>
+                or Sec-WebSocket-Protocol: bearer,<token> header.
+                WARNING: Empty token disables web console authentication entirely.
+
+        config IAQ_WEB_CONSOLE_LOG_BUFFER_SIZE
+            int "Log ring buffer size (bytes)"
+            range 4096 32768
+            default 8192
+            depends on IAQ_WEB_CONSOLE_ENABLE
+            help
+                Size of ring buffer for log history. Larger = more scrollback.
+
+        config IAQ_WEB_CONSOLE_MAX_LOG_CLIENTS
+            int "Maximum log stream clients"
+            range 1 8
             default 4
-            help
-                Priority for the OTA boot validation task.
+            depends on IAQ_WEB_CONSOLE_ENABLE
 
+        config IAQ_WEB_CONSOLE_CMD_RATE_LIMIT
+            int "Command rate limit (per second)"
+            range 1 20
+            default 5
+            depends on IAQ_WEB_CONSOLE_ENABLE
+
+        config IAQ_WEB_CONSOLE_MAX_CMD_LEN
+            int "Maximum command length"
+            range 64 1024
+            default 256
+            depends on IAQ_WEB_CONSOLE_ENABLE
+
+        config IAQ_WEB_CONSOLE_LOG_LINE_MAX
+            int "Maximum log line length"
+            range 128 1024
+            default 512
+            depends on IAQ_WEB_CONSOLE_ENABLE
+            help
+                Maximum length of a single log line. Longer lines are truncated.
+                ESP_LOG lines are typically <200 chars. Increase for hexdumps.
+    endmenu
+
+    menu "OTA Updates"
         config IAQ_OTA_VALIDATION_TIMEOUT_MIN
             int "OTA validation timeout (minutes)"
             default 5

@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_check.h"
 #include "esp_netif.h"
+#include "iaq_config.h"
 #include "dns_server.h"
 
 #define DNS_PORT 53
@@ -160,7 +161,8 @@ dns_server_handle_t dns_server_start(const dns_server_config_t *cfg)
     strlcpy(h->name_pat, cfg->queried_name, sizeof(h->name_pat));
     strlcpy(h->if_key, cfg->netif_key, sizeof(h->if_key));
     h->sock = -1;
-    BaseType_t ret = xTaskCreatePinnedToCore(dns_task, "dns_server", 4096, h, 4, &h->task, 1);
+    BaseType_t ret = xTaskCreatePinnedToCore(dns_task, "dns_server", 4096, h, 4, &h->task,
+                                             TASK_CORE_WEB_SERVER);
     if (ret != pdPASS) {
         ESP_LOGE(TAG, "Failed to create DNS task");
         free(h);

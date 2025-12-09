@@ -3,6 +3,7 @@
 #define WEB_PORTAL_H
 
 #include "esp_err.h"
+#include "esp_http_server.h"
 #include "system_context.h"
 
 #ifdef __cplusplus
@@ -20,6 +21,9 @@ esp_err_t web_portal_stop(void);
 
 /* Return true if HTTP/HTTPS server is currently running. */
 bool web_portal_is_running(void);
+
+/* Get current httpd handle (NULL if not running). */
+httpd_handle_t web_portal_get_server(void);
 
 #ifdef __cplusplus
 }

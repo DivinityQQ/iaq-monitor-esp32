@@ -36,6 +36,7 @@
 #include "pm_guard.h"
 #include "power_board.h"
 #include "ota_manager.h"
+#include "web_console.h"
 
 static const char *TAG = "WEB_PORTAL";
 
@@ -1747,6 +1748,24 @@ esp_err_t web_portal_start(void)
     httpd_register_uri_handler(s_server, &uri_sensors_cadence);
     httpd_register_uri_handler(s_server, &uri_sensor_action);
     httpd_register_uri_handler(s_server, &uri_ws);
+    /* Web console handlers must be registered before catch-all. */
+#if CONFIG_IAQ_WEB_CONSOLE_ENABLE
+    if (web_console_is_initialized()) {
+        web_console_reset_clients();
+        web_console_set_server(s_server);
+
+        esp_err_t err = httpd_register_uri_handler(s_server, &web_console_uri_log);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to register /ws/log: %s", esp_err_to_name(err));
+        }
+        err = httpd_register_uri_handler(s_server, &web_console_uri_console);
+        if (err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to register /ws/console: %s", esp_err_to_name(err));
+        }
+    }
+#endif
+
+    /* Catch-all must be last. */
     httpd_register_uri_handler(s_server, &uri_static);
     /* 404 redirect for captive portal */
     httpd_register_err_handler(s_server, HTTPD_404_NOT_FOUND, http_404_error_handler);
@@ -1780,6 +1799,10 @@ esp_err_t web_portal_stop(void)
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_stop(s_ws_state_timer));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_stop(s_ws_metrics_timer));
     ESP_ERROR_CHECK_WITHOUT_ABORT(esp_timer_stop(s_ws_health_timer));
+#if CONFIG_IAQ_WEB_CONSOLE_ENABLE
+    web_console_set_server(NULL);
+    web_console_reset_clients();
+#endif
     if (s_server_is_https) {
         httpd_ssl_stop(s_server);
     } else {
@@ -1795,6 +1818,11 @@ esp_err_t web_portal_stop(void)
 bool web_portal_is_running(void)
 {
     return s_server != NULL;
+}
+
+httpd_handle_t web_portal_get_server(void)
+{
+    return s_server;
 }
 /* ===== Captive portal helpers ===== */
 static void dhcp_set_captiveportal_uri(void)

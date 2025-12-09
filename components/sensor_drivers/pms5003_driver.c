@@ -330,7 +330,9 @@ esp_err_t pms5003_driver_init(void)
     if (!s_rx_task) {
         (void)uart_set_rx_full_threshold(s_uart_port, 32);
         (void)uart_set_rx_timeout(s_uart_port, 2);
-        BaseType_t ok = xTaskCreate(pms5003_rx_task, "pms5003_rx", 2048, NULL, tskIDLE_PRIORITY + 2, &s_rx_task);
+        BaseType_t ok = xTaskCreatePinnedToCore(pms5003_rx_task, "pms5003_rx", 2048, NULL,
+                                                tskIDLE_PRIORITY + 2, &s_rx_task,
+                                                TASK_CORE_PMS5003_RX);
         if (ok != pdPASS) {
             ESP_LOGE(TAG, "Failed to create PMS5003 RX task");
             return ESP_ERR_NO_MEM;

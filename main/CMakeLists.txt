@@ -22,6 +22,7 @@ idf_component_register(
         app_config
         iaq_profiler
         web_portal
+        web_console
         ota_manager
 )
 

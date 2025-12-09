@@ -20,7 +20,9 @@
  */
 #define TASK_PRIORITY_SENSOR_COORDINATOR    5
 #define TASK_PRIORITY_POWER_POLL            4
+#define TASK_PRIORITY_OTA_VALIDATION        4
 #define TASK_PRIORITY_MQTT_MANAGER          3
+#define TASK_PRIORITY_WC_LOG_BCAST          2  /* tskIDLE_PRIORITY + 2 */
 #define TASK_PRIORITY_DISPLAY               2
 #define TASK_PRIORITY_STATUS_LED            1
 
@@ -33,6 +35,8 @@
 #define TASK_STACK_DISPLAY              3072
 #define TASK_STACK_STATUS_LED           2048
 #define TASK_STACK_WEB_SERVER           6144
+#define TASK_STACK_OTA_VALIDATION       4096
+#define TASK_STACK_WC_LOG_BCAST         4096
 
 /**
  * Task core affinity (ESP32-S3 is dual-core)
@@ -41,6 +45,10 @@
  */
 #define TASK_CORE_SENSOR_COORDINATOR    0
 #define TASK_CORE_MQTT_MANAGER          1
+#define TASK_CORE_OTA_VALIDATION        1
+#define TASK_CORE_WC_LOG_BCAST          1
+#define TASK_CORE_POWER_POLL            0
+#define TASK_CORE_PMS5003_RX            0
 #define TASK_CORE_DISPLAY               0
 #define TASK_CORE_STATUS_LED            0
 #define TASK_CORE_WEB_SERVER            1
