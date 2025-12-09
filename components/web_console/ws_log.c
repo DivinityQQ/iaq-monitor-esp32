@@ -3,6 +3,8 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <unistd.h>
+#include <sys/reent.h>
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "esp_err.h"
@@ -32,15 +34,18 @@ typedef struct {
     uint32_t send_failures;
 } log_client_t;
 
-static log_ring_t s_ring = {0};
+/* Static ring buffer - available from first instruction for early boot capture. */
+static char s_ring_buffer[CONFIG_IAQ_WEB_CONSOLE_LOG_BUFFER_SIZE];
+static log_ring_t s_ring = {
+    .buffer = s_ring_buffer,
+    .size = CONFIG_IAQ_WEB_CONSOLE_LOG_BUFFER_SIZE,
+};
 static SemaphoreHandle_t s_ring_mutex = NULL;
 static SemaphoreHandle_t s_clients_mutex = NULL;
 static QueueHandle_t s_notify_queue = NULL;
 static TaskHandle_t s_broadcast_task = NULL;
 static bool s_exit_task = false;
 static log_client_t s_clients[CONFIG_IAQ_WEB_CONSOLE_MAX_LOG_CLIENTS] = {0};
-static vprintf_like_t s_prev_vprintf = NULL;
-static bool s_vprintf_installed = false;
 
 static inline size_t ring_used(const log_ring_t *rb)
 {
@@ -89,14 +94,6 @@ static size_t ring_read_line(const log_ring_t *rb, size_t cursor, size_t head,
     return len;
 }
 
-static void ring_init(log_ring_t *rb, size_t size)
-{
-    if (!rb) return;
-    rb->buffer = (char *)malloc(size);
-    rb->size = rb->buffer ? size : 0;
-    rb->head = rb->tail = rb->broadcast_tail = 0;
-}
-
 static void ring_write(log_ring_t *rb, const char *data, size_t len)
 {
     if (!rb || !rb->buffer || rb->size < 2 || !data || len == 0) return;
@@ -112,8 +109,13 @@ static void ring_write(log_ring_t *rb, const char *data, size_t len)
     if (len > free_space) {
         size_t drop = len - free_space;
         rb->tail = (rb->tail + drop) % rb->size;
-        /* Dropped data cannot be broadcast later */
-        rb->broadcast_tail = rb->tail;
+        /* Only reset broadcast_tail if it was pointing to dropped data.
+         * If broadcast_tail is still in the valid range [new_tail, head],
+         * keep it - that data hasn't been sent yet and is still valid.
+         * Unconditionally resetting would cause already-sent data to be re-sent. */
+        if (!cursor_in_range(rb->broadcast_tail, rb->tail, rb->head, rb->size)) {
+            rb->broadcast_tail = rb->tail;
+        }
     }
 
     size_t first = rb->size - rb->head;
@@ -370,6 +372,13 @@ static void log_broadcast_task(void *arg)
                 goto next_cycle;  /* Exit loop, will retry on next notification */
             }
             head = s_ring.head;
+
+            /* Check if ring overflowed during send - broadcast_tail would have
+             * been advanced by ring_write. If so, skip to the new position. */
+            if (s_ring.broadcast_tail != cursor) {
+                ESP_LOGD(TAG, "Ring overflow during broadcast; skipping to new tail");
+                cursor = s_ring.broadcast_tail;
+            }
         }
 
         s_ring.broadcast_tail = cursor;
@@ -381,58 +390,40 @@ next_cycle:
     vTaskDelete(NULL);
 }
 
-static int log_vprintf_wrapper(const char *fmt, va_list args)
-{
-    va_list copy;
-    va_copy(copy, args);
-    int ret = s_prev_vprintf ? s_prev_vprintf(fmt, args) : vprintf(fmt, args);
+/* Linker-wrapped _write_r to tee stdout/stderr into log ring.
+ * Captures from very first printf/ESP_LOG - early boot is single-threaded so no mutex needed. */
+extern int __real__write_r(struct _reent *r, int fd, const void *data, size_t size);
 
-    /* Static buffer to reduce stack usage. Safe because ESP-IDF
-     * serializes log output through a single vprintf callback. */
-    static char line[CONFIG_IAQ_WEB_CONSOLE_LOG_LINE_MAX];
-    int len = vsnprintf(line, sizeof(line), fmt, copy);
-    va_end(copy);
-    if (len < 0) len = 0;
-    if (len >= (int)sizeof(line)) {
-        len = (int)sizeof(line) - 1;
-        line[len] = '\0';
-    }
-    /* Ensure a newline is always present, even when truncated. */
-    if (len > 0 && line[len - 1] != '\n') {
-        if (len < (int)sizeof(line)) {
-            line[len++] = '\n';
-        } else {
-            line[len - 1] = '\n';
+int __wrap__write_r(struct _reent *r, int fd, const void *data, size_t size)
+{
+    /* Call the original _write_r first to preserve behavior. */
+    ssize_t ret = __real__write_r(r, fd, data, size);
+
+    /* Tee stdout/stderr into ring buffer. */
+    if (fd == STDOUT_FILENO || fd == STDERR_FILENO) {
+        /* Early boot (before mutex created): single-threaded, write directly.
+         * After init: take mutex to synchronize with broadcast task. */
+        if (!s_ring_mutex || xSemaphoreTake(s_ring_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
+            ring_write(&s_ring, (const char *)data, size);
+            if (s_ring_mutex) xSemaphoreGive(s_ring_mutex);
+        }
+        if (s_notify_queue && uxQueueMessagesWaiting(s_notify_queue) == 0) {
+            uint8_t dummy = 1;
+            (void)xQueueSend(s_notify_queue, &dummy, 0);
         }
     }
-
-    if (s_ring_mutex && xSemaphoreTake(s_ring_mutex, pdMS_TO_TICKS(5)) == pdTRUE) {
-        ring_write(&s_ring, line, (size_t)len);
-        xSemaphoreGive(s_ring_mutex);
-    }
-
-    if (s_notify_queue && uxQueueMessagesWaiting(s_notify_queue) == 0) {
-        uint8_t dummy = 1;
-        (void)xQueueSend(s_notify_queue, &dummy, 0);
-    }
-    return ret;
+    return (int)ret;
 }
 
 esp_err_t web_console_log_init(void)
 {
-    if (s_vprintf_installed) return ESP_OK;
+    if (s_ring_mutex) return ESP_OK;
 
     s_ring_mutex = xSemaphoreCreateMutex();
     s_clients_mutex = xSemaphoreCreateMutex();
     s_notify_queue = xQueueCreate(4, sizeof(uint8_t));
     if (!s_ring_mutex || !s_clients_mutex || !s_notify_queue) {
         ESP_LOGE(TAG, "Failed to create log primitives");
-        web_console_log_stop();
-        return ESP_ERR_NO_MEM;
-    }
-    ring_init(&s_ring, CONFIG_IAQ_WEB_CONSOLE_LOG_BUFFER_SIZE);
-    if (!s_ring.buffer) {
-        ESP_LOGE(TAG, "Failed to allocate log ring buffer");
         web_console_log_stop();
         return ESP_ERR_NO_MEM;
     }
@@ -449,8 +440,6 @@ esp_err_t web_console_log_init(void)
     }
     iaq_profiler_register_task("wc_log_bcast", s_broadcast_task, TASK_STACK_WC_LOG_BCAST);
 
-    s_prev_vprintf = esp_log_set_vprintf(log_vprintf_wrapper);
-    s_vprintf_installed = true;
     ESP_LOGI(TAG, "Web console log capture installed (buf=%d bytes)", CONFIG_IAQ_WEB_CONSOLE_LOG_BUFFER_SIZE);
     return ESP_OK;
 }
@@ -474,17 +463,8 @@ void web_console_log_stop(void)
         }
         s_broadcast_task = NULL;
     }
-    if (s_vprintf_installed && s_prev_vprintf) {
-        esp_log_set_vprintf(s_prev_vprintf);
-    }
-    s_vprintf_installed = false;
-    s_prev_vprintf = NULL;
-
-    if (s_ring.buffer) {
-        free(s_ring.buffer);
-        s_ring.buffer = NULL;
-        s_ring.size = s_ring.head = s_ring.tail = s_ring.broadcast_tail = 0;
-    }
+    /* Reset ring pointers but keep static buffer (allows re-init). */
+    s_ring.head = s_ring.tail = s_ring.broadcast_tail = 0;
     if (s_ring_mutex) { vSemaphoreDelete(s_ring_mutex); s_ring_mutex = NULL; }
     if (s_clients_mutex) { vSemaphoreDelete(s_clients_mutex); s_clients_mutex = NULL; }
     if (s_notify_queue) { vQueueDelete(s_notify_queue); s_notify_queue = NULL; }

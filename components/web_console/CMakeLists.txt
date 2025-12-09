@@ -15,3 +15,6 @@ idf_component_register(
         iaq_profiler
         app_config
 )
+
+# Wrap _write_r to tee stdout/stderr into log ring buffer
+target_link_libraries(${COMPONENT_LIB} INTERFACE "-Wl,--wrap=_write_r")

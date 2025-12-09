@@ -173,9 +173,23 @@ static esp_err_t ws_console_handler(httpd_req_t *req)
     }
     s_last_cmd_time = now;
 
+    /* Strip trailing whitespace/newlines (websocat sends \n or \r\n) */
+    char *cmd = (char *)frame.payload;
+    size_t len = frame.len;
+    while (len > 0 && (cmd[len - 1] == '\n' || cmd[len - 1] == '\r' || cmd[len - 1] == ' ')) {
+        cmd[--len] = '\0';
+    }
+
+    /* Skip empty commands */
+    if (len == 0) {
+        send_text(req, "iaq> ");
+        free(frame.payload);
+        return ESP_OK;
+    }
+
     uint64_t t0 = iaq_prof_tic();
     int ret_code = 0;
-    esp_console_run((const char *)frame.payload, &ret_code);
+    esp_console_run(cmd, &ret_code);
 
     char prompt[32];
     snprintf(prompt, sizeof(prompt), "(%d) iaq> ", ret_code);
