@@ -6,6 +6,7 @@
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 
+#include <cmath>
 #include <mutex>
 
 #include "Mainboard/Mainboard.h"
@@ -32,6 +33,7 @@ static uint16_t s_alarm_low_v_mv = 0;
 static uint16_t s_alarm_high_v_mv = 0;
 static uint8_t s_alarm_low_pct = 0;
 static uint16_t s_maintain_mv = CONFIG_IAQ_POWERFEATHER_MAINTAIN_VOLTAGE_MV;
+static bool s_ts_enabled = true; /* Charger thermistor sense enabled? */
 
 static bool s_init_ok = false;
 static std::mutex s_lock;
@@ -141,6 +143,18 @@ esp_err_t power_board_init(void)
         }
     }
 
+    /* Cache whether charger TS (thermistor) sensing is enabled; assume enabled on read failure */
+    {
+        bool ts_on = true;
+        if (Board.getCharger().getTSEnabled(ts_on)) {
+            s_ts_enabled = ts_on;
+            ESP_LOGI(TAG, "Charger TS sense is %s", ts_on ? "enabled" : "disabled");
+        } else {
+            s_ts_enabled = true;
+            ESP_LOGW(TAG, "Unable to read TS enable state; defaulting to enabled");
+        }
+    }
+
     s_init_ok = true;
     ESP_LOGI(TAG, "PowerFeather initialized (capacity=%u mAh, type=%d)", capacity, static_cast<int>(type));
     if (s_poll_task == NULL) {
@@ -167,6 +181,17 @@ esp_err_t power_board_get_snapshot(power_board_snapshot_t *out)
     if (!out) return ESP_ERR_INVALID_ARG;
     *out = {};
     if (!s_init_ok) return ESP_ERR_NOT_SUPPORTED;
+
+    /* Grab latest compensated SHT45 temperature from cached iaq_data (no fresh sensor reads here) */
+    float cached_temp_c = 0.0f;
+    bool cached_temp_valid = false;
+    IAQ_DATA_WITH_LOCK() {
+        iaq_data_t *d = iaq_data_get();
+        if (d->valid.temp_c && !std::isnan(d->fused.temp_c)) {
+            cached_temp_c = d->fused.temp_c;
+            cached_temp_valid = true;
+        }
+    }
 
     /*
      * Phase 1: Read SDK values WITHOUT holding our mutex.
@@ -240,9 +265,25 @@ esp_err_t power_board_get_snapshot(power_board_snapshot_t *out)
     /* Temperature (float type) */
     {
         float temp = 0.0f;
-        Result r = Board.getBatteryTemperature(temp);
-        if (r == Result::Ok) out->batt_temp_c = temp;
+        Result r = s_ts_enabled ? Board.getBatteryTemperature(temp) : Result::InvalidState;
+        if (r == Result::Ok) {
+            out->batt_temp_c = temp;
+        } else if (cached_temp_valid) {
+            out->batt_temp_c = cached_temp_c;
+        }
         record_err(r);
+
+        /* If the thermistor path is unavailable, push SHT45 temp into the fuel gauge */
+        if (cached_temp_valid && r != Result::Ok) {
+            if (cached_temp_c < LC709204F::MinTemperature || cached_temp_c > LC709204F::MaxTemperature) {
+                ESP_LOGD(TAG, "Skipping fuel gauge temp update: cached temp %.2f C out of range", cached_temp_c);
+            } else {
+                Result rr = Board.updateBatteryFuelGaugeTemp(cached_temp_c);
+                if (rr != Result::Ok && rr != Result::InvalidState && rr != Result::NotReady) {
+                    ESP_LOGW(TAG, "Fuel gauge temp update failed: %d", static_cast<int>(rr));
+                }
+            }
+        }
     }
 
     /*
