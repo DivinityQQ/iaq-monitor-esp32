@@ -474,15 +474,10 @@ static esp_err_t ws_log_handler(httpd_req_t *req)
 {
     int sock = httpd_req_to_sockfd(req);
     if (req->method == HTTP_GET) {
-        char token_buf[128];
-        web_console_auth_result_t auth = web_console_check_auth(req, token_buf, sizeof(token_buf));
-        if (!auth.valid) {
+        if (!web_console_check_auth(req)) {
             httpd_resp_set_status(req, "401 Unauthorized");
             (void)httpd_resp_send(req, NULL, 0);
             return ESP_FAIL;
-        }
-        if (auth.via_subproto) {
-            httpd_resp_set_hdr(req, "Sec-WebSocket-Protocol", auth.subproto_echo);
         }
 
         /* Capture current head as history boundary BEFORE adding client.

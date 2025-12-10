@@ -23,79 +23,28 @@ void web_console_set_server(httpd_handle_t server)
     s_server = server;
 }
 
-/* Parse Bearer token from Authorization or Sec-WebSocket-Protocol. */
-web_console_auth_result_t web_console_check_auth(httpd_req_t *req, char *token_buf, size_t buf_len)
+/* Parse token from query parameter ?token=XXX */
+bool web_console_check_auth(httpd_req_t *req)
 {
-    web_console_auth_result_t result = { .valid = false, .via_subproto = false, .subproto_echo = {0} };
+    if (!req) return false;
 
-    if (!req || !token_buf || buf_len == 0) {
-        return result;
+    /* Empty token in Kconfig = reject all connections. */
+    if (strlen(CONFIG_IAQ_WEB_CONSOLE_TOKEN) == 0) return false;
+
+    size_t query_len = httpd_req_get_url_query_len(req);
+    if (query_len == 0 || query_len >= 256) return false;
+
+    char query[256];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        return false;
     }
 
-    /* Empty token in Kconfig = no valid token can be provided = reject all connections.
-     * To allow access, configure a non-empty IAQ_WEB_CONSOLE_TOKEN. */
-    if (strlen(CONFIG_IAQ_WEB_CONSOLE_TOKEN) == 0) {
-        return result;
+    char token[128];
+    if (httpd_query_key_value(query, "token", token, sizeof(token)) != ESP_OK) {
+        return false;
     }
 
-    /* Method 1: Authorization: Bearer <token> */
-    char auth_hdr[256];
-    esp_err_t hdr_err = httpd_req_get_hdr_value_str(req, "Authorization", auth_hdr, sizeof(auth_hdr));
-    if (hdr_err == ESP_ERR_HTTPD_RESULT_TRUNC) {
-        ESP_LOGW(TAG, "Authorization header truncated; token likely too long");
-    }
-    if (hdr_err == ESP_OK) {
-        if (strncasecmp(auth_hdr, "bearer ", 7) == 0) {
-            const char *tok = auth_hdr + 7;
-            while (*tok == ' ') tok++;
-            size_t len = strlen(tok);
-            while (len > 0 && tok[len - 1] == ' ') len--;
-            if (len > 0 && len < buf_len) {
-                memcpy(token_buf, tok, len);
-                token_buf[len] = '\0';
-                if (strcmp(token_buf, CONFIG_IAQ_WEB_CONSOLE_TOKEN) == 0) {
-                    result.valid = true;
-                    return result;
-                }
-            }
-        }
-    }
-
-    /* Method 2: Sec-WebSocket-Protocol: bearer,<token> (comma separated list) */
-    char proto_hdr[256];  /* Reduced from 512; ample for bearer + token */
-    hdr_err = httpd_req_get_hdr_value_str(req, "Sec-WebSocket-Protocol", proto_hdr, sizeof(proto_hdr));
-    if (hdr_err == ESP_ERR_HTTPD_RESULT_TRUNC) {
-        ESP_LOGW(TAG, "Sec-WebSocket-Protocol header truncated; token likely too long");
-    }
-    if (hdr_err == ESP_OK) {
-        char *saveptr = NULL;
-        char *entry = strtok_r(proto_hdr, ",", &saveptr);
-        while (entry) {
-            while (*entry == ' ') entry++;
-            char *end = entry + strlen(entry) - 1;
-            while (end > entry && *end == ' ') *end-- = '\0';
-
-            if (strncasecmp(entry, "bearer", 6) == 0) {
-                const char *tok = entry + 6;
-                while (*tok == ' ') tok++;
-                /* If no token follows "bearer", keep scanning other entries */
-                if (*tok == '\0') {
-                    strlcpy(result.subproto_echo, "bearer", sizeof(result.subproto_echo));
-                } else if (strlen(tok) < buf_len) {
-                    strlcpy(token_buf, tok, buf_len);
-                    if (strcmp(token_buf, CONFIG_IAQ_WEB_CONSOLE_TOKEN) == 0) {
-                        result.valid = true;
-                        result.via_subproto = true;
-                        strlcpy(result.subproto_echo, "bearer", sizeof(result.subproto_echo));
-                        return result;
-                    }
-                }
-            }
-            entry = strtok_r(NULL, ",", &saveptr);
-        }
-    }
-
-    return result;
+    return strcmp(token, CONFIG_IAQ_WEB_CONSOLE_TOKEN) == 0;
 }
 
 esp_err_t web_console_init(void)

@@ -1,5 +1,6 @@
 **Overview**
 - Serves a single-page app from LittleFS at `/` (if present) and exposes a REST API under `/api/v1/*` plus a WebSocket at `/ws`.
+- Developer web console (optional) exposes `/ws/log` and `/ws/console` (Bearer token required via `Authorization` or `Sec-WebSocket-Protocol: bearer,<token>`; empty token disables access).
 - Protocol selection simplified for UX clarity:
   - AP-only (provisioning): HTTP only (better captive portal compatibility).
   - STA or AP+STA: HTTPS when `IAQ_WEB_PORTAL_ENABLE_HTTPS=y`.
@@ -97,11 +98,16 @@
  - Heartbeats: server sends WS PINGs periodically; stale clients are removed if no PONG within timeout.
 - Timers only run while at least one WS client is connected.
 
+**Web Console (dev)**
+- Auth: `IAQ_WEB_CONSOLE_TOKEN` (required). Pass as query parameter: `/ws/log?token=<token>`. Empty token in config disables access.
+- Logs: `/ws/log?token=<token>` streams plain-text stdout/stderr + ESP_LOG lines. On connect, the device dumps buffered history (`IAQ_WEB_CONSOLE_LOG_BUFFER_SIZE`, lines truncated to `IAQ_WEB_CONSOLE_LOG_LINE_MAX`), then live tails. Max clients: `IAQ_WEB_CONSOLE_MAX_LOG_CLIENTS`. Client frames are ignored except control (PING/PONG/CLOSE).
+- Console: `/ws/console?token=<token>` is an interactive shell (single client at a time; others are closed with "Console busy"). Send commands as text frames (newline/space trimmed). Limits: `IAQ_WEB_CONSOLE_MAX_CMD_LEN`, rate `IAQ_WEB_CONSOLE_CMD_RATE_LIMIT` cmds/sec. Replies are text output from `esp_console` plus prompt `(<rc>) iaq> `.
+
 **Captive Portal (AP‑only)**
 - DNS redirect server answers all A queries with the SoftAP IP.
 - DHCP option 114 set to `http://<ap_ip>`.
 - HTTP 404s redirect to `/`.
-- Enabled only when running AP‑only (not AP+STA). In AP+STA the portal may be HTTPS if STA is connected.
+- Enabled only when running AP-only (not AP+STA). In AP+STA the portal may be HTTPS if STA is connected.
 
 **Conventions & Notes**
 - All timestamps/durations are seconds unless noted.
@@ -122,6 +128,8 @@
   - `curl -X POST http://<ip>/api/v1/sensor/sht45/cadence -H 'Content-Type: application/json' -d '{"ms":5000}'`
   - `curl http://<ip>/api/v1/power`
   - `curl -X POST http://<ip>/api/v1/power/outputs -H 'Content-Type: application/json' -d '{"en":true,"v3v_on":true,"vsqt_on":true}'`
+  - `websocat 'ws://<ip>/ws/log?token=<token>'`
+  - `websocat 'ws://<ip>/ws/console?token=<token>'`
 
 - HTTPS with self‑signed cert:
   - When HTTPS is enabled and the device uses a self‑signed certificate (default), add `-k` (`--insecure`) to curl:

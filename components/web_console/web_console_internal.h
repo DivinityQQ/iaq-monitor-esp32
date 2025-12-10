@@ -33,14 +33,8 @@
  * Prevents hangs if a bug causes mutex to not be released. */
 #define WC_MUTEX_TIMEOUT_MS 1000
 
-typedef struct {
-    bool valid;
-    bool via_subproto;
-    char subproto_echo[32];
-} web_console_auth_result_t;
-
-/* Auth helpers */
-web_console_auth_result_t web_console_check_auth(httpd_req_t *req, char *token_buf, size_t buf_len);
+/* Auth helper - validates token from query parameter */
+bool web_console_check_auth(httpd_req_t *req);
 
 /* Server accessors */
 httpd_handle_t web_console_get_server(void);
