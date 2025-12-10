@@ -1,13 +1,13 @@
 # IAQ Monitor (ESP32-S3, ESP-IDF)
 Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, runtime power management, a built‑in web portal, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery. Optional PowerFeather board support adds charger/fuel‑gauge telemetry and power rail control.
-Current version: 0.11.0
+Current version: 0.11.7
 ## Features
-- Connectivity & automation: Wi‑Fi station mode with NVS‑stored credentials, captive‑portal provisioning that lands on the dashboard, MQTT 5.0 with HA auto‑discovery, HTTP/S REST API + WebSocket streaming with OTA firmware/frontend uploads, and a console for on‑device setup.
+- Connectivity & automation: Wi‑Fi station mode with NVS‑stored credentials, captive‑portal provisioning that lands on the dashboard, MQTT 5.0 with HA auto‑discovery, HTTP/S REST API + WebSocket streaming with OTA firmware/frontend uploads, and a console for on‑device setup (plus token‑protected web console + log streaming in the portal).
 - Sensors & fusion: Six real sensor drivers (MCU temp, SHT45, BMP280, SGP41, PMS5003, Senseair S8) with cross‑sensor compensation, derived metrics (AQI, comfort, CO₂ rate, PM spikes, mold risk, pressure trends), and full simulation mode for hardware‑free testing.
 - Power & platform: Runtime power management (DFS + light sleep) guarded by shared PM locks; optional PowerFeather board integration via the official SDK with rail control, charger/fuel‑gauge telemetry, MQTT `/power` topic, REST/WebSocket `/power`, console `power` controls, and a portal Power dashboard for battery/rails/alarms.
 - UI: SH1106 OLED with smooth warm‑up indicator, night schedule, and button navigation; on‑device SPA web portal served from LittleFS with consistent dashboard/config/health panels, charts, notifications, and a System Update tab for OTA firmware/frontend uploads with progress + rollback.
 - Security: MQTT TLS (custom CA, mutual TLS, AWS IoT ALPN) and HTTPS with built‑in or user‑provided certificates plus gzip static serving and SPA fallback.
-- Reliability & observability: Central data model with explicit "no data" sentinels, per‑sensor cadences/warm‑up countdowns, staggered timers, error recovery, time sync events, watchdog integration, profiling hooks, and non‑blocking MQTT publishing with queue coalescing.
+- Reliability & observability: Central data model with explicit "no data" sentinels, per‑sensor cadences/warm‑up countdowns, staggered timers, error recovery, time sync events, watchdog integration, profiling hooks, non‑blocking MQTT publishing with queue coalescing, and automatic rollback after boot‑loops.
 ## Hardware/Software
 - Target: ESP32‑S3 (DevKit and PowerFeather board)
 - SDK: ESP‑IDF v5.5.1+
@@ -72,6 +72,7 @@ mqtt restart
   - `curl http://<ip>/api/v1/metrics`
   - `curl http://<ip>/api/v1/health`
   - `curl http://<ip>/api/v1/power`
+- Developer console: Console tab streams `/ws/log` (device logs) and `/ws/console` (interactive shell). Auth via bearer token in the WebSocket URI query (`?token=`); one console client at a time.
 - OTA updates: `/api/v1/ota/info`, POST firmware bins to `/api/v1/ota/firmware`, LittleFS images to `/api/v1/ota/frontend`, and rollback with `/api/v1/ota/rollback` (also available in the portal Update tab with live progress).
 - Power controls (PowerFeather): `POST /api/v1/power/outputs`, `/power/charger`, `/power/alarms`, `/power/ship`, `/power/shutdown`, `/power/cycle`.
 
@@ -240,7 +241,7 @@ sensor cadence set <sensor> <ms>
 - For new settings, consider Kconfig defaults and NVS persistence
 - Follow CONTRIBUTING.md for coding and component guidelines
 ## Development Status
-**Current Status (v0.11.0)**
+**Current Status (v0.11.7)**
 - ✅ Core infrastructure (Wi‑Fi, MQTT 5.0, Home Assistant auto‑discovery)
 - ✅ 6 sensor drivers with real hardware support (MCU, SHT45, BMP280, SGP41, PMS5003, S8)
 - ✅ Full simulation mode for testing without hardware

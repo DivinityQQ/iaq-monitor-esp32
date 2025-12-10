@@ -4,6 +4,22 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog, and the project adheres to Semantic Versioning.
 
+## [0.11.7] - 2025-12-10
+
+Developer console + safety release: token-protected web console/log streaming, portal console UI, power polish, and bootloop rollback.
+
+Added:
+- Backend web console component exposing `/ws/log` and `/ws/console`, bridging `esp_console` with buffering, rate limiting, and optional enable flags (token passed via `?token=`).
+- Web portal Console tab with log viewer, command input, token dialog, and ANSI parsing for an interactive shell + live logs.
+
+Changed:
+- Web console/log authentication now uses bearer tokens in the WebSocket query (`?token=`) with improved capture/queueing and graceful busy rejection.
+- Power dashboard battery status shows clearer charge/discharge time estimates; fuel-gauge ambient temperature falls back to board temp when the thermistor is unavailable to keep estimates stable.
+
+Fixed:
+- Ignore zero-length control frames and prevent console blocking when a session is already active.
+- Enable automatic rollback on boot loops to recover from bad OTA images.
+
 ## [0.11.0] - 2025-12-08
 
 OTA-focused release: dual-slot firmware/frontend OTA with rollback, new portal Update tab, and power UI polish.
