@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import { selectAtom } from 'jotai/utils';
+import { atomWithStorage, selectAtom } from 'jotai/utils';
 import type { State, Metrics, Health, Power, DeviceInfo, SensorId, SensorCadence, MQTTStatus, OTAProgress, OTAVersionInfo } from '../api/types';
 // Color derivations moved to components using theme CSS variables for live updates
 import { getBuffersVersion } from '../utils/streamBuffers';
@@ -180,3 +180,19 @@ export const wifiSignalCategoryAtom = atom((get) => {
   if (rssi >= -70) return 'Fair';
   return 'Poor';
 });
+
+// ============================================================================
+// WEB CONSOLE ATOMS
+// ============================================================================
+
+/**
+ * Console bearer token (persisted to localStorage)
+ * Used for authentication with /ws/log and /ws/console endpoints
+ */
+export const consoleTokenAtom = atomWithStorage<string>('iaq-console-token', '');
+
+/**
+ * Console toggle state (session-only)
+ * Starts disabled every visit to avoid auto-reconnecting
+ */
+export const consoleEnabledAtom = atom<boolean>(false);

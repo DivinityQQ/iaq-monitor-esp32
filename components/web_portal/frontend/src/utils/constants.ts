@@ -23,3 +23,20 @@ export const WS_MAX_RECONNECT_INTERVAL = 10000;
 
 /** Base reconnection interval (milliseconds) */
 export const WS_BASE_RECONNECT_INTERVAL = 1000;
+
+// Typography
+/** Monospace font stack for console/code display */
+export const MONOSPACE_FONT = 'Monaco, Consolas, "Liberation Mono", "Courier New", monospace';
+
+/**
+ * Build WebSocket URL for a given endpoint
+ * Handles both development (proxied) and production environments
+ * @param endpoint - The WebSocket endpoint path (e.g., '/ws', '/ws/log')
+ * @param token - Optional authentication token to include as query param
+ */
+export function buildWsUrl(endpoint: string, token?: string): string {
+  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
+  const host = window.location.host;
+  const base = `${protocol}//${host}${endpoint}`;
+  return token ? `${base}?token=${encodeURIComponent(token)}` : base;
+}

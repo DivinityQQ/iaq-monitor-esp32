@@ -12,20 +12,7 @@ import {
   otaProgressAtom,
 } from '../store/atoms';
 import { logger } from '../utils/logger';
-
-/**
- * Get WebSocket URL based on current protocol and environment
- * - Development: Proxied via Vite (ws://localhost:5173/ws → ws://ESP32_IP/ws)
- * - Production: Direct connection to ESP32 (ws:// or wss:// based on page protocol)
- */
-const getWebSocketUrl = (): string => {
-  const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:';
-  const host = import.meta.env.DEV
-    ? window.location.host // Use Vite dev server for proxy
-    : window.location.host; // Use current host in production
-
-  return `${protocol}//${host}/ws`;
-};
+import { buildWsUrl } from '../utils/constants';
 
 /**
  * Custom hook for WebSocket connection to ESP32 device
@@ -51,7 +38,7 @@ export function useWebSocketConnection() {
 
   // WebSocket connection with react-use-websocket
   const { sendMessage, lastMessage, readyState } = useWebSocket(
-    getWebSocketUrl(),
+    buildWsUrl('/ws'),
     {
       // Reconnection strategy: exponential backoff with 10s cap
       shouldReconnect: () => true, // Always reconnect

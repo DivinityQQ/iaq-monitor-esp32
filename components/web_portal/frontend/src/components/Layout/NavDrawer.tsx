@@ -11,6 +11,7 @@ import SettingsIcon from '@mui/icons-material/Settings';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
 import BatteryChargingFullIcon from '@mui/icons-material/BatteryChargingFull';
 import SystemUpdateIcon from '@mui/icons-material/SystemUpdate';
+import TerminalIcon from '@mui/icons-material/Terminal';
 import { useLocation } from 'wouter';
 
 interface NavDrawerProps {
@@ -27,6 +28,7 @@ const navItems = [
   { label: 'Health', icon: <HealthAndSafetyIcon />, path: '/health' },
   { label: 'Power', icon: <BatteryChargingFullIcon />, path: '/power' },
   { label: 'Update', icon: <SystemUpdateIcon />, path: '/update' },
+  { label: 'Console', icon: <TerminalIcon />, path: '/console' },
 ];
 
 export function NavDrawer({ open, onClose }: NavDrawerProps) {
