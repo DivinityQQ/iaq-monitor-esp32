@@ -166,8 +166,13 @@ static void ota_validation_task(void *arg)
             }
         }
         if ((esp_timer_get_time() - start_us) >= timeout_us) {
-            esp_err_t r = ota_manager_mark_valid();
-            ESP_LOGW(TAG, "OTA self-test timeout reached; marking firmware valid (r=%s)", esp_err_to_name(r));
+            esp_err_t r = ota_manager_rollback();
+            if (r == ESP_OK) {
+                ESP_LOGW(TAG, "OTA self-test timeout reached; rolling back to previous firmware");
+            } else {
+                ESP_LOGE(TAG, "OTA self-test timeout; rollback unavailable (r=%s). Marking current image valid to avoid boot loop", esp_err_to_name(r));
+                (void)ota_manager_mark_valid();
+            }
             break;
         }
         vTaskDelay(pdMS_TO_TICKS(1000));
