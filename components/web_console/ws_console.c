@@ -2,6 +2,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <stdbool.h>
+#include <arpa/inet.h>
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "esp_err.h"
@@ -46,7 +47,7 @@ static void console_client_cleanup(int sock)
     if (s_console_sock == sock) {
         s_console_sock = -1;
         s_last_cmd_time = 0;
-        ESP_LOGI(TAG, "Console client %d disconnected", sock);
+        ESP_LOGI(TAG, "Console client closed: %d", sock);
     }
     xSemaphoreGive(s_console_mutex);
 }
@@ -91,10 +92,20 @@ static esp_err_t ws_console_handler(httpd_req_t *req)
             return ESP_FAIL;
         }
         if (s_console_sock >= 0) {
+            /* Gracefully reject with proper close code + reason */
             xSemaphoreGive(s_console_mutex);
-            httpd_ws_frame_t closefrm = { .type = HTTPD_WS_TYPE_CLOSE, .payload = (uint8_t *)"Console busy", .len = 12 };
+            static const char *reason = "Console busy";
+            uint16_t code = htons(1013); /* Try Again Later */
+            uint8_t payload[2 + sizeof("Console busy")]; /* includes NUL but len excludes */
+            memcpy(payload, &code, sizeof(code));
+            memcpy(payload + 2, reason, strlen(reason));
+            httpd_ws_frame_t closefrm = {
+                .type = HTTPD_WS_TYPE_CLOSE,
+                .payload = payload,
+                .len = 2 + strlen(reason),
+            };
             (void)httpd_ws_send_frame(req, &closefrm);
-            return ESP_FAIL;
+            return ESP_OK;
         }
         s_console_sock = sock;
         s_last_cmd_time = 0;
@@ -111,6 +122,27 @@ static esp_err_t ws_console_handler(httpd_req_t *req)
         return ret;
     }
 
+    /* Handle zero-length control frames without blocking on payload */
+    if (frame.len == 0) {
+        if (frame.type == HTTPD_WS_TYPE_CLOSE) {
+            console_client_cleanup(sock);
+            httpd_ws_frame_t closefrm = { .type = HTTPD_WS_TYPE_CLOSE };
+            (void)httpd_ws_send_frame(req, &closefrm);
+            return ESP_OK;
+        }
+        if (frame.type == HTTPD_WS_TYPE_PING) {
+            httpd_ws_frame_t pong = { .type = HTTPD_WS_TYPE_PONG, .payload = NULL, .len = 0 };
+            (void)httpd_ws_send_frame(req, &pong);
+            return ESP_OK;
+        }
+        if (frame.type != HTTPD_WS_TYPE_TEXT) {
+            return ESP_OK;
+        }
+        /* Empty text frame -> just re-prompt */
+        send_text(req, "iaq> ");
+        return ESP_OK;
+    }
+
     /* Bound allocation BEFORE malloc to prevent malicious large frames */
     size_t max_len = CONFIG_IAQ_WEB_CONSOLE_MAX_CMD_LEN;
     if (frame.type == HTTPD_WS_TYPE_TEXT && frame.len > max_len) {
@@ -124,7 +156,6 @@ static esp_err_t ws_console_handler(httpd_req_t *req)
     if (frame.type == HTTPD_WS_TYPE_CLOSE || frame.type == HTTPD_WS_TYPE_PING) {
         if (alloc_len > 125) alloc_len = 125;
     }
-    if (alloc_len == 0) alloc_len = 1;
 
     frame.payload = malloc(alloc_len + 1);
     if (!frame.payload) {
