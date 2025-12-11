@@ -274,6 +274,15 @@ bool ota_manager_is_busy(void)
 esp_err_t ota_firmware_begin(size_t total_size, ota_progress_cb_t cb)
 {
     if (total_size == 0) return ESP_ERR_INVALID_ARG;
+    const esp_partition_t *running = esp_ota_get_running_partition();
+    if (running) {
+        esp_ota_img_states_t st = ESP_OTA_IMG_UNDEFINED;
+        if (esp_ota_get_state_partition(running, &st) == ESP_OK &&
+            st == ESP_OTA_IMG_PENDING_VERIFY) {
+            ESP_LOGW(TAG, "Firmware is pending verification; blocking new OTA to preserve rollback");
+            return ESP_ERR_INVALID_STATE;
+        }
+    }
     if (!ota_can_start()) return ESP_ERR_INVALID_STATE;
 
     const esp_partition_t *update_partition = esp_ota_get_next_update_partition(NULL);
@@ -317,6 +326,7 @@ esp_err_t ota_firmware_write(const void *data, size_t len)
     if (!data || len == 0) return ESP_ERR_INVALID_ARG;
     const esp_partition_t *part = NULL;
     esp_ota_handle_t handle = 0;
+    bool handle_valid = false;
     size_t received_before = 0;
     bool do_header_check = false;
 
@@ -327,6 +337,7 @@ esp_err_t ota_firmware_write(const void *data, size_t len)
     }
     part = s_ctx.target_partition;
     handle = s_ctx.fw_handle;
+    handle_valid = s_ctx.fw_handle_valid;
     received_before = s_ctx.received_size;
     if (!s_ctx.header_checked &&
         (received_before + len) >= (sizeof(esp_image_header_t) + sizeof(esp_app_desc_t))) {
@@ -343,6 +354,10 @@ esp_err_t ota_firmware_write(const void *data, size_t len)
             s_ctx.state = OTA_STATE_ERROR;
             ota_unlock();
         }
+        if (handle_valid) {
+            (void)esp_ota_abort(handle);
+            handle_valid = false;
+        }
         ota_emit_progress(true, "FW image exceeds partition");
         return ESP_ERR_INVALID_SIZE;
     }
@@ -354,14 +369,11 @@ esp_err_t ota_firmware_write(const void *data, size_t len)
             s_ctx.state = OTA_STATE_ERROR;
             ota_unlock();
         }
-        ota_emit_progress(true, "FW write failed");
-        if (ota_lock()) {
-            if (s_ctx.fw_handle_valid) {
-                (void)esp_ota_abort(s_ctx.fw_handle);
-                s_ctx.fw_handle_valid = false;
-            }
-            ota_unlock();
+        if (handle_valid) {
+            (void)esp_ota_abort(handle);
+            handle_valid = false;
         }
+        ota_emit_progress(true, "FW write failed");
         return r;
     }
 
@@ -374,14 +386,11 @@ esp_err_t ota_firmware_write(const void *data, size_t len)
                 s_ctx.state = OTA_STATE_ERROR;
                 ota_unlock();
             }
-            ota_emit_progress(true, "FW header invalid");
-            if (ota_lock()) {
-                if (s_ctx.fw_handle_valid) {
-                    (void)esp_ota_abort(s_ctx.fw_handle);
-                    s_ctx.fw_handle_valid = false;
-                }
-                ota_unlock();
+            if (handle_valid) {
+                (void)esp_ota_abort(handle);
+                handle_valid = false;
             }
+            ota_emit_progress(true, "FW header invalid");
             return ESP_ERR_INVALID_ARG;
         }
 
@@ -395,14 +404,11 @@ esp_err_t ota_firmware_write(const void *data, size_t len)
                     s_ctx.state = OTA_STATE_ERROR;
                     ota_unlock();
                 }
-                ota_emit_progress(true, "FW project mismatch");
-                if (ota_lock()) {
-                    if (s_ctx.fw_handle_valid) {
-                        (void)esp_ota_abort(s_ctx.fw_handle);
-                        s_ctx.fw_handle_valid = false;
-                    }
-                    ota_unlock();
+                if (handle_valid) {
+                    (void)esp_ota_abort(handle);
+                    handle_valid = false;
                 }
+                ota_emit_progress(true, "FW project mismatch");
                 return ESP_ERR_INVALID_VERSION;
             }
         }

@@ -824,6 +824,12 @@ static esp_err_t api_ota_info_get(httpd_req_t *req)
 
 static esp_err_t api_ota_firmware_post(httpd_req_t *req)
 {
+    ota_runtime_info_t rt = {0};
+    (void)ota_manager_get_runtime(&rt);
+    if (rt.pending_verify) {
+        respond_error(req, 409, "OTA_PENDING_VERIFY", "Current firmware awaiting verification; reboot or complete validation/rollback before uploading new firmware");
+        return ESP_OK;
+    }
     if (ota_manager_is_busy()) {
         respond_error(req, 409, "OTA_BUSY", "Another OTA update is in progress");
         return ESP_OK;
@@ -845,6 +851,10 @@ static esp_err_t api_ota_firmware_post(httpd_req_t *req)
 
     esp_err_t r = ota_firmware_begin((size_t)req->content_len, ota_progress_ws_cb);
     if (r != ESP_OK) {
+        if (r == ESP_ERR_INVALID_STATE) {
+            respond_error(req, 409, "OTA_PENDING_VERIFY", "Current firmware awaiting verification; reboot or complete validation/rollback before uploading new firmware");
+            return ESP_OK;
+        }
         respond_error(req, 500, "OTA_BEGIN_FAILED", esp_err_to_name(r));
         return ESP_OK;
     }
