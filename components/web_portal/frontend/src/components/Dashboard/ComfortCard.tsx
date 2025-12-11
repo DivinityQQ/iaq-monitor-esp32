@@ -4,14 +4,16 @@ import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import Collapse from '@mui/material/Collapse';
 import Grid from '@mui/material/Grid';
-import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import SentimentSatisfiedAltIcon from '@mui/icons-material/SentimentSatisfiedAlt';
-import { metricsAtom, sensorStatusMapAtom } from '../../store/atoms';
+import { metricsAtom } from '../../store/atoms';
 import { getComfortColorVar } from '../../theme';
+import { FeaturedCardSkeleton } from '../Common/FeaturedCardSkeleton';
+import { featuredCardSx } from '../Common/cardStyles';
+import { useSensorStaleStatus } from '../../hooks/useSensorStaleStatus';
 
 /**
  * Featured Comfort Score card component
@@ -28,65 +30,27 @@ import { getComfortColorVar } from '../../theme';
 export function ComfortCard() {
   const theme = useTheme();
   const metrics = useAtomValue(metricsAtom);
-  const sensorStatusMap = useAtomValue(sensorStatusMapAtom);
   const [expanded, setExpanded] = useState(false);
+
+  // Comfort depends on temperature & humidity (SHT45)
+  const { isStale, staleReason } = useSensorStaleStatus([
+    { id: 'sht45', label: 'Temp/Humidity' },
+  ]);
+
   // Show loading skeleton until we have a complete comfort snapshot
   if (!metrics?.comfort ||
       typeof metrics.comfort.score !== 'number' ||
       typeof metrics.comfort.heat_index_c !== 'number' ||
       typeof metrics.comfort.abs_humidity_gm3 !== 'number' ||
       typeof metrics.comfort.dew_point_c !== 'number') {
-    return (
-      <Card sx={{ height: '100%', minHeight: 280 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-            <Skeleton variant="circular" width={32} height={32} />
-            <Skeleton variant="text" width="50%" height={32} />
-          </Box>
-          <Skeleton variant="text" width="60%" height={72} sx={{ mb: 1 }} />
-          <Skeleton variant="rectangular" width="50%" height={32} sx={{ mb: 2, borderRadius: 2 }} />
-          <Grid container spacing={1}>
-            <Grid size={{ xs: 4 }}>
-              <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
-            </Grid>
-            <Grid size={{ xs: 4 }}>
-              <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
-            </Grid>
-            <Grid size={{ xs: 4 }}>
-              <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-    );
+    return <FeaturedCardSkeleton />;
   }
 
   const { score, category, heat_index_c, abs_humidity_gm3, dew_point_c } = metrics.comfort;
   const comfortColor = getComfortColorVar(score, theme);
 
-  // Comfort depends on temperature & humidity (SHT45); derive stale status
-  const staleSensors: string[] = [];
-  const sht = sensorStatusMap?.sht45;
-  if (sht?.stale || sht?.state === 'ERROR' || sht?.state === 'DISABLED') staleSensors.push('Temp/Humidity');
-  const isStale = staleSensors.length > 0;
-  const staleReason = isStale ? `Stale • ${staleSensors.join(', ')} sensor` : '';
-
   return (
-    <Card
-      onClick={() => setExpanded(!expanded)}
-      sx={{
-        height: '100%',
-        minHeight: 280,
-        background: `linear-gradient(135deg, color-mix(in srgb, ${comfortColor} 15%, transparent) 0%, color-mix(in srgb, ${comfortColor} 5%, transparent) 100%)`,
-        border: `2px solid color-mix(in srgb, ${comfortColor} 25%, transparent)`,
-        transition: 'transform 0.2s, box-shadow 0.2s',
-        cursor: 'pointer',
-        '&:hover': {
-          transform: 'translateY(-4px)',
-          boxShadow: (theme) => theme.shadows[8],
-        },
-      }}
-    >
+    <Card onClick={() => setExpanded(!expanded)} sx={featuredCardSx(comfortColor)}>
       <CardContent>
         {/* Header */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>

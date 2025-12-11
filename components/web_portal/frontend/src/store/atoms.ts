@@ -1,5 +1,5 @@
 import { atom } from 'jotai';
-import { atomWithStorage, selectAtom } from 'jotai/utils';
+import { atomFamily, atomWithStorage, selectAtom } from 'jotai/utils';
 import type { State, Metrics, Health, Power, DeviceInfo, SensorId, SensorCadence, MQTTStatus, OTAProgress, OTAVersionInfo } from '../api/types';
 // Color derivations moved to components using theme CSS variables for live updates
 import { getBuffersVersion } from '../utils/streamBuffers';
@@ -36,6 +36,12 @@ export const deviceInfoAtom = atom<DeviceInfo | null>(null);
  * MQTT status (fetched once via REST API on mount)
  */
 export const mqttStatusAtom = atom<MQTTStatus | null>(null);
+
+/**
+ * Bootstrap error state - set when initial REST API calls fail
+ * Used to show "cannot reach device" UI instead of infinite loading
+ */
+export const bootstrapErrorAtom = atom<string | null>(null);
 
 /**
  * OTA update progress (updated via WebSocket during OTA)
@@ -159,14 +165,15 @@ export const refreshOTAInfoAtom = atom(null, async (_get, set) => {
 // ============================================================================
 
 /**
- * Sensor status by ID atom factory
- * Creates a derived atom that extracts status for a specific sensor
+ * Sensor status by ID atom (uses atomFamily for stable atom references)
+ * Returns the status for a specific sensor from the health data
  */
-export const sensorStatusAtom = (sensorId: SensorId) =>
+export const sensorStatusAtom = atomFamily((sensorId: SensorId) =>
   atom((get) => {
     const sensors = get(sensorStatusMapAtom);
     return sensors?.[sensorId] ?? null;
-  });
+  })
+);
 
 /**
  * WiFi signal strength category atom

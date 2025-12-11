@@ -62,7 +62,10 @@ export function SensorCard({
   const hasCurrent = typeof value === 'number' && !Number.isNaN(value);
   const hasLast = typeof lastValue === 'number' && !Number.isNaN(lastValue as number);
 
-  const status = sensorId ? useAtomValue(sensorStatusAtom(sensorId)) : null;
+  // Always call hook unconditionally (Rules of Hooks), use fallback sensorId
+  const rawStatus = useAtomValue(sensorStatusAtom(sensorId ?? 'mcu'));
+  // Only use status if sensorId was actually provided
+  const status = sensorId ? rawStatus : null;
   const sensorState = status?.state;
   const lastReadSeconds = status?.last_read_s;
 

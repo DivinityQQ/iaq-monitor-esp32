@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useEffect } from 'react';
 import Box from '@mui/material/Box';
 import Button from '@mui/material/Button';
 import Card from '@mui/material/Card';
@@ -61,6 +61,13 @@ export function WiFiConfig() {
   const [passwordError, setPasswordError] = useState<string | null>(null);
 
   const wifiConnected = deviceInfo?.network?.wifi_connected || false;
+
+  // Cleanup: abort any in-flight scan when component unmounts
+  useEffect(() => {
+    return () => {
+      scanAbortController.current?.abort();
+    };
+  }, []);
 
   const handleScan = async () => {
     // Cancel any ongoing scan

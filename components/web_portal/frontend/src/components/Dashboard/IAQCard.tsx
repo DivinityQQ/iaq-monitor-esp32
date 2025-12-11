@@ -4,14 +4,16 @@ import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import Collapse from '@mui/material/Collapse';
 import Grid from '@mui/material/Grid';
-import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
-import { metricsAtom, sensorStatusMapAtom } from '../../store/atoms';
+import { metricsAtom } from '../../store/atoms';
 import { getIAQColorVar } from '../../theme';
+import { FeaturedCardSkeleton } from '../Common/FeaturedCardSkeleton';
+import { featuredCardSx } from '../Common/cardStyles';
+import { useSensorStaleStatus } from '../../hooks/useSensorStaleStatus';
 
 /**
  * Featured IAQ (Indoor Air Quality) score card component
@@ -29,54 +31,27 @@ import { getIAQColorVar } from '../../theme';
 export function IAQCard() {
   const theme = useTheme();
   const metrics = useAtomValue(metricsAtom);
-  const sensorStatusMap = useAtomValue(sensorStatusMapAtom);
   const [expanded, setExpanded] = useState(false);
+
+  // IAQ uses multiple sensors
+  const { isStale, staleReason } = useSensorStaleStatus([
+    { id: 'sht45', label: 'Temp/Humidity' },
+    { id: 'bmp280', label: 'Pressure' },
+    { id: 'pms5003', label: 'PM' },
+    { id: 's8', label: 'CO₂' },
+  ]);
+
   // Show loading skeleton until we have a complete metrics snapshot
   if (!metrics?.overall_iaq_score ||
       typeof metrics.overall_iaq_score !== 'number' ||
       !metrics.aqi || typeof metrics.aqi.value !== 'number' ||
       typeof metrics.co2_score !== 'number' ||
       !metrics.comfort || typeof metrics.comfort.score !== 'number') {
-    return (
-      <Card sx={{ height: '100%', minHeight: 280 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-            <Skeleton variant="circular" width={32} height={32} />
-            <Skeleton variant="text" width="60%" height={32} />
-          </Box>
-          <Skeleton variant="text" width="60%" height={72} sx={{ mb: 1 }} />
-          <Skeleton variant="rectangular" width="50%" height={32} sx={{ mb: 2, borderRadius: 2 }} />
-          <Grid container spacing={1}>
-            <Grid size={{ xs: 4 }}>
-              <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
-            </Grid>
-            <Grid size={{ xs: 4 }}>
-              <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
-            </Grid>
-            <Grid size={{ xs: 4 }}>
-              <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-    );
+    return <FeaturedCardSkeleton />;
   }
 
   const iaqScore = metrics.overall_iaq_score;
   const iaqColor = getIAQColorVar(iaqScore, theme);
-
-  // Derive stale reason from backend sensor statuses
-  const staleSensors: string[] = [];
-  const sht = sensorStatusMap?.sht45;
-  const bmp = sensorStatusMap?.bmp280;
-  const pms = sensorStatusMap?.pms5003;
-  const s8 = sensorStatusMap?.s8;
-  if (sht?.stale || sht?.state === 'ERROR' || sht?.state === 'DISABLED') staleSensors.push('Temp/Humidity');
-  if (bmp?.stale || bmp?.state === 'ERROR' || bmp?.state === 'DISABLED') staleSensors.push('Pressure');
-  if (pms?.stale || pms?.state === 'ERROR' || pms?.state === 'DISABLED') staleSensors.push('PM');
-  if (s8?.stale || s8?.state === 'ERROR' || s8?.state === 'DISABLED') staleSensors.push('CO₂');
-  const isStale = staleSensors.length > 0;
-  const staleReason = isStale ? `Stale • ${staleSensors.join(', ')} sensor${staleSensors.length > 1 ? 's' : ''}` : '';
 
   // Determine IAQ category based on score
   const getCategory = (score: number): string => {
@@ -92,21 +67,7 @@ export function IAQCard() {
   const airQualityScore = Math.max(0, 100 - (metrics.aqi.value / 5));
 
   return (
-    <Card
-      onClick={() => setExpanded(!expanded)}
-      sx={{
-        height: '100%',
-        minHeight: 280,
-        background: `linear-gradient(135deg, color-mix(in srgb, ${iaqColor} 15%, transparent) 0%, color-mix(in srgb, ${iaqColor} 5%, transparent) 100%)`,
-        border: `2px solid color-mix(in srgb, ${iaqColor} 25%, transparent)`,
-        transition: 'transform 0.2s, box-shadow 0.2s',
-        cursor: 'pointer',
-        '&:hover': {
-          transform: 'translateY(-4px)',
-          boxShadow: (theme) => theme.shadows[8],
-        },
-      }}
-    >
+    <Card onClick={() => setExpanded(!expanded)} sx={featuredCardSx(iaqColor)}>
       <CardContent>
         {/* Header */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>

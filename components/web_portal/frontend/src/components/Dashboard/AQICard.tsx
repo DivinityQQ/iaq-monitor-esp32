@@ -4,14 +4,16 @@ import CardContent from '@mui/material/CardContent';
 import Chip from '@mui/material/Chip';
 import Collapse from '@mui/material/Collapse';
 import Grid from '@mui/material/Grid';
-import Skeleton from '@mui/material/Skeleton';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
 import { useState } from 'react';
 import AirIcon from '@mui/icons-material/Air';
-import { metricsAtom, sensorStatusMapAtom } from '../../store/atoms';
+import { metricsAtom } from '../../store/atoms';
 import { getAQIColorVar } from '../../theme';
+import { FeaturedCardSkeleton } from '../Common/FeaturedCardSkeleton';
+import { featuredCardSx } from '../Common/cardStyles';
+import { useSensorStaleStatus } from '../../hooks/useSensorStaleStatus';
 
 /**
  * Featured AQI (Air Quality Index) card component
@@ -27,47 +29,23 @@ import { getAQIColorVar } from '../../theme';
 export function AQICard() {
   const theme = useTheme();
   const metrics = useAtomValue(metricsAtom);
-  const sensorStatusMap = useAtomValue(sensorStatusMapAtom);
   const [expanded, setExpanded] = useState(false);
+
+  // AQI depends primarily on PM sensors
+  const { isStale, staleReason } = useSensorStaleStatus([
+    { id: 'pms5003', label: 'PM sensors' },
+  ]);
+
   // Show loading skeleton until we have a complete AQI snapshot
   if (!metrics?.aqi ||
       typeof metrics.aqi.value !== 'number' ||
       typeof metrics.aqi.pm25_subindex !== 'number' ||
       typeof metrics.aqi.pm10_subindex !== 'number') {
-    return (
-      <Card sx={{ height: '100%', minHeight: 280 }}>
-        <CardContent>
-          <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
-            <Skeleton variant="circular" width={32} height={32} />
-            <Skeleton variant="text" width="40%" height={32} />
-          </Box>
-          <Skeleton variant="text" width="60%" height={72} sx={{ mb: 1 }} />
-          <Skeleton variant="rectangular" width="50%" height={32} sx={{ mb: 2, borderRadius: 2 }} />
-          <Grid container spacing={1}>
-            <Grid size={{ xs: 4 }}>
-              <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
-            </Grid>
-            <Grid size={{ xs: 4 }}>
-              <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
-            </Grid>
-            <Grid size={{ xs: 4 }}>
-              <Skeleton variant="rectangular" height={60} sx={{ borderRadius: 2 }} />
-            </Grid>
-          </Grid>
-        </CardContent>
-      </Card>
-    );
+    return <FeaturedCardSkeleton />;
   }
 
   const { value, category, dominant, pm25_subindex, pm10_subindex } = metrics.aqi;
   const aqiColor = getAQIColorVar(value, theme);
-
-  // AQI depends primarily on PM sensors; derive stale status
-  const staleSensors: string[] = [];
-  const pms = sensorStatusMap?.pms5003;
-  if (pms?.stale || pms?.state === 'ERROR' || pms?.state === 'DISABLED') staleSensors.push('PM sensors');
-  const isStale = staleSensors.length > 0;
-  const staleReason = isStale ? `Stale • ${staleSensors.join(', ')}` : '';
 
   const formatDominant = (dominant: string): string => {
     if (dominant === 'pm25') return 'PM2.5';
@@ -76,21 +54,7 @@ export function AQICard() {
   };
 
   return (
-    <Card
-      onClick={() => setExpanded(!expanded)}
-      sx={{
-        height: '100%',
-        minHeight: 280,
-        background: `linear-gradient(135deg, color-mix(in srgb, ${aqiColor} 15%, transparent) 0%, color-mix(in srgb, ${aqiColor} 5%, transparent) 100%)`,
-        border: `2px solid color-mix(in srgb, ${aqiColor} 25%, transparent)`,
-        transition: 'transform 0.2s, box-shadow 0.2s',
-        cursor: 'pointer',
-        '&:hover': {
-          transform: 'translateY(-4px)',
-          boxShadow: (theme) => theme.shadows[8],
-        },
-      }}
-    >
+    <Card onClick={() => setExpanded(!expanded)} sx={featuredCardSx(aqiColor)}>
       <CardContent>
         {/* Header */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 2 }}>
