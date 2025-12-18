@@ -45,9 +45,6 @@ static esp_timer_handle_t s_diagnostics_timer = NULL;
 #ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
 static esp_timer_handle_t s_power_timer = NULL;
 #endif
-#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
-static esp_timer_handle_t s_power_timer = NULL;
-#endif
 
 typedef enum {
     MQTT_PUBLISH_EVENT_HEALTH = 0,
@@ -98,12 +95,6 @@ static void mqtt_state_timer_callback(void *arg);
 static void mqtt_metrics_timer_callback(void *arg);
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
 static void mqtt_diagnostics_timer_callback(void *arg);
-#endif
-#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
-static void mqtt_power_timer_callback(void *arg);
-#endif
-#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
-static void mqtt_power_timer_callback(void *arg);
 #endif
 #ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
 static void mqtt_power_timer_callback(void *arg);
@@ -869,24 +860,6 @@ static void mqtt_power_timer_callback(void *arg)
 }
 #endif /* CONFIG_IAQ_MQTT_PUBLISH_POWER */
 
-#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
-/**
- * MQTT power publishing timer callback.
- * Publishes /power topic (PowerFeather snapshot). Uses same cadence as /state.
- */
-static void mqtt_power_timer_callback(void *arg)
-{
-    (void)arg;
-    enqueue_publish_event(MQTT_PUBLISH_EVENT_POWER);
-
-    if (s_power_timer && !esp_timer_is_active(s_power_timer)) {
-        esp_timer_start_periodic(s_power_timer, CONFIG_MQTT_STATE_PUBLISH_INTERVAL_SEC * 1000000ULL);
-    }
-}
-#endif /* CONFIG_IAQ_MQTT_PUBLISH_POWER */
-
-
-
 
 static bool parse_co2_calibration_payload(const char *payload, int *ppm_out)
 {
@@ -1134,12 +1107,6 @@ static void mqtt_publish_worker_task(void *arg)
         mqtt_publish_power();
         if (wdt_ret == ESP_OK) esp_task_wdt_reset();
     }
-#endif
-#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
-        if (pending_events & (1 << MQTT_PUBLISH_EVENT_POWER)) {
-            mqtt_publish_power();
-            if (wdt_ret == ESP_OK) esp_task_wdt_reset();
-        }
 #endif
     }
 }
