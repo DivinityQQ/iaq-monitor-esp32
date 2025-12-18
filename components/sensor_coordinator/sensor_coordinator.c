@@ -775,9 +775,16 @@ static void sensor_coordinator_task(void *arg)
 
         /* Handle pending coordinator commands with calculated timeout */
         sensor_cmd_t cmd;
-        /* Ensure minimum 1-tick delay to prevent tight loop when next_wake=0 */
+        /* Ensure periodic wakeups even when no sensors are scheduled to allow clean shutdowns. */
         TickType_t queue_timeout = (next_wake == 0) ? 1 : next_wake;
+        if (next_wake == portMAX_DELAY) {
+            queue_timeout = pdMS_TO_TICKS(1000); /* wake at least once per second */
+        }
         if (s_cmd_queue && xQueueReceive(s_cmd_queue, &cmd, queue_timeout) == pdTRUE) {
+            if (!s_running) {
+                /* Stop requested while blocked on queue; skip processing. */
+                continue;
+            }
             esp_err_t op_res = ESP_ERR_NOT_SUPPORTED;
             switch (cmd.type) {
                 case CMD_READ:
@@ -1115,6 +1122,12 @@ esp_err_t sensor_coordinator_stop(void)
     ESP_LOGI(TAG, "Stopping sensor coordinator");
     s_running = false;
 
+    /* Wake the coordinator task if it is blocked on the queue. */
+    if (s_cmd_queue) {
+        sensor_cmd_t wake_cmd = {0};
+        (void)xQueueSend(s_cmd_queue, &wake_cmd, 0);
+    }
+
     /* Stop timers */
     if (s_fusion_timer) {
         esp_timer_stop(s_fusion_timer);
@@ -1124,7 +1137,7 @@ esp_err_t sensor_coordinator_stop(void)
     }
 
     /* Wait for task to finish */
-    vTaskDelay(pdMS_TO_TICKS(100));
+    vTaskDelay(pdMS_TO_TICKS(150));
 
     /* Deinitialize sensors */
     if (s_runtime[SENSOR_ID_MCU].state != SENSOR_STATE_UNINIT) {
