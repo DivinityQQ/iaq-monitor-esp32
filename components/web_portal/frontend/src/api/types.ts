@@ -63,34 +63,34 @@ export interface State {
 
 export interface Metrics {
   aqi: {
-    value: number;
-    category: string;
-    dominant: string;
-    pm25_subindex: number;
-    pm10_subindex: number;
+    value: number | null;
+    category: string | null;
+    dominant: string | null;
+    pm25_subindex: number | null;
+    pm10_subindex: number | null;
   };
   comfort: {
-    score: number;
-    category: string;
-    dew_point_c: number;
-    abs_humidity_gm3: number;
-    heat_index_c: number;
+    score: number | null;
+    category: string | null;
+    dew_point_c: number | null;
+    abs_humidity_gm3: number | null;
+    heat_index_c: number | null;
   };
   pressure: {
-    trend: string;
-    delta_hpa: number;
-    window_hours: number;
+    trend: string | null;
+    delta_hpa: number | null;
+    window_hours: number | null;
   };
-  co2_score: number;
-  voc_category: string;
-  nox_category: string;
-  overall_iaq_score: number;
+  co2_score: number | null;
+  voc_category: string | null;
+  nox_category: string | null;
+  overall_iaq_score: number | null;
   mold_risk: {
-    score: number;
-    category: string;
+    score: number | null;
+    category: string | null;
   };
-  co2_rate_ppm_hr: number;
-  pm25_spike_detected: boolean;
+  co2_rate_ppm_hr: number | null;
+  pm25_spike_detected: boolean | null;
 }
 
 // ============================================================================

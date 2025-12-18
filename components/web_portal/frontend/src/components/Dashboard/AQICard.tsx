@@ -44,14 +44,16 @@ export function AQICard() {
     return <FeaturedCardSkeleton />;
   }
 
-  const { value, category, dominant, pm25_subindex, pm10_subindex } = metrics.aqi;
-  const aqiColor = getAQIColorVar(value, theme);
-
   const formatDominant = (dominant: string): string => {
     if (dominant === 'pm25') return 'PM2.5';
     if (dominant === 'pm10') return 'PM10';
     return dominant;
   };
+
+  const { value, category, dominant, pm25_subindex, pm10_subindex } = metrics.aqi;
+  const categoryLabel = category ?? 'Unknown';
+  const dominantLabel = formatDominant(dominant ?? 'unknown');
+  const aqiColor = getAQIColorVar(value, theme);
 
   return (
     <Card onClick={() => setExpanded(!expanded)} sx={featuredCardSx(aqiColor)}>
@@ -90,7 +92,7 @@ export function AQICard() {
         {/* Category Badge */}
         <Box sx={{ mb: 2 }}>
           <Chip
-            label={category}
+            label={categoryLabel}
             sx={{
               bgcolor: aqiColor,
               color: (theme) => (theme as any).vars?.palette?.common?.white || '#fff',
@@ -117,7 +119,7 @@ export function AQICard() {
                 Dominant
               </Typography>
               <Typography variant="h6" fontWeight={600}>
-                {formatDominant(dominant)}
+                {dominantLabel}
               </Typography>
             </Box>
           </Grid>

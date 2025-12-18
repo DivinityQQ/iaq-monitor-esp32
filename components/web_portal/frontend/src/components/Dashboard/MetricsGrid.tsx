@@ -76,7 +76,7 @@ export function MetricsGrid() {
           icon={<CloudIcon />}
           color="primary.main"
           sensorId="bmp280"
-          subtitle={metrics?.pressure?.trend}
+          subtitle={metrics?.pressure?.trend ?? undefined}
         />
       </Grid>
 
@@ -128,7 +128,7 @@ export function MetricsGrid() {
           color="success.main"
           precision={0}
           sensorId="sgp41"
-          subtitle={metrics?.voc_category}
+          subtitle={metrics?.voc_category ?? undefined}
         />
       </Grid>
 

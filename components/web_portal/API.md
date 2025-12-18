@@ -29,6 +29,7 @@
 **Metrics**
 - GET `/api/v1/metrics`
   - Derived metrics (same as MQTT `/metrics`).
+  - Fields are `null` when a required sensor is disabled/errored or its cadence is set to `0`.
   - Response: `{ aqi:{ value, category, dominant, pm25_subindex, pm10_subindex }, comfort:{ score, category, dew_point_c, abs_humidity_gm3, heat_index_c }, pressure:{ trend, delta_hpa, window_hours }, co2_score, voc_category, nox_category, overall_iaq_score, mold_risk:{ score, category }, co2_rate_ppm_hr, pm25_spike_detected }`.
 
 **Power (PowerFeather only)**

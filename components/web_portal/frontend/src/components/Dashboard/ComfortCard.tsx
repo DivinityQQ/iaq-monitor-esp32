@@ -47,6 +47,7 @@ export function ComfortCard() {
   }
 
   const { score, category, heat_index_c, abs_humidity_gm3, dew_point_c } = metrics.comfort;
+  const categoryLabel = category ?? 'Unknown';
   const comfortColor = getComfortColorVar(score, theme);
 
   return (
@@ -90,7 +91,7 @@ export function ComfortCard() {
         {/* Category Badge */}
         <Box sx={{ mb: 2 }}>
           <Chip
-            label={category}
+            label={categoryLabel}
             sx={{
               bgcolor: comfortColor,
               color: (theme) => (theme as any).vars?.palette?.common?.white || '#fff',
