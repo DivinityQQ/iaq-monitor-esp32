@@ -402,7 +402,7 @@ esp_err_t pms5003_driver_read(float *out_pm1_0, float *out_pm2_5, float *out_pm1
             space = sizeof(buf) - (size_t)total;
         }
 
-        int r = uart_bus_read_bytes(s_uart_port, buf + total, space, pdMS_TO_TICKS(50));
+        int r = uart_bus_read_bytes(s_uart_port, buf + total, space, 50);
         if (r > 0) total += r;
 
         while (total >= 32) {
