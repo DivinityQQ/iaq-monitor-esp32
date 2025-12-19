@@ -9,6 +9,7 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "freertos/queue.h"
+#include "freertos/semphr.h"
 #include "esp_log.h"
 #include "esp_system.h"
 #include "mqtt_client.h"
@@ -60,6 +61,7 @@ typedef enum {
 
 static QueueHandle_t s_publish_queue = NULL;
 static TaskHandle_t s_publish_task_handle = NULL;
+static SemaphoreHandle_t s_mqtt_client_lock = NULL;
 
 /* NVS namespace for MQTT config */
 #define NVS_NAMESPACE        "mqtt_config"
@@ -128,6 +130,7 @@ static void ha_publish_sensor_config(cJSON *device, const char *unique_suffix, c
                                      const char *icon)
 {
     cJSON *config = cJSON_CreateObject();
+    if (!config) return;
     cJSON_AddStringToObject(config, "name", name);
     cJSON_AddStringToObject(config, "state_topic", state_topic);
     cJSON_AddStringToObject(config, "availability_topic", TOPIC_STATUS); cJSON_AddStringToObject(config, "payload_available", "online"); cJSON_AddStringToObject(config, "payload_not_available", "offline");
@@ -147,10 +150,13 @@ static void ha_publish_sensor_config(cJSON *device, const char *unique_suffix, c
     char topic[128];
     snprintf(topic, sizeof(topic), "homeassistant/sensor/%s/config", unique_id);
     char *json_string = cJSON_PrintUnformatted(config);
-    if (json_string) {
-        esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, CONFIG_IAQ_MQTT_CRITICAL_QOS, 1, true);
-        free(json_string);
+    if (!json_string) {
+        ESP_LOGW(TAG, "Failed to serialize HA config (unique_id=%s)", unique_id);
+        cJSON_Delete(config);
+        return;
     }
+    esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, CONFIG_IAQ_MQTT_CRITICAL_QOS, 1, true);
+    free(json_string);
     cJSON_Delete(config);
 }
 
@@ -356,6 +362,14 @@ esp_err_t mqtt_manager_init(iaq_system_context_t *ctx)
     /* Store system context */
     s_system_ctx = ctx;
 
+    if (s_mqtt_client_lock == NULL) {
+        s_mqtt_client_lock = xSemaphoreCreateMutex();
+        if (!s_mqtt_client_lock) {
+            ESP_LOGE(TAG, "Failed to create MQTT client mutex");
+            return ESP_ERR_NO_MEM;
+        }
+    }
+
     load_mqtt_config();
 
     if (s_publish_queue == NULL) {
@@ -441,18 +455,39 @@ esp_err_t mqtt_manager_start(void)
 
 esp_err_t mqtt_manager_stop(void)
 {
-    if (!s_initialized || s_mqtt_client == NULL) return ESP_OK;
-    ESP_LOGI(TAG, "Stopping MQTT client");
-    esp_err_t ret = esp_mqtt_client_stop(s_mqtt_client);
-    if (ret != ESP_OK) {
-        ESP_LOGW(TAG, "esp_mqtt_client_stop returned %s; destroying client anyway", esp_err_to_name(ret));
-    }
-    /* Always destroy to ensure a clean slate regardless of start state */
-    esp_mqtt_client_destroy(s_mqtt_client);
-    s_mqtt_client = NULL;
+    if (!s_initialized) return ESP_OK;
+
     s_mqtt_connected = false;
     IAQ_DATA_WITH_LOCK() { iaq_data_get()->system.mqtt_connected = false; }
-    xEventGroupClearBits(s_system_ctx->event_group, MQTT_CONNECTED_BIT);
+    if (s_system_ctx && s_system_ctx->event_group) {
+        xEventGroupClearBits(s_system_ctx->event_group, MQTT_CONNECTED_BIT);
+    }
+
+    ESP_LOGI(TAG, "Stopping MQTT client");
+
+    /* Drain publish queue to prevent stale bursts after reconnect */
+    if (s_publish_queue) {
+        mqtt_publish_event_t discard;
+        while (xQueueReceive(s_publish_queue, &discard, 0) == pdTRUE) {}
+    }
+
+    esp_err_t ret = ESP_OK;
+    if (s_mqtt_client_lock) {
+        (void)xSemaphoreTake(s_mqtt_client_lock, portMAX_DELAY);
+    }
+    if (s_mqtt_client) {
+        ret = esp_mqtt_client_stop(s_mqtt_client);
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "esp_mqtt_client_stop returned %s; destroying client anyway", esp_err_to_name(ret));
+        }
+        /* Always destroy to ensure a clean slate regardless of start state */
+        esp_mqtt_client_destroy(s_mqtt_client);
+        s_mqtt_client = NULL;
+    }
+    if (s_mqtt_client_lock) {
+        xSemaphoreGive(s_mqtt_client_lock);
+    }
+
     ESP_LOGI(TAG, "MQTT client stopped and destroyed");
     return ESP_OK;
 }
@@ -461,9 +496,20 @@ esp_err_t mqtt_manager_stop(void)
 static void mqtt_publish_ha_discovery(void)
 {
     if (!s_mqtt_connected) return;
+    if (s_mqtt_client_lock) {
+        (void)xSemaphoreTake(s_mqtt_client_lock, portMAX_DELAY);
+    }
+    if (!s_mqtt_connected || s_mqtt_client == NULL) {
+        if (s_mqtt_client_lock) xSemaphoreGive(s_mqtt_client_lock);
+        return;
+    }
     ESP_LOGD(TAG, "Publishing Home Assistant discovery messages");
 
     cJSON *device = cJSON_CreateObject();
+    if (!device) {
+        if (s_mqtt_client_lock) xSemaphoreGive(s_mqtt_client_lock);
+        return;
+    }
     cJSON *ids = cJSON_CreateArray(); if (ids) { cJSON_AddItemToArray(ids, cJSON_CreateString(CONFIG_IAQ_DEVICE_ID)); cJSON_AddItemToObject(device, "identifiers", ids); } else { cJSON_AddStringToObject(device, "identifiers", CONFIG_IAQ_DEVICE_ID); }
     cJSON_AddStringToObject(device, "name", "IAQ Monitor");
     cJSON_AddStringToObject(device, "model", "ESP32-S3 DIY");
@@ -512,6 +558,7 @@ static void mqtt_publish_ha_discovery(void)
 
     cJSON_Delete(device);
     ESP_LOGI(TAG, "Home Assistant discovery announced");
+    if (s_mqtt_client_lock) xSemaphoreGive(s_mqtt_client_lock);
 }
 
 
@@ -527,22 +574,39 @@ esp_err_t mqtt_publish_status(const iaq_data_t *data)
 /* Topic publishing helpers */
 static esp_err_t publish_json(const char *topic, cJSON *obj)
 {
-    if (!s_mqtt_connected || !obj || !topic) { if (obj) cJSON_Delete(obj); return ESP_FAIL; }
+    if (!obj || !topic) { if (obj) cJSON_Delete(obj); return ESP_FAIL; }
+    if (!s_mqtt_client_lock) { cJSON_Delete(obj); return ESP_FAIL; }
+    if (xSemaphoreTake(s_mqtt_client_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
+        cJSON_Delete(obj);
+        return ESP_ERR_TIMEOUT;
+    }
+    if (!s_mqtt_connected || s_mqtt_client == NULL) {
+        xSemaphoreGive(s_mqtt_client_lock);
+        cJSON_Delete(obj);
+        return ESP_FAIL;
+    }
     pm_guard_lock_cpu();
     char *json_string = cJSON_PrintUnformatted(obj);
-    if (json_string) {
-        int msg_id = esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, CONFIG_IAQ_MQTT_TELEMETRY_QOS, 0, true);
-        if (msg_id < 0) {
-            ESP_LOGW(TAG, "MQTT enqueue failed (topic=%s, msg_id=%d), dropping message", topic, msg_id);
-            free(json_string);
-            cJSON_Delete(obj);
-            pm_guard_unlock_cpu();
-            return ESP_FAIL;
-        }
-        ESP_LOGD(TAG, "Enqueued %s, msg_id=%d", topic, msg_id);
-        free(json_string);
+    if (!json_string) {
+        ESP_LOGW(TAG, "Failed to serialize JSON (topic=%s)", topic);
+        pm_guard_unlock_cpu();
+        xSemaphoreGive(s_mqtt_client_lock);
+        cJSON_Delete(obj);
+        return ESP_ERR_NO_MEM;
     }
+    int msg_id = esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, CONFIG_IAQ_MQTT_TELEMETRY_QOS, 0, true);
+    if (msg_id < 0) {
+        ESP_LOGW(TAG, "MQTT enqueue failed (topic=%s, msg_id=%d), dropping message", topic, msg_id);
+        free(json_string);
+        pm_guard_unlock_cpu();
+        xSemaphoreGive(s_mqtt_client_lock);
+        cJSON_Delete(obj);
+        return ESP_FAIL;
+    }
+    ESP_LOGD(TAG, "Enqueued %s, msg_id=%d", topic, msg_id);
+    free(json_string);
     pm_guard_unlock_cpu();
+    xSemaphoreGive(s_mqtt_client_lock);
     cJSON_Delete(obj);
     return ESP_OK;
 }
@@ -591,9 +655,11 @@ esp_err_t mqtt_publish_diagnostics(const iaq_data_t *data)
     if (!s_mqtt_connected || !data) return ESP_FAIL;
 
     cJSON *root = cJSON_CreateObject();
+    if (!root) return ESP_ERR_NO_MEM;
 
     /* Raw (uncompensated) sensor values */
     cJSON *raw = cJSON_CreateObject();
+    if (!raw) { cJSON_Delete(root); return ESP_ERR_NO_MEM; }
     if (!isnan(data->raw.temp_c)) cJSON_AddNumberToObject(raw, "temp_c", round(data->raw.temp_c * 10.0) / 10.0);
     if (!isnan(data->raw.rh_pct)) cJSON_AddNumberToObject(raw, "rh_pct", round(data->raw.rh_pct * 10.0) / 10.0);
     if (!isnan(data->raw.pressure_pa)) cJSON_AddNumberToObject(raw, "pressure_hpa", round(data->raw.pressure_pa / 10.0) / 10.0);  /* Pa -> hPa */
@@ -605,6 +671,7 @@ esp_err_t mqtt_publish_diagnostics(const iaq_data_t *data)
 
     /* Fusion diagnostics */
     cJSON *fusion = cJSON_CreateObject();
+    if (!fusion) { cJSON_Delete(root); return ESP_ERR_NO_MEM; }
     cJSON_AddNumberToObject(fusion, "pm_rh_factor", round(data->fusion_diag.pm_rh_factor * 1000.0) / 1000.0);
     cJSON_AddNumberToObject(fusion, "co2_pressure_offset_ppm", round(data->fusion_diag.co2_pressure_offset_ppm * 10.0) / 10.0);
     cJSON_AddNumberToObject(fusion, "temp_self_heat_offset_c", round(data->fusion_diag.temp_self_heat_offset_c * 100.0) / 100.0);
@@ -616,6 +683,7 @@ esp_err_t mqtt_publish_diagnostics(const iaq_data_t *data)
 
     /* Fusion ABC diagnostics */
     cJSON *abc = cJSON_CreateObject();
+    if (!abc) { cJSON_Delete(root); return ESP_ERR_NO_MEM; }
     cJSON_AddNumberToObject(abc, "baseline_ppm", data->fusion_diag.co2_abc_baseline_ppm);
     cJSON_AddNumberToObject(abc, "confidence_pct", data->fusion_diag.co2_abc_confidence_pct);
     cJSON_AddItemToObject(root, "abc", abc);
@@ -623,6 +691,7 @@ esp_err_t mqtt_publish_diagnostics(const iaq_data_t *data)
     /* Senseair S8 diagnostics (from iaq_data, not driver) */
     if (data->hw_diag.s8_diag_valid) {
         cJSON *s8j = cJSON_CreateObject();
+        if (!s8j) { cJSON_Delete(root); return ESP_ERR_NO_MEM; }
         cJSON_AddNumberToObject(s8j, "addr", data->hw_diag.s8_addr);
         cJSON_AddNumberToObject(s8j, "serial", data->hw_diag.s8_serial);
         cJSON_AddNumberToObject(s8j, "meter_status", data->hw_diag.s8_meter_status);
