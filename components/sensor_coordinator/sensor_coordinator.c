@@ -606,9 +606,10 @@ static esp_err_t read_sensor_s8(void)
 static void fusion_timer_callback(void *arg)
 {
     iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_FUSION_TICK);
-    IAQ_DATA_WITH_LOCK() {
+    if (iaq_data_lock(0)) {
         iaq_data_t *data = iaq_data_get();
         fusion_apply(data);
+        iaq_data_unlock();
     }
     iaq_prof_end(p);
 }
@@ -621,9 +622,10 @@ static void fusion_timer_callback(void *arg)
 static void metrics_timer_callback(void *arg)
 {
     iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_METRICS_TICK);
-    IAQ_DATA_WITH_LOCK() {
+    if (iaq_data_lock(0)) {
         iaq_data_t *data = iaq_data_get();
         metrics_calculate_all(data);
+        iaq_data_unlock();
     }
     iaq_prof_end(p);
 }
