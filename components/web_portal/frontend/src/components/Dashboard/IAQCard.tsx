@@ -7,13 +7,21 @@ import Grid from '@mui/material/Grid';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import HealthAndSafetyIcon from '@mui/icons-material/HealthAndSafety';
 import { metricsAtom } from '../../store/atoms';
+import type { Metrics, MetricsLast } from '../../api/types';
 import { getIAQColorVar } from '../../theme';
 import { FeaturedCardSkeleton } from '../Common/FeaturedCardSkeleton';
 import { featuredCardSx } from '../Common/cardStyles';
 import { useSensorStaleStatus } from '../../hooks/useSensorStaleStatus';
+
+interface IAQData {
+  overall_iaq_score: number;
+  aqi_value: number;
+  co2_score: number;
+  comfort_score: number;
+}
 
 /**
  * Featured IAQ (Indoor Air Quality) score card component
@@ -27,6 +35,7 @@ import { useSensorStaleStatus } from '../../hooks/useSensorStaleStatus';
  *   - Comfort (20% weight)
  * - Color-coded background based on IAQ score
  * - Loading skeleton support
+ * - Falls back to last known values when sensors are stale/disabled
  */
 export function IAQCard() {
   const theme = useTheme();
@@ -41,17 +50,42 @@ export function IAQCard() {
     { id: 's8', label: 'CO₂' },
   ]);
 
-  // Show loading skeleton until we have a complete metrics snapshot
-  if (!metrics?.overall_iaq_score ||
-      typeof metrics.overall_iaq_score !== 'number' ||
-      !metrics.aqi || typeof metrics.aqi.value !== 'number' ||
-      typeof metrics.co2_score !== 'number' ||
-      !metrics.comfort || typeof metrics.comfort.score !== 'number') {
+  // Helper to check if IAQ data is complete from a metrics source
+  const extractIAQData = (src: Metrics | MetricsLast | undefined): IAQData | undefined => {
+    if (!src) return undefined;
+    if (
+      typeof src.overall_iaq_score === 'number' &&
+      typeof src.aqi?.value === 'number' &&
+      typeof src.co2_score === 'number' &&
+      typeof src.comfort?.score === 'number'
+    ) {
+      return {
+        overall_iaq_score: src.overall_iaq_score,
+        aqi_value: src.aqi.value,
+        co2_score: src.co2_score,
+        comfort_score: src.comfort.score,
+      };
+    }
+    return undefined;
+  };
+
+  // Determine which IAQ data to use: current or last known
+  const { iaqData, usingLast } = useMemo(() => {
+    const current = extractIAQData(metrics ?? undefined);
+    if (current) return { iaqData: current, usingLast: false };
+    const last = extractIAQData(metrics?.last);
+    if (last) return { iaqData: last, usingLast: true };
+    return { iaqData: undefined, usingLast: false };
+  }, [metrics]);
+
+  // Show loading skeleton if no data available (current or last)
+  if (!iaqData) {
     return <FeaturedCardSkeleton />;
   }
 
-  const iaqScore = metrics.overall_iaq_score;
-  const iaqColor = getIAQColorVar(iaqScore, theme);
+  const { overall_iaq_score, aqi_value, co2_score, comfort_score } = iaqData;
+  const iaqColor = getIAQColorVar(overall_iaq_score, theme);
+  const showStale = isStale || usingLast;
 
   // Determine IAQ category based on score
   const getCategory = (score: number): string => {
@@ -64,7 +98,7 @@ export function IAQCard() {
 
   // Calculate normalized AQI score (inverted, 0-100 scale)
   // Backend formula: 100 - (aqi / 500 * 100), clamped to 0
-  const airQualityScore = Math.max(0, 100 - (metrics.aqi.value / 5));
+  const airQualityScore = Math.max(0, 100 - (aqi_value / 5));
 
   return (
     <Card onClick={() => setExpanded(!expanded)} sx={featuredCardSx(iaqColor)}>
@@ -76,9 +110,9 @@ export function IAQCard() {
             <Typography variant="h5" fontWeight={600}>
               Indoor Air Quality
             </Typography>
-            {isStale && (
+            {showStale && (
               <Typography variant="caption" color="text.secondary">
-                {staleReason}
+                {staleReason || 'Last known value'}
               </Typography>
             )}
           </Box>
@@ -97,7 +131,7 @@ export function IAQCard() {
               minWidth: '3ch',
             }}
           >
-            {iaqScore.toFixed(0)}
+            {overall_iaq_score.toFixed(0)}
           </Typography>
           <Typography variant="h5" color="text.secondary">
             / 100
@@ -107,7 +141,7 @@ export function IAQCard() {
         {/* Category Badge */}
         <Box sx={{ mb: 2 }}>
           <Chip
-            label={getCategory(iaqScore)}
+            label={getCategory(overall_iaq_score)}
             sx={{
               bgcolor: iaqColor,
               color: (theme) => (theme as any).vars?.palette?.common?.white || '#fff',
@@ -154,7 +188,7 @@ export function IAQCard() {
                 CO₂ Score
               </Typography>
               <Typography variant="h6" fontWeight={600}>
-                {metrics.co2_score.toFixed(0)}
+                {co2_score.toFixed(0)}
               </Typography>
             </Box>
           </Grid>
@@ -173,7 +207,7 @@ export function IAQCard() {
                 Comfort
               </Typography>
               <Typography variant="h6" fontWeight={600}>
-                {metrics.comfort.score.toFixed(0)}
+                {comfort_score.toFixed(0)}
               </Typography>
             </Box>
           </Grid>

@@ -7,9 +7,10 @@ import Grid from '@mui/material/Grid';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import AirIcon from '@mui/icons-material/Air';
 import { metricsAtom } from '../../store/atoms';
+import type { MetricsAqi } from '../../api/types';
 import { getAQIColorVar } from '../../theme';
 import { FeaturedCardSkeleton } from '../Common/FeaturedCardSkeleton';
 import { featuredCardSx } from '../Common/cardStyles';
@@ -25,6 +26,7 @@ import { useSensorStaleStatus } from '../../hooks/useSensorStaleStatus';
  * - PM2.5 and PM10 sub-indices in grid layout
  * - Color-coded background based on AQI value
  * - Loading skeleton support
+ * - Falls back to last known values when sensor is stale/disabled
  */
 export function AQICard() {
   const theme = useTheme();
@@ -36,11 +38,26 @@ export function AQICard() {
     { id: 'pms5003', label: 'PM sensors' },
   ]);
 
-  // Show loading skeleton until we have a complete AQI snapshot
-  if (!metrics?.aqi ||
-      typeof metrics.aqi.value !== 'number' ||
-      typeof metrics.aqi.pm25_subindex !== 'number' ||
-      typeof metrics.aqi.pm10_subindex !== 'number') {
+  // Helper to check if AQI data is complete
+  const isAqiComplete = (aqi: MetricsAqi | undefined): aqi is MetricsAqi =>
+    aqi !== undefined &&
+    typeof aqi.value === 'number' &&
+    typeof aqi.pm25_subindex === 'number' &&
+    typeof aqi.pm10_subindex === 'number';
+
+  // Determine which AQI data to use: current or last known
+  const { aqi, usingLast } = useMemo(() => {
+    if (isAqiComplete(metrics?.aqi)) {
+      return { aqi: metrics.aqi, usingLast: false };
+    }
+    if (isAqiComplete(metrics?.last?.aqi)) {
+      return { aqi: metrics.last.aqi, usingLast: true };
+    }
+    return { aqi: undefined, usingLast: false };
+  }, [metrics]);
+
+  // Show loading skeleton if no data available (current or last)
+  if (!aqi) {
     return <FeaturedCardSkeleton />;
   }
 
@@ -50,10 +67,14 @@ export function AQICard() {
     return dominant;
   };
 
-  const { value, category, dominant, pm25_subindex, pm10_subindex } = metrics.aqi;
-  const categoryLabel = category ?? 'Unknown';
-  const dominantLabel = formatDominant(dominant ?? 'unknown');
+  // Values are guaranteed to be numbers by isAqiComplete check
+  const value = aqi.value!;
+  const pm25_subindex = aqi.pm25_subindex!;
+  const pm10_subindex = aqi.pm10_subindex!;
+  const categoryLabel = aqi.category ?? 'Unknown';
+  const dominantLabel = formatDominant(aqi.dominant ?? 'unknown');
   const aqiColor = getAQIColorVar(value, theme);
+  const showStale = isStale || usingLast;
 
   return (
     <Card onClick={() => setExpanded(!expanded)} sx={featuredCardSx(aqiColor)}>
@@ -65,9 +86,9 @@ export function AQICard() {
             <Typography variant="h5" fontWeight={600}>
               Air Quality Index
             </Typography>
-            {isStale && (
+            {showStale && (
               <Typography variant="caption" color="text.secondary">
-                {staleReason}
+                {staleReason || 'Last known value'}
               </Typography>
             )}
           </Box>

@@ -7,9 +7,10 @@ import Grid from '@mui/material/Grid';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import { useAtomValue } from 'jotai';
-import { useState } from 'react';
+import { useState, useMemo } from 'react';
 import SentimentSatisfiedAltIcon from '@mui/icons-material/SentimentSatisfiedAlt';
 import { metricsAtom } from '../../store/atoms';
+import type { MetricsComfort } from '../../api/types';
 import { getComfortColorVar } from '../../theme';
 import { FeaturedCardSkeleton } from '../Common/FeaturedCardSkeleton';
 import { featuredCardSx } from '../Common/cardStyles';
@@ -26,6 +27,7 @@ import { useSensorStaleStatus } from '../../hooks/useSensorStaleStatus';
  * - Dew point in Celsius
  * - Color-coded background based on comfort score
  * - Loading skeleton support
+ * - Falls back to last known values when sensor is stale/disabled
  */
 export function ComfortCard() {
   const theme = useTheme();
@@ -37,18 +39,38 @@ export function ComfortCard() {
     { id: 'sht45', label: 'Temp/Humidity' },
   ]);
 
-  // Show loading skeleton until we have a complete comfort snapshot
-  if (!metrics?.comfort ||
-      typeof metrics.comfort.score !== 'number' ||
-      typeof metrics.comfort.heat_index_c !== 'number' ||
-      typeof metrics.comfort.abs_humidity_gm3 !== 'number' ||
-      typeof metrics.comfort.dew_point_c !== 'number') {
+  // Helper to check if comfort data is complete
+  const isComfortComplete = (comfort: MetricsComfort | undefined): comfort is MetricsComfort =>
+    comfort !== undefined &&
+    typeof comfort.score === 'number' &&
+    typeof comfort.heat_index_c === 'number' &&
+    typeof comfort.abs_humidity_gm3 === 'number' &&
+    typeof comfort.dew_point_c === 'number';
+
+  // Determine which comfort data to use: current or last known
+  const { comfort, usingLast } = useMemo(() => {
+    if (isComfortComplete(metrics?.comfort)) {
+      return { comfort: metrics.comfort, usingLast: false };
+    }
+    if (isComfortComplete(metrics?.last?.comfort)) {
+      return { comfort: metrics.last.comfort, usingLast: true };
+    }
+    return { comfort: undefined, usingLast: false };
+  }, [metrics]);
+
+  // Show loading skeleton if no data available (current or last)
+  if (!comfort) {
     return <FeaturedCardSkeleton />;
   }
 
-  const { score, category, heat_index_c, abs_humidity_gm3, dew_point_c } = metrics.comfort;
-  const categoryLabel = category ?? 'Unknown';
+  // Values are guaranteed to be numbers by isComfortComplete check
+  const score = comfort.score!;
+  const heat_index_c = comfort.heat_index_c!;
+  const abs_humidity_gm3 = comfort.abs_humidity_gm3!;
+  const dew_point_c = comfort.dew_point_c!;
+  const categoryLabel = comfort.category ?? 'Unknown';
   const comfortColor = getComfortColorVar(score, theme);
+  const showStale = isStale || usingLast;
 
   return (
     <Card onClick={() => setExpanded(!expanded)} sx={featuredCardSx(comfortColor)}>
@@ -60,9 +82,9 @@ export function ComfortCard() {
             <Typography variant="h5" fontWeight={600}>
               Comfort Score
             </Typography>
-            {isStale && (
+            {showStale && (
               <Typography variant="caption" color="text.secondary">
-                {staleReason}
+                {staleReason || 'Last known value'}
               </Typography>
             )}
           </Box>

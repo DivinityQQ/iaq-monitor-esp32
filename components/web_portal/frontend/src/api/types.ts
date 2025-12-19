@@ -61,36 +61,59 @@ export interface State {
 // METRICS (5s WebSocket updates)
 // ============================================================================
 
-export interface Metrics {
-  aqi: {
-    value: number | null;
-    category: string | null;
-    dominant: string | null;
-    pm25_subindex: number | null;
-    pm10_subindex: number | null;
-  };
-  comfort: {
-    score: number | null;
-    category: string | null;
-    dew_point_c: number | null;
-    abs_humidity_gm3: number | null;
-    heat_index_c: number | null;
-  };
-  pressure: {
-    trend: string | null;
-    delta_hpa: number | null;
-    window_hours: number | null;
-  };
+export interface MetricsAqi {
+  value: number | null;
+  category: string | null;
+  dominant: string | null;
+  pm25_subindex: number | null;
+  pm10_subindex: number | null;
+}
+
+export interface MetricsComfort {
+  score: number | null;
+  category: string | null;
+  dew_point_c: number | null;
+  abs_humidity_gm3: number | null;
+  heat_index_c: number | null;
+}
+
+export interface MetricsPressure {
+  trend: string | null;
+  delta_hpa: number | null;
+  window_hours: number | null;
+}
+
+export interface MetricsMoldRisk {
+  score: number | null;
+  category: string | null;
+}
+
+export interface MetricsLast {
+  aqi: MetricsAqi;
+  comfort: MetricsComfort;
+  pressure: MetricsPressure;
   co2_score: number | null;
   voc_category: string | null;
   nox_category: string | null;
   overall_iaq_score: number | null;
-  mold_risk: {
-    score: number | null;
-    category: string | null;
-  };
+  mold_risk: MetricsMoldRisk;
   co2_rate_ppm_hr: number | null;
   pm25_spike_detected: boolean | null;
+}
+
+export interface Metrics {
+  aqi: MetricsAqi;
+  comfort: MetricsComfort;
+  pressure: MetricsPressure;
+  co2_score: number | null;
+  voc_category: string | null;
+  nox_category: string | null;
+  overall_iaq_score: number | null;
+  mold_risk: MetricsMoldRisk;
+  co2_rate_ppm_hr: number | null;
+  pm25_spike_detected: boolean | null;
+  /** Last known valid metrics (for stale display). Structure mirrors top-level Metrics. */
+  last?: MetricsLast;
 }
 
 // ============================================================================
