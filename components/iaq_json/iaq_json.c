@@ -377,7 +377,10 @@ cJSON* iaq_json_build_health(const iaq_data_t *data)
     /* System */
     cJSON_AddNumberToObject(root, "uptime", data->system.uptime_seconds);
     cJSON_AddNumberToObject(root, "wifi_rssi", data->system.wifi_rssi);
-    cJSON_AddNumberToObject(root, "free_heap", data->system.free_heap);
+    cJSON_AddNumberToObject(root, "internal_free", data->system.internal_free);
+    cJSON_AddNumberToObject(root, "internal_total", data->system.internal_total);
+    cJSON_AddNumberToObject(root, "spiram_free", data->system.spiram_free);
+    cJSON_AddNumberToObject(root, "spiram_total", data->system.spiram_total);
 
     /* Time sync */
     bool ts_ok = time_sync_is_set();

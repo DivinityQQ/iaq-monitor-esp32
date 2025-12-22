@@ -309,8 +309,9 @@ static void collect_display_snapshot(display_snapshot_t *snap)
         snap->mqtt = d->system.mqtt_connected;
         snap->rssi = d->system.wifi_rssi;
         snap->uptime = d->system.uptime_seconds;
-        snap->heap = d->system.free_heap;
-        snap->min_heap = d->system.min_free_heap;
+        snap->internal_free = d->system.internal_free;
+        snap->spiram_free = d->system.spiram_free;
+        snap->spiram_total = d->system.spiram_total;
     }
 
     /* Time sync status (outside data lock) */

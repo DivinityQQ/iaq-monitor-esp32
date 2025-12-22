@@ -6,6 +6,7 @@
 #include "esp_log.h"
 #include "esp_timer.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
 #include "freertos/queue.h"
@@ -163,8 +164,9 @@ static void print_simple_status(void)
 {
     /* Snapshot */
     uint32_t uptime_s = (uint32_t)(esp_timer_get_time() / 1000000ULL);
-    uint32_t heap_now = esp_get_free_heap_size();
-    uint32_t heap_min = esp_get_minimum_free_heap_size();
+    uint32_t iram_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    uint32_t spiram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    uint32_t spiram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
     bool wifi_ok = false, mqtt_ok = false;
     int rssi = 0;
     IAQ_DATA_WITH_LOCK() {
@@ -196,12 +198,19 @@ static void print_simple_status(void)
     unsigned h = uptime_s / 3600U;
     unsigned m = (uptime_s % 3600U) / 60U;
     unsigned s = uptime_s % 60U;
-    unsigned heap_k = heap_now / 1024U;
-    unsigned heap_min_k = heap_min / 1024U;
+    unsigned iram_k = iram_free / 1024U;
 
-    ESP_LOGI(TAG, "Sys up %uh%um%us | heap %uk (min %uk) | WiFi %s | MQTT %s",
+    char psram_str[24];
+    if (spiram_total > 0) {
+        snprintf(psram_str, sizeof(psram_str), "PSRAM %uk", (unsigned)(spiram_free / 1024U));
+    } else {
+        snprintf(psram_str, sizeof(psram_str), "PSRAM N/A");
+    }
+
+    ESP_LOGI(TAG, "Sys up %uh%um%us | IRAM %uk | %s | WiFi %s | MQTT %s",
              h, m, s,
-             heap_k, heap_min_k,
+             iram_k,
+             psram_str,
              wifi_str,
              mqtt_ok ? "OK" : "Down");
 }
@@ -279,10 +288,18 @@ void iaq_status_report(void)
 #endif
 
     /* Heap */
-    ESP_LOGI(TAG, "  -- Heap --");
-    ESP_LOGI(TAG, "  now=%lu, min=%lu",
-             (unsigned long)esp_get_free_heap_size(),
-             (unsigned long)esp_get_minimum_free_heap_size());
+    ESP_LOGI(TAG, "  -- Memory --");
+    uint32_t spiram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    ESP_LOGI(TAG, "  IRAM: %lu / %lu bytes",
+             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned long)heap_caps_get_total_size(MALLOC_CAP_INTERNAL));
+    if (spiram_total > 0) {
+        ESP_LOGI(TAG, "  PSRAM: %lu / %lu bytes",
+                 (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+                 (unsigned long)spiram_total);
+    } else {
+        ESP_LOGI(TAG, "  PSRAM: N/A");
+    }
 
 \
 #if CONFIG_IAQ_PROFILING_RUNTIME_STATS

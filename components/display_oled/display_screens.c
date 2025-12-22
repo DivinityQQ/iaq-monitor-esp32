@@ -359,15 +359,19 @@ void render_system(uint8_t page, uint8_t *buf, const display_snapshot_t *snap)
         display_gfx_draw_text_8x8_page(page, buf, 0, 32, str, &s_font_label);
     }
 
-    /* Page 5: Heap */
+    /* Page 5: Internal RAM */
     if (page == 5) {
-        snprintf(str, sizeof(str), "Heap: %lu kB", (unsigned long)(snap->heap / 1024));
+        snprintf(str, sizeof(str), "IRAM: %lu kB", (unsigned long)(snap->internal_free / 1024));
         display_gfx_draw_text_8x8_page(page, buf, 0, 40, str, &s_font_label);
     }
 
-    /* Page 6: Min heap */
+    /* Page 6: PSRAM */
     if (page == 6) {
-        snprintf(str, sizeof(str), "Min: %lu kB", (unsigned long)(snap->min_heap / 1024));
+        if (snap->spiram_total > 0) {
+            snprintf(str, sizeof(str), "PSRAM: %lu kB", (unsigned long)(snap->spiram_free / 1024));
+        } else {
+            snprintf(str, sizeof(str), "PSRAM: N/A");
+        }
         display_gfx_draw_text_8x8_page(page, buf, 0, 48, str, &s_font_label);
     }
 

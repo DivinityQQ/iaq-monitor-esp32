@@ -8,6 +8,7 @@
 #include "esp_log.h"
 #include "esp_chip_info.h"
 #include "esp_timer.h"
+#include "esp_heap_caps.h"
 #include "nvs_flash.h"
 #include "esp_netif.h"
 #include "esp_event.h"
@@ -62,8 +63,10 @@ static void system_status_timer_callback(void* arg)
     IAQ_DATA_WITH_LOCK() {
         iaq_data_t *data = iaq_data_get();
         data->system.uptime_seconds = esp_timer_get_time() / 1000000;
-        data->system.free_heap = esp_get_free_heap_size();
-        data->system.min_free_heap = esp_get_minimum_free_heap_size();
+        data->system.internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+        data->system.internal_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
+        data->system.spiram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+        data->system.spiram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
         data->system.wifi_rssi = rssi;
     }
 
@@ -121,7 +124,11 @@ static esp_err_t init_core_system(void)
     /* Quiet noisy subsystem logs (Wi‑Fi stack) */
     configure_log_levels();
 
-    ESP_LOGI(TAG, "Free heap: %lu bytes", esp_get_free_heap_size());
+    ESP_LOGI(TAG, "IRAM: %lu/%lu bytes, PSRAM: %lu/%lu bytes",
+             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
+             (unsigned long)heap_caps_get_total_size(MALLOC_CAP_INTERNAL),
+             (unsigned long)heap_caps_get_free_size(MALLOC_CAP_SPIRAM),
+             (unsigned long)heap_caps_get_total_size(MALLOC_CAP_SPIRAM));
 
     /* Initialize NVS */
     esp_err_t ret = nvs_flash_init();

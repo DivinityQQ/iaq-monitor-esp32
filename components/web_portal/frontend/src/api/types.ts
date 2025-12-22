@@ -123,7 +123,10 @@ export interface Metrics {
 export interface Health {
   uptime: number;
   wifi_rssi: number;
-  free_heap: number;
+  internal_free: number;
+  internal_total: number;
+  spiram_free: number;
+  spiram_total: number;
   time_synced: boolean;
   epoch?: number;
   sensors: Record<SensorId, SensorStatus>;

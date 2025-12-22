@@ -46,13 +46,13 @@ export function SystemHealth() {
               </Box>
             </Grid>
 
-            {/* Free Heap Skeleton */}
+            {/* Internal RAM Skeleton */}
             <Grid size={{ xs: 6 }}>
               <Box display="flex" alignItems="center" gap={1}>
                 <Skeleton variant="circular" width={20} height={20} />
                 <Box flex={1}>
-                  <Skeleton variant="text" width={70} height={16} />
-                  <Skeleton variant="text" width={100} height={20} />
+                  <Skeleton variant="text" width={80} height={16} />
+                  <Skeleton variant="text" width={120} height={20} />
                   <Skeleton variant="rounded" height={4} sx={{ mt: 0.5, borderRadius: 2 }} />
                 </Box>
               </Box>
@@ -65,6 +65,18 @@ export function SystemHealth() {
                 <Box>
                   <Skeleton variant="text" width={70} height={16} />
                   <Skeleton variant="text" width={60} height={20} />
+                </Box>
+              </Box>
+            </Grid>
+
+            {/* PSRAM Skeleton */}
+            <Grid size={{ xs: 6 }}>
+              <Box display="flex" alignItems="center" gap={1}>
+                <Skeleton variant="circular" width={20} height={20} />
+                <Box flex={1}>
+                  <Skeleton variant="text" width={50} height={16} />
+                  <Skeleton variant="text" width={120} height={20} />
+                  <Skeleton variant="rounded" height={4} sx={{ mt: 0.5, borderRadius: 2 }} />
                 </Box>
               </Box>
             </Grid>
@@ -84,7 +96,7 @@ export function SystemHealth() {
             </Grid>
 
             {/* Time Sync Skeleton */}
-            <Grid size={{ xs: 12 }}>
+            <Grid size={{ xs: 6 }}>
               <Box display="flex" alignItems="center" gap={1}>
                 <Skeleton variant="circular" width={20} height={20} />
                 <Box flex={1}>
@@ -117,8 +129,12 @@ export function SystemHealth() {
     );
   }
 
-  // Calculate heap usage percentage (assuming some reasonable total heap size)
-  const heapPercentage = calculatePercentage(health.free_heap, 327680, 1); // 320KB typical ESP32
+  // Calculate memory usage percentages
+  const internalPercentage = calculatePercentage(health.internal_free, health.internal_total, 1);
+  const hasPsram = health.spiram_total > 0;
+  const spiramPercentage = hasPsram
+    ? calculatePercentage(health.spiram_free, health.spiram_total, 1)
+    : 0;
 
   // Get signal strength category
   const signalStrength = getSignalStrength(health.wifi_rssi);
@@ -148,22 +164,22 @@ export function SystemHealth() {
             </Box>
           </Grid>
 
-          {/* Free Heap */}
+          {/* Internal RAM */}
           <Grid size={{ xs: 6 }}>
             <Box display="flex" alignItems="center" gap={1}>
               <MemoryIcon fontSize="small" color="action" />
               <Box flex={1}>
                 <Typography variant="caption" color="text.secondary">
-                  Free Heap
+                  Internal RAM
                 </Typography>
                 <Typography variant="body2" fontWeight={500}>
-                  {formatBytes(health.free_heap)} ({heapPercentage}%)
+                  {formatBytes(health.internal_free)} / {formatBytes(health.internal_total)} ({internalPercentage}%)
                 </Typography>
                 <LinearProgress
                   variant="determinate"
-                  value={heapPercentage}
+                  value={internalPercentage}
                   sx={{ mt: 0.5, height: 4, borderRadius: 2 }}
-                  color={heapPercentage > 30 ? 'success' : heapPercentage > 15 ? 'warning' : 'error'}
+                  color={internalPercentage > 30 ? 'success' : internalPercentage > 15 ? 'warning' : 'error'}
                 />
               </Box>
             </Box>
@@ -185,6 +201,35 @@ export function SystemHealth() {
               </Box>
             </Grid>
           )}
+
+          {/* PSRAM */}
+          <Grid size={{ xs: 6 }}>
+            <Box display="flex" alignItems="center" gap={1}>
+              <MemoryIcon fontSize="small" color="action" />
+              <Box flex={1}>
+                <Typography variant="caption" color="text.secondary">
+                  PSRAM
+                </Typography>
+                {hasPsram ? (
+                  <>
+                    <Typography variant="body2" fontWeight={500}>
+                      {formatBytes(health.spiram_free)} / {formatBytes(health.spiram_total)} ({spiramPercentage}%)
+                    </Typography>
+                    <LinearProgress
+                      variant="determinate"
+                      value={spiramPercentage}
+                      sx={{ mt: 0.5, height: 4, borderRadius: 2 }}
+                      color={spiramPercentage > 30 ? 'success' : spiramPercentage > 15 ? 'warning' : 'error'}
+                    />
+                  </>
+                ) : (
+                  <Typography variant="body2" fontWeight={500} color="text.secondary">
+                    N/A
+                  </Typography>
+                )}
+              </Box>
+            </Box>
+          </Grid>
 
           {/* WiFi RSSI */}
           <Grid size={{ xs: 6 }}>
@@ -210,7 +255,7 @@ export function SystemHealth() {
           </Grid>
 
           {/* Time Sync Status */}
-          <Grid size={{ xs: 12 }}>
+          <Grid size={{ xs: 6 }}>
             <Box display="flex" alignItems="center" gap={1}>
               <TimeIcon fontSize="small" color="action" />
               <Box flex={1}>

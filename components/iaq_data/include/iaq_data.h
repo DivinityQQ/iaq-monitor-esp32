@@ -197,8 +197,10 @@ typedef struct {
         bool mqtt_connected;
         int32_t wifi_rssi;
         uint32_t uptime_seconds;
-        uint32_t free_heap;
-        uint32_t min_free_heap;
+        uint32_t internal_free;       // Free internal RAM
+        uint32_t internal_total;      // Total internal RAM
+        uint32_t spiram_free;         // Free PSRAM (0 if not available)
+        uint32_t spiram_total;        // Total PSRAM (0 if not available)
     } system;
 
 } iaq_data_t;

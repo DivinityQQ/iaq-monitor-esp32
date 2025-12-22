@@ -48,8 +48,9 @@ typedef struct display_snapshot {
     bool time_synced;
     int32_t rssi;
     uint32_t uptime;
-    uint32_t heap;
-    uint32_t min_heap;
+    uint32_t internal_free;
+    uint32_t spiram_free;
+    uint32_t spiram_total;
 
     /* Time (if synced) */
     int hour;

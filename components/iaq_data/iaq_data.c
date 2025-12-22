@@ -3,6 +3,7 @@
 #include <math.h>
 #include "esp_log.h"
 #include "esp_system.h"
+#include "esp_heap_caps.h"
 #include <string.h>
 #include <limits.h>
 
@@ -125,8 +126,10 @@ esp_err_t iaq_data_init(void)
 
     /* Initialize system status with current values (prevents zeros on first MQTT publish) */
     g_iaq_data.system.uptime_seconds = 0;
-    g_iaq_data.system.free_heap = esp_get_free_heap_size();
-    g_iaq_data.system.min_free_heap = esp_get_minimum_free_heap_size();
+    g_iaq_data.system.internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    g_iaq_data.system.internal_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
+    g_iaq_data.system.spiram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+    g_iaq_data.system.spiram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
     g_iaq_data.system.wifi_rssi = 0;  /* Will be updated when WiFi connects */
     g_iaq_data.system.wifi_connected = false;
     g_iaq_data.system.mqtt_connected = false;

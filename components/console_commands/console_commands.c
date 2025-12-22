@@ -11,6 +11,7 @@
 #include "esp_timer.h"
 #include "esp_chip_info.h"
 #include "esp_flash.h"
+#include "esp_heap_caps.h"
 
 #include "console_commands.h"
 #include "esp_wifi.h"
@@ -101,8 +102,12 @@ static int cmd_status(int argc, char **argv)
         /* System Status */
         printf("\n--- System ---\n");
         printf("Uptime: %lu seconds\n", data->system.uptime_seconds);
-        printf("Free heap: %lu bytes\n", data->system.free_heap);
-        printf("Min free heap: %lu bytes\n", data->system.min_free_heap);
+        printf("Internal RAM: %lu / %lu bytes\n", data->system.internal_free, data->system.internal_total);
+        if (data->system.spiram_total > 0) {
+            printf("PSRAM: %lu / %lu bytes\n", data->system.spiram_free, data->system.spiram_total);
+        } else {
+            printf("PSRAM: N/A\n");
+        }
 
         /* Network Status */
         printf("\n--- Network ---\n");
@@ -822,11 +827,22 @@ static int cmd_sensor(int argc, char **argv)
 static int cmd_free(int argc, char **argv)
 {
     printf("\n=== Memory Info ===\n");
-    printf("Free heap: %lu bytes\n", (unsigned long)esp_get_free_heap_size());
-    printf("Min free heap: %lu bytes\n", (unsigned long)esp_get_minimum_free_heap_size());
 
-    /* Show largest free block */
-    printf("Largest free block: %lu bytes\n", (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_DEFAULT));
+    /* Internal RAM */
+    uint32_t internal_free = heap_caps_get_free_size(MALLOC_CAP_INTERNAL);
+    uint32_t internal_total = heap_caps_get_total_size(MALLOC_CAP_INTERNAL);
+    printf("Internal RAM: %lu / %lu bytes\n", (unsigned long)internal_free, (unsigned long)internal_total);
+    printf("  Largest block: %lu bytes\n", (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_INTERNAL));
+
+    /* PSRAM */
+    uint32_t spiram_total = heap_caps_get_total_size(MALLOC_CAP_SPIRAM);
+    if (spiram_total > 0) {
+        uint32_t spiram_free = heap_caps_get_free_size(MALLOC_CAP_SPIRAM);
+        printf("PSRAM: %lu / %lu bytes\n", (unsigned long)spiram_free, (unsigned long)spiram_total);
+        printf("  Largest block: %lu bytes\n", (unsigned long)heap_caps_get_largest_free_block(MALLOC_CAP_SPIRAM));
+    } else {
+        printf("PSRAM: N/A\n");
+    }
 
     printf("\n");
     return 0;
