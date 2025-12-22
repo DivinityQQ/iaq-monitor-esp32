@@ -4,6 +4,24 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog, and the project adheres to Semantic Versioning.
 
+## [0.11.10] - 2025-12-22
+
+Stability + telemetry release: refined memory reporting, stale data handling, MQTT/OTA fixes, and portal performance polish.
+
+Added:
+- Health telemetry now splits internal RAM and PSRAM usage, surfaced in console status/free output, OLED system screen, and the portal System Health card.
+- State/metrics payloads now include last-known values for stale/disabled sensors to power consistent stale indicators in the portal.
+
+Changed:
+- Web portal data layer and dashboard cards refactored for better performance and clearer stale display; frontend dependencies refreshed.
+- OTA firmware uploads now block when the running image is pending verification; web API cadence and OTA validation bounds are clamped to safe ranges.
+- Defaults now enable PSRAM and performance-tuned SDK settings.
+
+Fixed:
+- MQTT stop/publish race, /power publish path duplication, and cJSON NULL handling when serializing payloads.
+- Sensor coordinator timers avoid stalling on data locks and now wake cleanly on stop.
+- PMS5003 UART read timeout tick conversion that caused tight polling.
+
 ## [0.11.7] - 2025-12-10
 
 Developer console + safety release: token-protected web console/log streaming, portal console UI, power polish, and bootloop rollback.
