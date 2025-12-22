@@ -152,7 +152,10 @@ static esp_err_t init_core_system(void)
 static void ota_validation_task(void *arg)
 {
     (void)arg;
-    const uint64_t timeout_us = (uint64_t)CONFIG_IAQ_OTA_VALIDATION_TIMEOUT_MIN * 60ULL * 1000000ULL;
+    uint32_t timeout_min = CONFIG_IAQ_OTA_VALIDATION_TIMEOUT_MIN;
+    if (timeout_min < 1) timeout_min = 1;
+    if (timeout_min > 60) timeout_min = 60;
+    const uint64_t timeout_us = (uint64_t)timeout_min * 60ULL * 1000000ULL;
     const uint64_t start_us = esp_timer_get_time();
     while (1) {
         bool wifi_ok = wifi_manager_is_connected() || wifi_manager_is_ap_active();

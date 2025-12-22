@@ -122,7 +122,6 @@ esp_err_t fusion_init(void)
  */
 static void apply_pm_rh_correction(iaq_data_t *data)
 {
-#ifdef CONFIG_FUSION_PM_RH_ENABLE
     if (!data->valid.rh_pct || !data->valid.pm25_ugm3) {
         /* No valid PM/RH input - keep last fused values as-is */
         data->fusion_diag.pm_rh_factor = 1.0f;
@@ -173,21 +172,6 @@ static void apply_pm_rh_correction(iaq_data_t *data)
 
     ESP_LOGD(TAG, "PM RH correction: factor=%.3f, PM2.5: %.1f -> %.1f ug/m3",
              correction_factor, data->raw.pm25_ugm3, data->fused.pm25_ugm3);
-#else
-    /* PM RH correction disabled - copy raw to fused */
-    data->fused.pm1_ugm3 = data->raw.pm1_ugm3;
-    data->fused.pm25_ugm3 = data->raw.pm25_ugm3;
-    data->fused.pm10_ugm3 = data->raw.pm10_ugm3;
-    data->fusion_diag.pm_rh_factor = 1.0f;
-    data->fusion_diag.pm25_quality = 100;
-
-    /* Still calculate PM1/PM2.5 ratio for diagnostics */
-    if (data->raw.pm25_ugm3 > 1.0f) {
-        data->fusion_diag.pm1_pm25_ratio = data->raw.pm1_ugm3 / data->raw.pm25_ugm3;
-    } else {
-        data->fusion_diag.pm1_pm25_ratio = NAN;
-    }
-#endif
 }
 
 /**

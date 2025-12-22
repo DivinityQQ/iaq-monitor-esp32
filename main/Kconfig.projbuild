@@ -271,7 +271,7 @@ menu "IAQ Monitor Configuration"
         config IAQ_WEB_PORTAL_STATIC_CHUNK_SIZE
             int "Static file chunk size (bytes)"
             range 512 8192
-            default 2048
+            default 4096
             help
                 Buffer size for reading and sending static files.
                 Larger values improve throughput. The HTTPD task stack size
@@ -302,8 +302,11 @@ menu "IAQ Monitor Configuration"
 
         config IAQ_WEB_PORTAL_CADENCE_MAX_MS
             int "Max allowed sensor cadence (ms)"
-            range 0 7200000
+            range 1000 7200000
             default 3600000
+            help
+                Upper bound for sensor cadence set via the web API.
+                Values are clamped to 1s..2h at runtime.
     endmenu
 
     menu "Web Console"
@@ -321,7 +324,7 @@ menu "IAQ Monitor Configuration"
                 Shared secret for WebSocket authentication. MUST be set to a non-empty
                 value to enable console access. Send via Authorization: Bearer <token>
                 or Sec-WebSocket-Protocol: bearer,<token> header.
-                WARNING: Empty token disables web console authentication entirely.
+                WARNING: Empty token rejects all web console connections.
 
         config IAQ_WEB_CONSOLE_LOG_BUFFER_SIZE
             int "Log ring buffer size (bytes)"
@@ -362,6 +365,7 @@ menu "IAQ Monitor Configuration"
     menu "OTA Updates"
         config IAQ_OTA_VALIDATION_TIMEOUT_MIN
             int "OTA validation timeout (minutes)"
+            range 1 60
             default 5
             help
                 Maximum time to wait after boot before marking firmware valid even if
@@ -406,13 +410,6 @@ menu "IAQ Monitor Configuration"
     endmenu
 
     menu "System & Debug"
-        config IAQ_STATUS_LED_GPIO
-            int "Status LED GPIO number"
-            default 46
-            help
-                GPIO number for status LED.
-                Default: GPIO46 (PowerFeather onboard green LED).
-
         config IAQ_ENABLE_CONSOLE_COMMANDS
             bool "Enable console commands"
             default y
@@ -471,15 +468,6 @@ menu "IAQ Monitor Configuration"
                 help
                     Track time each PM lock is held and allow dumping via esp_pm_dump_locks().
                     Adds runtime overhead; keep disabled in production.
-
-            config IAQ_PROFILING_PARSEABLE_OUTPUT
-                bool "Use machine-parseable output format"
-                default n
-                depends on IAQ_PROFILING
-                help
-                    Emit simplified parseable lines instead of human-friendly formatting.
-                    Useful for scraping logs; off by default.
-                    Note: Reserved for future use; currently not used.
         endmenu
     endmenu
 
@@ -564,15 +552,6 @@ menu "IAQ Monitor Configuration"
                 help
                     BMP280 IIR filter coefficient in config register.
                     Code mapping: 0=off, 1=2, 2=4, 3=8, 4=16.
-
-            config IAQ_BMP280_MEAS_DELAY_MARGIN_MS
-                int "Measurement delay margin (ms)"
-                default 3
-                range 0 50
-                help
-                    Extra delay margin added to the computed forced-mode measurement time.
-                    Datasheet formula: 1.25ms + 2.3ms*osrs_t + 2.3ms*osrs_p.
-                    A small margin (2–5ms) is recommended.
         endmenu
 
         menu "UART Sensors"
@@ -742,14 +721,6 @@ menu "IAQ Monitor Configuration"
                     help
                         ABC period in hours (0 disables ABC). Typical: 180 hours (7.5 days).
 
-                config IAQ_S8_USE_SENSOR_PRESSURE_COMP
-                    bool "Use sensor-side pressure compensation (if supported)"
-                    default n
-                    help
-                        If the S8 variant supports ambient pressure input via Modbus, enable this
-                        to write measured pressure to the sensor. This will disable fusion-side
-                        pressure compensation to avoid double-correction. If unsupported, this
-                        setting has no effect.
             endmenu
         endmenu
 
@@ -779,19 +750,12 @@ menu "IAQ Monitor Configuration"
                     SH1106 has 132 columns with typically only 128 visible. Set the left
                     column offset (0–4) so the 128-pixel content is centered.
 
-            choice IAQ_OLED_ROTATION
-                prompt "Rotation"
-                default IAQ_OLED_ROTATION_0
+            config IAQ_OLED_ROTATION_180
+                bool "Rotate 180°"
+                default n
                 depends on IAQ_OLED_ENABLE
                 help
-                    Rotate the display 0 or 180 degrees.
-
-                config IAQ_OLED_ROTATION_0
-                    bool "0°"
-
-                config IAQ_OLED_ROTATION_180
-                    bool "180°"
-            endchoice
+                    Rotate the display 180 degrees. Default is 0°.
 
             config IAQ_OLED_CONTRAST
                 int "Contrast (0-255)"
@@ -989,18 +953,9 @@ menu "IAQ Monitor Configuration"
                 Simulation still respects cadences, warm-up delays, and state machine logic.
 
         menu "Sensor Fusion"
-            config FUSION_PM_RH_ENABLE
-                bool "Enable PM humidity compensation"
-                default y
-                help
-                    Correct PM2.5/PM10 readings for humidity effects.
-                    Optical PM sensors over-read at high RH due to hygroscopic growth.
-                    Applies correction: pm_dry = pm_raw / (1 + a*(RH/100)^b)
-
             config FUSION_PM_RH_A
                 string "PM RH correction coefficient A"
                 default "0.3"
-                depends on FUSION_PM_RH_ENABLE
                 help
                     Coefficient 'a' in PM RH correction formula.
                     Default: 0.3 (conservative, based on literature).
@@ -1009,7 +964,6 @@ menu "IAQ Monitor Configuration"
             config FUSION_PM_RH_B
                 string "PM RH correction coefficient B"
                 default "3.0"
-                depends on FUSION_PM_RH_ENABLE
                 help
                     Exponent 'b' in PM RH correction formula.
                     Default: 3.0 (conservative, based on literature).
@@ -1018,7 +972,6 @@ menu "IAQ Monitor Configuration"
                 int "Maximum RH for PM correction (%)"
                 default 90
                 range 70 95
-                depends on FUSION_PM_RH_ENABLE
                 help
                     Above this RH, PM correction is not applied (quality flagged as low).
                     Optical sensors become unreliable at very high RH.
@@ -1026,7 +979,6 @@ menu "IAQ Monitor Configuration"
 
             config FUSION_CO2_PRESSURE_ENABLE
                 bool "Enable CO2 pressure compensation"
-                depends on !IAQ_S8_USE_SENSOR_PRESSURE_COMP
                 default y
                 help
                     Compensate CO2 readings for barometric pressure changes.
@@ -1118,19 +1070,10 @@ menu "IAQ Monitor Configuration"
                     Deviations reduce comfort score.
                     Default: 45%.
 
-            config METRICS_PRESSURE_TREND_ENABLE
-                bool "Calculate barometric pressure trend"
-                default y
-                help
-                    Track pressure changes over configurable window (default 3 hours).
-                    Result: RISING, STABLE, or FALLING with delta value.
-                    Useful for weather context and ventilation strategy.
-
             config METRICS_PRESSURE_TREND_WINDOW_HR
                 int "Pressure trend window (hours)"
                 default 3
                 range 1 6
-                depends on METRICS_PRESSURE_TREND_ENABLE
                 help
                     Time window for pressure trend calculation.
                     Default: 3 hours (meteorological standard).
@@ -1138,7 +1081,6 @@ menu "IAQ Monitor Configuration"
             config METRICS_PRESSURE_TREND_THRESHOLD_HPA
                 string "Pressure trend threshold (hPa)"
                 default "1.5"
-                depends on METRICS_PRESSURE_TREND_ENABLE
                 help
                     Change threshold to classify as RISING or FALLING.
                     Value represents delta over the configured window (default 3h).
@@ -1146,7 +1088,6 @@ menu "IAQ Monitor Configuration"
             config METRICS_PRESSURE_TREND_HYSTERESIS_HPA
                 string "Pressure trend hysteresis (hPa)"
                 default "0.3"
-                depends on METRICS_PRESSURE_TREND_ENABLE
                 help
                     Hysteresis band applied when exiting RISING/FALLING back to STABLE.
                     Prevents rapid oscillation around the trend threshold.

@@ -52,6 +52,8 @@ static const char *TAG = "WEB_PORTAL";
 #define CONFIG_IAQ_WEB_PORTAL_STATIC_CHUNK_SIZE 2048  /* Default static file chunk size */
 #endif
 #define WEB_STATIC_CHUNK_SIZE CONFIG_IAQ_WEB_PORTAL_STATIC_CHUNK_SIZE
+#define WEB_PORTAL_CADENCE_MAX_MIN_MS 1000U
+#define WEB_PORTAL_CADENCE_MAX_MAX_MS 7200000U
 
 /* Minimum stack size: base overhead + static chunk buffer + safety margin
  * Base covers: HTTPD framework, TLS (if HTTPS), handler locals (path buffers, stat structs)
@@ -1197,7 +1199,13 @@ static esp_err_t api_sensor_action(httpd_req_t *req)
         if (!cJSON_IsNumber(jms)) { cJSON_Delete(body); respond_error(req, 400, "INVALID_MS", "'ms' must be a number"); iaq_prof_toc(IAQ_METRIC_WEB_API_SENSOR_ACTION, t0); return ESP_OK; }
         int ms = (int)jms->valuedouble;
         if (ms < 0) ms = 0;
-        if (ms > CONFIG_IAQ_WEB_PORTAL_CADENCE_MAX_MS) ms = CONFIG_IAQ_WEB_PORTAL_CADENCE_MAX_MS;
+        uint32_t max_ms = CONFIG_IAQ_WEB_PORTAL_CADENCE_MAX_MS;
+        if (max_ms < WEB_PORTAL_CADENCE_MAX_MIN_MS) {
+            max_ms = WEB_PORTAL_CADENCE_MAX_MIN_MS;
+        } else if (max_ms > WEB_PORTAL_CADENCE_MAX_MAX_MS) {
+            max_ms = WEB_PORTAL_CADENCE_MAX_MAX_MS;
+        }
+        if (ms > (int)max_ms) ms = (int)max_ms;
         r = sensor_coordinator_set_cadence(id, (uint32_t)ms);
         cJSON_Delete(body);
     } else {

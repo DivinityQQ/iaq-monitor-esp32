@@ -38,7 +38,6 @@ static float median3(float a, float b, float c)
 #define PM_SAMPLE_INTERVAL_SEC 30U
 
 /* ===== Pressure Trend Tracking ===== */
-#ifdef CONFIG_METRICS_PRESSURE_TREND_ENABLE
 #define PRESSURE_HISTORY_SIZE 144  /* 6 hours @ 2.5-minute intervals */
 #define PRESSURE_TREND_MIN_SPAN_FRAC 0.5f   /* Require at least 50% of window */
 #define PRESSURE_TREND_EMA_ALPHA 0.2f       /* Smoothing factor for delta (0..1) */
@@ -53,7 +52,6 @@ static struct {
 } s_pressure_history = {0};
 static uint32_t s_pressure_sample_elapsed_sec = PRESSURE_SAMPLE_INTERVAL_SEC;
 static float s_pressure_delta_ema_hpa = NAN;
-#endif
 
 /* ===== CO2 Rate of Change Tracking ===== */
 #ifdef CONFIG_METRICS_CO2_RATE_ENABLE
@@ -95,11 +93,9 @@ esp_err_t metrics_init(void)
 {
     ESP_LOGI(TAG, "Initializing metrics calculation");
 
-#ifdef CONFIG_METRICS_PRESSURE_TREND_ENABLE
     memset(&s_pressure_history, 0, sizeof(s_pressure_history));
     s_pressure_sample_elapsed_sec = PRESSURE_SAMPLE_INTERVAL_SEC;
     s_pressure_delta_ema_hpa = NAN;
-#endif
 
 #ifdef CONFIG_METRICS_CO2_RATE_ENABLE
     memset(&s_co2_history, 0, sizeof(s_co2_history));
@@ -548,8 +544,6 @@ static void calculate_mold_risk(iaq_data_t *data)
 
 /* ========== Pressure Trend ========== */
 
-#ifdef CONFIG_METRICS_PRESSURE_TREND_ENABLE
-
 static void reset_pressure_metrics(iaq_data_t *data)
 {
     if (!data) {
@@ -719,7 +713,6 @@ static void update_pressure_trend(iaq_data_t *data)
 
     data->metrics.pressure_trend = trend;
 }
-#endif /* CONFIG_METRICS_PRESSURE_TREND_ENABLE */
 
 /* ========== CO2 Rate of Change ========== */
 
@@ -941,9 +934,7 @@ void metrics_calculate_all(iaq_data_t *data)
 #endif
 
     /* Update pressure trend */
-#ifdef CONFIG_METRICS_PRESSURE_TREND_ENABLE
     update_pressure_trend(data);
-#endif
 
     /* Update CO2 rate */
 #ifdef CONFIG_METRICS_CO2_RATE_ENABLE
