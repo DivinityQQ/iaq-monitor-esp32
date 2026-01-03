@@ -2,6 +2,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
+#include <ctype.h>
 #include <math.h>
 #include "freertos/FreeRTOS.h"
 #include "freertos/task.h"
@@ -22,6 +24,7 @@
 #include "sensor_coordinator.h"
 #include "s8_driver.h"
 #include "power_board.h"
+#include "log_control.h"
 /* SGP41 baseline ops removed; no direct console hooks needed */
 
 static const char *TAG = "CONSOLE_CMD";
@@ -88,6 +91,138 @@ static bool parse_one_quoted(int argc, char **argv, int *idx, char *out, size_t 
 
     out[out_pos] = '\0';
     return true;
+}
+
+static const char *log_level_to_string(esp_log_level_t level)
+{
+    switch (level) {
+        case ESP_LOG_NONE: return "none";
+        case ESP_LOG_ERROR: return "error";
+        case ESP_LOG_WARN: return "warn";
+        case ESP_LOG_INFO: return "info";
+        case ESP_LOG_DEBUG: return "debug";
+        case ESP_LOG_VERBOSE: return "verbose";
+        default: return "unknown";
+    }
+}
+
+static bool parse_log_level(const char *arg, esp_log_level_t *out)
+{
+    if (!arg || !out) return false;
+
+    if (isdigit((unsigned char)arg[0])) {
+        char *end = NULL;
+        long val = strtol(arg, &end, 10);
+        if (!end || *end != '\0') return false;
+        if (val < ESP_LOG_NONE || val > ESP_LOG_VERBOSE) return false;
+        *out = (esp_log_level_t)val;
+        return true;
+    }
+
+    if (strcasecmp(arg, "none") == 0) { *out = ESP_LOG_NONE; return true; }
+    if (strcasecmp(arg, "error") == 0 || strcasecmp(arg, "err") == 0) { *out = ESP_LOG_ERROR; return true; }
+    if (strcasecmp(arg, "warn") == 0 || strcasecmp(arg, "warning") == 0) { *out = ESP_LOG_WARN; return true; }
+    if (strcasecmp(arg, "info") == 0) { *out = ESP_LOG_INFO; return true; }
+    if (strcasecmp(arg, "debug") == 0 || strcasecmp(arg, "dbg") == 0) { *out = ESP_LOG_DEBUG; return true; }
+    if (strcasecmp(arg, "verbose") == 0 || strcasecmp(arg, "verb") == 0) { *out = ESP_LOG_VERBOSE; return true; }
+
+    return false;
+}
+
+static void print_log_status(void)
+{
+    esp_log_level_t app = log_control_get_app_level();
+    esp_log_level_t sys = log_control_get_system_level();
+
+    printf("Log levels:\n");
+    printf("  app: %s (%d)\n", log_level_to_string(app), app);
+    printf("  sys: %s (%d)\n", log_level_to_string(sys), sys);
+
+    const char **tags = NULL;
+    size_t count = 0;
+    log_control_get_system_tags(&tags, &count);
+    if (tags && count > 0) {
+        printf("System tags:");
+        for (size_t i = 0; i < count; ++i) {
+            printf(" %s", tags[i]);
+        }
+        printf("\n");
+    }
+}
+
+static void print_log_help(void)
+{
+    printf("Usage:\n");
+    printf("  log show\n");
+    printf("  log app <level>\n");
+    printf("  log sys <level>\n");
+    printf("  log reset\n");
+    printf("Levels: none, error, warn, info, debug, verbose (or 0-5)\n");
+}
+
+/* ==================== LOG COMMAND ==================== */
+static int cmd_log(int argc, char **argv)
+{
+#if !CONFIG_LOG_DYNAMIC_LEVEL_CONTROL
+    printf("Error: dynamic log control is disabled in Kconfig\n");
+    return 1;
+#else
+    if (argc == 1 || (argc >= 2 && strcmp(argv[1], "show") == 0)) {
+        print_log_status();
+        return 0;
+    }
+
+    if (argc >= 2 && strcmp(argv[1], "app") == 0) {
+        if (argc < 3) {
+            print_log_help();
+            return 1;
+        }
+        esp_log_level_t level;
+        if (!parse_log_level(argv[2], &level)) {
+            printf("Error: invalid level '%s'\n", argv[2]);
+            return 1;
+        }
+        esp_err_t err = log_control_set_app_level(level, true);
+        if (err != ESP_OK) {
+            printf("Error: failed to set app log level: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+        printf("App log level set to %s (%d)\n", log_level_to_string(level), level);
+        return 0;
+    }
+
+    if (argc >= 2 && strcmp(argv[1], "sys") == 0) {
+        if (argc < 3) {
+            print_log_help();
+            return 1;
+        }
+        esp_log_level_t level;
+        if (!parse_log_level(argv[2], &level)) {
+            printf("Error: invalid level '%s'\n", argv[2]);
+            return 1;
+        }
+        esp_err_t err = log_control_set_system_level(level, true);
+        if (err != ESP_OK) {
+            printf("Error: failed to set system log level: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+        printf("System log level set to %s (%d)\n", log_level_to_string(level), level);
+        return 0;
+    }
+
+    if (argc >= 2 && strcmp(argv[1], "reset") == 0) {
+        esp_err_t err = log_control_reset_to_defaults(true);
+        if (err != ESP_OK) {
+            printf("Error: failed to reset log levels: %s\n", esp_err_to_name(err));
+            return 1;
+        }
+        printf("Log levels reset to defaults\n");
+        return 0;
+    }
+
+    print_log_help();
+    return 1;
+#endif
 }
 
 /* ==================== STATUS COMMAND ==================== */
@@ -1233,6 +1368,15 @@ esp_err_t console_commands_init(void)
 
     /* Register help command */
     esp_console_register_help_command();
+
+    /* Register log command */
+    const esp_console_cmd_t log_cmd = {
+        .command = "log",
+        .help = "Log level control (app/sys)",
+        .hint = NULL,
+        .func = &cmd_log,
+    };
+    ESP_ERROR_CHECK(esp_console_cmd_register(&log_cmd));
 
     /* Register status command */
     const esp_console_cmd_t status_cmd = {

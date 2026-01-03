@@ -24,6 +24,7 @@ idf_component_register(
         web_portal
         web_console
         ota_manager
+        log_control
 )
 
 # Create LittleFS image for the web portal if source dir exists

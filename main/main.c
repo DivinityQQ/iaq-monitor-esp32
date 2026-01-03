@@ -28,6 +28,7 @@
 #include "pm_guard.h"
 #include "power_board.h"
 #include "ota_manager.h"
+#include "log_control.h"
 
 static const char *TAG = "IAQ_MAIN";
 
@@ -36,17 +37,6 @@ static iaq_system_context_t g_system_ctx;
 
 /* Timer for periodic system status updates (console logging + metrics) */
 static esp_timer_handle_t system_status_timer;
-
-/* Reduce noise from lower-level Wi-Fi libraries while keeping our INFO logs. */
-static void configure_log_levels(void)
-{
-    /* Tags observed in Wi-Fi/PHY bring-up that are chatty at INFO */
-    esp_log_level_set("wifi",      ESP_LOG_WARN);
-    esp_log_level_set("wifi_init", ESP_LOG_WARN);
-    esp_log_level_set("net80211",  ESP_LOG_WARN);
-    esp_log_level_set("pp",        ESP_LOG_WARN);
-    esp_log_level_set("phy_init",  ESP_LOG_WARN);
-}
 
 /**
  * System status timer callback - updates system metrics and logs to console.
@@ -121,9 +111,6 @@ static esp_err_t init_core_system(void)
              (chip_info.features & CHIP_FEATURE_BLE) ? "/BLE" : "",
              chip_info.revision);
 
-    /* Quiet noisy subsystem logs (Wi‑Fi stack) */
-    configure_log_levels();
-
     ESP_LOGI(TAG, "IRAM: %lu/%lu bytes, PSRAM: %lu/%lu bytes",
              (unsigned long)heap_caps_get_free_size(MALLOC_CAP_INTERNAL),
              (unsigned long)heap_caps_get_total_size(MALLOC_CAP_INTERNAL),
@@ -137,6 +124,11 @@ static esp_err_t init_core_system(void)
         ret = nvs_flash_init();
     }
     ESP_ERROR_CHECK(ret);
+
+    esp_err_t log_err = log_control_apply_from_nvs();
+    if (log_err != ESP_OK) {
+        ESP_LOGW(TAG, "Log control init failed: %s", esp_err_to_name(log_err));
+    }
 
     /* Initialize networking stack */
     ESP_ERROR_CHECK(esp_netif_init());
