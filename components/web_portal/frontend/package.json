@@ -1,7 +1,7 @@
 {
   "name": "iaq-monitor-frontend",
   "private": true,
-  "version": "1.9.1",
+  "version": "1.9.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,21 +11,22 @@
     "type-check": "tsc --noEmit"
   },
   "dependencies": {
-    "react": "^19.2.3",
-    "react-dom": "^19.2.3",
-    "jotai": "^2.16.0",
-    "@mui/material": "^7.3.6",
-    "@mui/icons-material": "^7.3.6",
     "@emotion/react": "^11.14.0",
     "@emotion/styled": "^11.14.1",
-    "uplot": "^1.6.32",
+    "@mui/icons-material": "^7.3.6",
+    "@mui/material": "^7.3.6",
+    "jotai": "^2.16.0",
+    "react": "^19.2.3",
+    "react-dom": "^19.2.3",
     "react-use-websocket": "^4.13.0",
+    "uplot": "^1.6.32",
     "wouter": "^3.9.0"
   },
   "devDependencies": {
     "@types/react": "^19.2.7",
     "@types/react-dom": "^19.2.3",
     "@vitejs/plugin-react": "^5.1.2",
+    "baseline-browser-mapping": "^2.9.11",
     "typescript": "^5.9.3",
     "vite": "^7.3.0",
     "vite-plugin-compression": "^0.5.1"

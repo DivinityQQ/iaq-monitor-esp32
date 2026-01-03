@@ -59,9 +59,9 @@ export function FeaturedCardSkeleton() {
 export function MetricsGridSkeleton() {
   return (
     <Grid container spacing={3}>
-      {/* 8 sensor cards */}
-      {Array.from({ length: 8 }).map((_, index) => (
-        <Grid key={index} size={{ xs: 6, tablet: 4, md: 3 }}>
+      {/* 10 sensor cards */}
+      {Array.from({ length: 10 }).map((_, index) => (
+        <Grid key={index} size={{ xs: 6, tablet: 4, md: 3, lg: 2.4 }}>
           <CardSkeleton />
         </Grid>
       ))}
