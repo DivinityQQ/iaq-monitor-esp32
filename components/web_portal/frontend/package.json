@@ -1,7 +1,7 @@
 {
   "name": "iaq-monitor-frontend",
   "private": true,
-  "version": "1.9.5",
+  "version": "2.0.1",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -15,11 +15,11 @@
     "@emotion/styled": "^11.14.1",
     "@mui/icons-material": "^7.3.6",
     "@mui/material": "^7.3.6",
+    "@mui/x-charts": "^8.23.0",
     "jotai": "^2.16.0",
     "react": "^19.2.3",
     "react-dom": "^19.2.3",
     "react-use-websocket": "^4.13.0",
-    "uplot": "^1.6.32",
     "wouter": "^3.9.0"
   },
   "devDependencies": {

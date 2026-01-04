@@ -5,9 +5,9 @@ import ToggleButton from '@mui/material/ToggleButton';
 import ToggleButtonGroup from '@mui/material/ToggleButtonGroup';
 import Typography from '@mui/material/Typography';
 import { useMemo, useState } from 'react';
-import { useTheme } from '@mui/material/styles';
-import { ChartTile, RangeSeconds } from './ChartTile';
-import { PMChartTile } from './PMChartTile';
+import { ChartCard } from './ChartCard';
+import { MultiSeriesChart } from './MultiSeriesChart';
+import { RANGES, SINGLE_SERIES_CHARTS, type RangeKey } from './config/chartConfig';
 
 /**
  * Container component for charts with controls and future enhancements
@@ -17,21 +17,18 @@ import { PMChartTile } from './PMChartTile';
  * - Export functionality
  */
 export function ChartContainer() {
-  const theme = useTheme();
-  const [range, setRange] = useState<RangeSeconds>(60);
+  const [range, setRange] = useState<RangeKey>('5m');
 
-  const handleRange = (_: any, val: RangeSeconds | null) => {
+  const handleRange = (_: any, val: RangeKey | null) => {
     if (val) setRange(val);
   };
 
-  const colors = useMemo(
-    () => ({
-      temp: theme.palette.error.main,
-      rh: theme.palette.info.main,
-      co2: theme.palette.warning.main,
-      pm: theme.palette.primary.main,
-    }),
-    [theme.palette],
+  const rangeOptions = useMemo(
+    () => (['1m', '5m', '1h', '1d', '7d'] as RangeKey[]).map((key) => ({
+      key,
+      label: RANGES[key].label,
+    })),
+    []
   );
 
   return (
@@ -47,51 +44,22 @@ export function ChartContainer() {
           </Typography>
         </Box>
         <ToggleButtonGroup size="small" exclusive value={range} onChange={handleRange}>
-          <ToggleButton value={60}>60s</ToggleButton>
-          <ToggleButton value={300}>5m</ToggleButton>
-          <ToggleButton value={3600}>1h</ToggleButton>
+          {rangeOptions.map((option) => (
+            <ToggleButton key={option.key} value={option.key}>
+              {option.label}
+            </ToggleButton>
+          ))}
         </ToggleButtonGroup>
       </Box>
 
       <Grid container spacing={2}>
+        {SINGLE_SERIES_CHARTS.map((metric) => (
+          <Grid key={metric} size={{ xs: 12, tablet: 12, md: 6 }}>
+            <ChartCard metric={metric} range={range} />
+          </Grid>
+        ))}
         <Grid size={{ xs: 12, tablet: 12, md: 6 }}>
-          <ChartTile
-            title="Temperature"
-            color={colors.temp}
-            unitSuffix="°C"
-            metric="temp_c"
-            range={range}
-            yMin={15}
-            softYMax={35}
-            decimals={1}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, tablet: 12, md: 6 }}>
-          <ChartTile
-            title="Humidity"
-            color={colors.rh}
-            unitSuffix="%"
-            metric="rh_pct"
-            range={range}
-            yMin={0}
-            yMax={100}
-            decimals={1}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, tablet: 12, md: 6 }}>
-          <ChartTile
-            title="CO2"
-            color={colors.co2}
-            unitSuffix="ppm"
-            metric="co2_ppm"
-            range={range}
-            yMin={400}
-            softYMax={2000}
-            decimals={0}
-          />
-        </Grid>
-        <Grid size={{ xs: 12, tablet: 12, md: 6 }}>
-          <PMChartTile range={range} yMin={0} softYMax={50} />
+          <MultiSeriesChart range={range} />
         </Grid>
       </Grid>
     </Container>

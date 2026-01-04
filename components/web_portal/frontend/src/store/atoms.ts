@@ -2,7 +2,6 @@ import { atom } from 'jotai';
 import { atomFamily, atomWithStorage, selectAtom } from 'jotai/utils';
 import type { State, Metrics, Health, Power, DeviceInfo, SensorId, SensorCadence, MQTTStatus, OTAProgress, OTAVersionInfo } from '../api/types';
 // Color derivations moved to components using theme CSS variables for live updates
-import { getBuffersVersion } from '../utils/streamBuffers';
 import { apiClient } from '../api/client';
 
 // ============================================================================
@@ -61,15 +60,15 @@ export const otaVersionInfoAtom = atom<OTAVersionInfo | null>(null);
 export const cadencesAtom = atom<Record<SensorId, SensorCadence> | null>(null);
 
 /**
- * Chart buffers version atom - read-only derived atom
- * Increments whenever new data is appended to chart buffers
+ * Chart buffers version atom - primitive writable atom
+ * Incremented by ChartBufferStream after appending data to buffers
  * Charts subscribe to this for efficient update triggering
+ *
+ * This is a writable atom (not derived) to avoid race conditions:
+ * the version is set AFTER data is appended, ensuring charts always
+ * see the latest data when they re-render.
  */
-export const buffersVersionAtom = atom((get) => {
-  // Also depend on stateAtom to trigger re-evaluation
-  get(stateAtom);
-  return getBuffersVersion();
-});
+export const buffersVersionAtom = atom<number>(0);
 
 // ============================================================================
 // DERIVED ATOMS - Computed Values

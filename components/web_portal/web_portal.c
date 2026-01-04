@@ -4,6 +4,8 @@
 #include <sys/stat.h>
 #include <sys/param.h>
 #include <strings.h>
+#include <time.h>
+#include <ctype.h>
 #include "esp_log.h"
 #include "esp_littlefs.h"
 #include "esp_timer.h"
@@ -25,6 +27,7 @@
 #include "iaq_config.h"
 #include "iaq_data.h"
 #include "iaq_json.h"
+#include "iaq_history.h"
 #include "wifi_manager.h"
 #include "mqtt_manager.h"
 #include "sensor_coordinator.h"
@@ -784,6 +787,326 @@ static esp_err_t api_health_get(httpd_req_t *req)
     iaq_data_t s = (iaq_data_t){0}; IAQ_DATA_WITH_LOCK(){s=*iaq_data_get();}
     respond_json(req, iaq_json_build_health(&s), 200);
     iaq_prof_toc(IAQ_METRIC_WEB_API_HEALTH, t0);
+    return ESP_OK;
+}
+
+typedef struct {
+    const char *key;
+    history_metric_id_t id;
+} history_metric_map_t;
+
+static const history_metric_map_t s_history_metric_map[] = {
+    { "temp_c", HIST_METRIC_TEMP },
+    { "rh_pct", HIST_METRIC_HUMIDITY },
+    { "co2_ppm", HIST_METRIC_CO2 },
+    { "pressure_hpa", HIST_METRIC_PRESSURE },
+    { "pm1_ugm3", HIST_METRIC_PM1 },
+    { "pm25_ugm3", HIST_METRIC_PM25 },
+    { "pm10_ugm3", HIST_METRIC_PM10 },
+    { "voc_index", HIST_METRIC_VOC },
+    { "nox_index", HIST_METRIC_NOX },
+    { "mold_risk", HIST_METRIC_MOLD_RISK },
+    { "aqi", HIST_METRIC_AQI },
+    { "comfort_score", HIST_METRIC_COMFORT },
+    { "iaq_score", HIST_METRIC_IAQ_SCORE },
+};
+
+static bool history_metric_from_key(const char *key, history_metric_id_t *out)
+{
+    if (!key || !out) return false;
+    for (size_t i = 0; i < sizeof(s_history_metric_map) / sizeof(s_history_metric_map[0]); i++) {
+        if (strcmp(key, s_history_metric_map[i].key) == 0) {
+            *out = s_history_metric_map[i].id;
+            return true;
+        }
+    }
+    return false;
+}
+
+static bool parse_range_seconds(const char *range, int64_t *out_seconds)
+{
+    if (!range || !out_seconds) return false;
+    char *end = NULL;
+    long value = strtol(range, &end, 10);
+    if (value <= 0 || !end || *end == '\0') return false;
+    char unit = *end;
+    int64_t seconds = 0;
+    switch (unit) {
+        case 's': seconds = value; break;
+        case 'm': seconds = value * 60LL; break;
+        case 'h': seconds = value * 3600LL; break;
+        case 'd': seconds = value * 86400LL; break;
+        default: return false;
+    }
+    *out_seconds = seconds;
+    return true;
+}
+
+static void url_decode_inplace(char *str)
+{
+    if (!str) return;
+    char *src = str;
+    char *dst = str;
+    while (*src) {
+        if (*src == '%' && isxdigit((unsigned char)src[1]) && isxdigit((unsigned char)src[2])) {
+            char hi = src[1];
+            char lo = src[2];
+            int high = (hi >= 'a') ? (hi - 'a' + 10) : (hi >= 'A') ? (hi - 'A' + 10) : (hi - '0');
+            int low = (lo >= 'a') ? (lo - 'a' + 10) : (lo >= 'A') ? (lo - 'A' + 10) : (lo - '0');
+            *dst++ = (char)((high << 4) | low);
+            src += 3;
+            continue;
+        }
+        if (*src == '+') {
+            *dst++ = ' ';
+            src++;
+            continue;
+        }
+        *dst++ = *src++;
+    }
+    *dst = '\0';
+}
+
+static uint16_t history_default_max_points(int64_t range_s)
+{
+    uint16_t tier1_points = CONFIG_IAQ_HISTORY_TIER1_WINDOW_S / CONFIG_IAQ_HISTORY_TIER1_RES_S;
+    uint16_t tier2_points = CONFIG_IAQ_HISTORY_TIER2_WINDOW_S / CONFIG_IAQ_HISTORY_TIER2_RES_S;
+    uint16_t tier3_points = CONFIG_IAQ_HISTORY_TIER3_WINDOW_S / CONFIG_IAQ_HISTORY_TIER3_RES_S;
+    if (range_s <= CONFIG_IAQ_HISTORY_TIER1_WINDOW_S) return tier1_points;
+    if (range_s <= CONFIG_IAQ_HISTORY_TIER2_WINDOW_S) return tier2_points;
+    return tier3_points;
+}
+
+/* ═══════════════════════════════════════════════════════════════════════════
+ * Binary History Streaming
+ * ═══════════════════════════════════════════════════════════════════════════ */
+
+#define HIST_BIN_MAGIC 0x01514149  /* "IAQ\x01" little-endian */
+#define HIST_STREAM_BUF_SIZE 1024
+#define HIST_STREAM_BATCH 128
+
+typedef struct __attribute__((packed)) {
+    uint32_t magic;
+    uint32_t resolution_s;
+    uint32_t end_time;
+    uint16_t metric_count;
+    uint16_t bucket_count;
+} hist_bin_header_t;
+
+_Static_assert(sizeof(hist_bin_header_t) == 16, "Header must be 16 bytes");
+
+typedef struct __attribute__((packed)) {
+    uint8_t  metric_id;
+    uint8_t  flags;
+    int16_t  scale;
+    int16_t  offset;
+} hist_bin_metric_desc_t;
+
+_Static_assert(sizeof(hist_bin_metric_desc_t) == 6, "Metric desc must be 6 bytes");
+_Static_assert(HIST_STREAM_BUF_SIZE >= sizeof(hist_bin_header_t) +
+               (HISTORY_METRIC_COUNT * sizeof(hist_bin_metric_desc_t)),
+               "Output buffer too small for header + descriptors");
+
+typedef struct {
+    httpd_req_t *req;
+    hist_bin_metric_desc_t descs[HISTORY_METRIC_COUNT];
+    uint8_t out_buf[HIST_STREAM_BUF_SIZE];
+    size_t out_len;
+    bool error;
+} hist_stream_ctx_t;
+
+static bool hist_flush(hist_stream_ctx_t *ctx)
+{
+    if (ctx->out_len == 0) return true;
+    if (httpd_resp_send_chunk(ctx->req, (char *)ctx->out_buf, ctx->out_len) != ESP_OK) {
+        ctx->error = true;
+        return false;
+    }
+    ctx->out_len = 0;
+    return true;
+}
+
+static bool hist_write(hist_stream_ctx_t *ctx, const void *data, size_t len)
+{
+    const uint8_t *src = (const uint8_t *)data;
+    size_t remaining = len;
+    while (remaining > 0) {
+        size_t space = sizeof(ctx->out_buf) - ctx->out_len;
+        if (space == 0 && !hist_flush(ctx)) return false;
+        space = sizeof(ctx->out_buf) - ctx->out_len;
+        size_t to_copy = remaining < space ? remaining : space;
+        memcpy(&ctx->out_buf[ctx->out_len], src, to_copy);
+        ctx->out_len += to_copy;
+        src += to_copy;
+        remaining -= to_copy;
+    }
+    return true;
+}
+
+static bool hist_header_cb(
+    const history_stream_params_t *params,
+    const history_metric_id_t *metrics,
+    int metric_count,
+    void *user_ctx)
+{
+    hist_stream_ctx_t *ctx = user_ctx;
+
+    /* Send header */
+    hist_bin_header_t hdr = {
+        .magic = HIST_BIN_MAGIC,
+        .resolution_s = params->resolution_s,
+        .end_time = (uint32_t)params->end_time,
+        .metric_count = (uint16_t)metric_count,
+        .bucket_count = params->bucket_count,
+    };
+    if (!hist_write(ctx, &hdr, sizeof(hdr))) return false;
+
+    /* Send metric descriptors */
+    return hist_write(ctx, ctx->descs, metric_count * sizeof(hist_bin_metric_desc_t));
+}
+
+static bool hist_bucket_cb(
+    history_metric_id_t metric,
+    uint16_t bucket_idx,
+    const history_bucket_wire_t *buckets,
+    uint16_t bucket_count,
+    void *user_ctx)
+{
+    hist_stream_ctx_t *ctx = user_ctx;
+    (void)metric;
+    (void)bucket_idx;
+
+    return hist_write(ctx, buckets, bucket_count * sizeof(*buckets));
+}
+
+static esp_err_t api_history_get(httpd_req_t *req)
+{
+    /* === Query parsing === */
+    char query[256];
+    if (httpd_req_get_url_query_str(req, query, sizeof(query)) != ESP_OK) {
+        respond_error(req, 400, "NO_QUERY", "Missing query parameters");
+        return ESP_OK;
+    }
+
+    char metrics_buf[192];
+    if (httpd_query_key_value(query, "metrics", metrics_buf, sizeof(metrics_buf)) != ESP_OK) {
+        respond_error(req, 400, "NO_METRICS", "Missing metrics list");
+        return ESP_OK;
+    }
+    url_decode_inplace(metrics_buf);
+
+    char range_buf[24];
+    int64_t range_s = 0;
+    if (httpd_query_key_value(query, "range", range_buf, sizeof(range_buf)) == ESP_OK) {
+        if (!parse_range_seconds(range_buf, &range_s)) {
+            respond_error(req, 400, "BAD_RANGE", "Invalid range format");
+            return ESP_OK;
+        }
+    }
+
+    char start_buf[24], end_buf[24];
+    int64_t start_s = 0, end_s = 0;
+    if (httpd_query_key_value(query, "start", start_buf, sizeof(start_buf)) == ESP_OK) {
+        start_s = strtoll(start_buf, NULL, 10);
+    }
+    if (httpd_query_key_value(query, "end", end_buf, sizeof(end_buf)) == ESP_OK) {
+        end_s = strtoll(end_buf, NULL, 10);
+    }
+
+    if (range_s > 0) {
+        if (end_s <= 0) end_s = time(NULL);
+        start_s = end_s - range_s;
+    } else if (start_s > 0) {
+        if (end_s <= 0) end_s = time(NULL);
+    } else {
+        respond_error(req, 400, "BAD_RANGE", "Provide range or start");
+        return ESP_OK;
+    }
+
+    char max_buf[16];
+    uint16_t max_points = 0;
+    if (httpd_query_key_value(query, "max_points", max_buf, sizeof(max_buf)) == ESP_OK) {
+        long mp = strtol(max_buf, NULL, 10);
+        if (mp > 0) max_points = (uint16_t)mp;
+    }
+    if (max_points == 0) max_points = history_default_max_points(end_s - start_s);
+
+    /* Parse metric list */
+    history_metric_id_t metrics[HISTORY_METRIC_COUNT];
+    int metric_count = 0;
+    char *saveptr = NULL;
+    for (char *tok = strtok_r(metrics_buf, ",", &saveptr); tok; tok = strtok_r(NULL, ",", &saveptr)) {
+        if (metric_count >= HISTORY_METRIC_COUNT) {
+            respond_error(req, 400, "TOO_MANY_METRICS", "Metrics list too long");
+            return ESP_OK;
+        }
+        history_metric_id_t id;
+        if (!history_metric_from_key(tok, &id)) {
+            respond_error(req, 400, "BAD_METRIC", "Unknown metric key");
+            return ESP_OK;
+        }
+        metrics[metric_count++] = id;
+    }
+    if (metric_count == 0) {
+        respond_error(req, 400, "NO_METRICS", "Empty metrics list");
+        return ESP_OK;
+    }
+
+    /* Pre-validate metric IDs/scales before sending any bytes */
+    hist_bin_metric_desc_t descs[HISTORY_METRIC_COUNT];
+    for (int i = 0; i < metric_count; i++) {
+        history_metric_scale_t scale = {0};
+        if (!iaq_history_metric_scale(metrics[i], &scale)) {
+            respond_error(req, 500, "HISTORY_SCALE_FAILED", "Missing metric scale");
+            return ESP_OK;
+        }
+        descs[i] = (hist_bin_metric_desc_t){
+            .metric_id = (uint8_t)metrics[i],
+            .flags = 0,
+            .scale = scale.scale,
+            .offset = scale.offset,
+        };
+    }
+
+    /* === Binary streaming === */
+    set_cors(req);
+    httpd_resp_set_type(req, "application/x-iaq-history");
+
+    hist_stream_ctx_t ctx = {
+        .req = req,
+        .out_len = 0,
+        .error = false,
+    };
+    memcpy(ctx.descs, descs, metric_count * sizeof(hist_bin_metric_desc_t));
+
+    history_bucket_wire_t scratch[HIST_STREAM_BATCH];
+
+    esp_err_t ret = iaq_history_stream(
+        metrics, metric_count,
+        start_s, end_s, max_points,
+        scratch, HIST_STREAM_BATCH,
+        hist_header_cb,
+        hist_bucket_cb,
+        &ctx
+    );
+
+    if (ctx.error) {
+        /* Client disconnected - nothing more to do */
+        return ESP_OK;
+    }
+
+    if (ret != ESP_OK) {
+        /* Stream failed before any bytes were sent */
+        if (ctx.out_len == 0) {
+            respond_error(req, 500, "HISTORY_STREAM_FAILED", esp_err_to_name(ret));
+        }
+        return ESP_OK;
+    }
+
+    if (hist_flush(&ctx)) {
+        httpd_resp_send_chunk(req, NULL, 0);  /* End chunked response */
+    }
+
     return ESP_OK;
 }
 
@@ -1707,6 +2030,7 @@ esp_err_t web_portal_start(void)
     const httpd_uri_t uri_state = { .uri = "/api/v1/state", .method = HTTP_GET, .handler = api_state_get, .user_ctx = NULL };
     const httpd_uri_t uri_metrics = { .uri = "/api/v1/metrics", .method = HTTP_GET, .handler = api_metrics_get, .user_ctx = NULL };
     const httpd_uri_t uri_health = { .uri = "/api/v1/health", .method = HTTP_GET, .handler = api_health_get, .user_ctx = NULL };
+    const httpd_uri_t uri_history = { .uri = "/api/v1/history", .method = HTTP_GET, .handler = api_history_get, .user_ctx = NULL };
     const httpd_uri_t uri_ota_info = { .uri = "/api/v1/ota/info", .method = HTTP_GET, .handler = api_ota_info_get, .user_ctx = NULL };
     const httpd_uri_t uri_ota_firmware = { .uri = "/api/v1/ota/firmware", .method = HTTP_POST, .handler = api_ota_firmware_post, .user_ctx = NULL };
     const httpd_uri_t uri_ota_frontend = { .uri = "/api/v1/ota/frontend", .method = HTTP_POST, .handler = api_ota_frontend_post, .user_ctx = NULL };
@@ -1743,6 +2067,7 @@ esp_err_t web_portal_start(void)
     httpd_register_uri_handler(s_server, &uri_state);
     httpd_register_uri_handler(s_server, &uri_metrics);
     httpd_register_uri_handler(s_server, &uri_health);
+    httpd_register_uri_handler(s_server, &uri_history);
     httpd_register_uri_handler(s_server, &uri_ota_info);
     httpd_register_uri_handler(s_server, &uri_ota_firmware);
     httpd_register_uri_handler(s_server, &uri_ota_frontend);

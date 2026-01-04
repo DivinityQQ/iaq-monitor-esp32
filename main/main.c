@@ -23,6 +23,7 @@
 #include "time_sync.h"
 #include "display_oled/display_ui.h"
 #include "iaq_profiler.h"
+#include "iaq_history.h"
 #include "web_portal.h"
 #include "web_console.h"
 #include "pm_guard.h"
@@ -216,6 +217,9 @@ void app_main(void)
 
     /* Initialize IAQ data structure */
     ESP_ERROR_CHECK(iaq_data_init());
+
+    /* Initialize history buffers (PSRAM) */
+    ESP_ERROR_CHECK(iaq_history_init());
 
     /* Initialize OTA manager (handles OTA state + pending verify bookkeeping) */
     ESP_ERROR_CHECK(ota_manager_init());

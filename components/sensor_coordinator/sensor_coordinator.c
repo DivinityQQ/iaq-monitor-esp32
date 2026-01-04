@@ -26,6 +26,7 @@
 /* Fusion and metrics */
 #include "sensor_fusion.h"
 #include "metrics_calc.h"
+#include "iaq_history.h"
 #include "esp_task_wdt.h"
 #include "iaq_profiler.h"
 #include "pm_guard.h"
@@ -606,10 +607,17 @@ static esp_err_t read_sensor_s8(void)
 static void fusion_timer_callback(void *arg)
 {
     iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_FUSION_TICK);
+    iaq_data_t snapshot = (iaq_data_t){0};
+    bool have_snapshot = false;
     if (iaq_data_lock(0)) {
         iaq_data_t *data = iaq_data_get();
         fusion_apply(data);
+        snapshot = *data;
+        have_snapshot = true;
         iaq_data_unlock();
+    }
+    if (have_snapshot) {
+        iaq_history_append(&snapshot);
     }
     iaq_prof_end(p);
 }
