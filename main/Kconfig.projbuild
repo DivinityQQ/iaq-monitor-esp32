@@ -1260,7 +1260,7 @@ menu "IAQ Monitor Configuration"
         config IAQ_HISTORY_TIER1_RES_S
             int "Tier 1 resolution (seconds)"
             range 1 10
-            default 2
+            default 8
             help
                 Resolution for the short-term ring buffer (streaming tail).
 
@@ -1274,7 +1274,7 @@ menu "IAQ Monitor Configuration"
         config IAQ_HISTORY_TIER2_RES_S
             int "Tier 2 resolution (seconds)"
             range 10 300
-            default 60
+            default 240
             help
                 Resolution for 24h history buckets.
 
@@ -1288,7 +1288,7 @@ menu "IAQ Monitor Configuration"
         config IAQ_HISTORY_TIER3_RES_S
             int "Tier 3 resolution (seconds)"
             range 60 1800
-            default 300
+            default 1200
             help
                 Resolution for multi-day history buckets.
 
