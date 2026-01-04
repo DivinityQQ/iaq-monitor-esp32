@@ -7,7 +7,7 @@ import Typography from '@mui/material/Typography';
 import { useMemo, useState } from 'react';
 import { ChartCard } from './ChartCard';
 import { MultiSeriesChart } from './MultiSeriesChart';
-import { RANGES, SINGLE_SERIES_CHARTS, type RangeKey } from './config/chartConfig';
+import { RANGES, type MetricKey, type RangeKey } from './config/chartConfig';
 
 /**
  * Container component for charts with controls and future enhancements
@@ -30,6 +30,19 @@ export function ChartContainer() {
     })),
     []
   );
+  const chartOrder: Array<{ type: 'metric'; metric: MetricKey } | { type: 'pm' }> = [
+    { type: 'metric', metric: 'temp_c' },
+    { type: 'metric', metric: 'rh_pct' },
+    { type: 'metric', metric: 'co2_ppm' },
+    { type: 'pm' },
+    { type: 'metric', metric: 'pressure_hpa' },
+    { type: 'metric', metric: 'voc_index' },
+    { type: 'metric', metric: 'aqi' },
+    { type: 'metric', metric: 'comfort_score' },
+    { type: 'metric', metric: 'iaq_score' },
+    { type: 'metric', metric: 'mold_risk' },
+    { type: 'metric', metric: 'nox_index' },
+  ];
 
   return (
     <Container maxWidth="xl" sx={{ py: 3, px: { xs: 2, sm: 3 } }}>
@@ -53,14 +66,18 @@ export function ChartContainer() {
       </Box>
 
       <Grid container spacing={2}>
-        {SINGLE_SERIES_CHARTS.map((metric) => (
-          <Grid key={metric} size={{ xs: 12, tablet: 12, md: 6 }}>
-            <ChartCard metric={metric} range={range} />
+        {chartOrder.map((item) => (
+          <Grid
+            key={item.type === 'pm' ? 'pm' : item.metric}
+            size={{ xs: 12, tablet: 12, md: 6 }}
+          >
+            {item.type === 'pm' ? (
+              <MultiSeriesChart range={range} />
+            ) : (
+              <ChartCard metric={item.metric} range={range} />
+            )}
           </Grid>
         ))}
-        <Grid size={{ xs: 12, tablet: 12, md: 6 }}>
-          <MultiSeriesChart range={range} />
-        </Grid>
       </Grid>
     </Container>
   );

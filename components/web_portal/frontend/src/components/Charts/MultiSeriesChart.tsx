@@ -5,10 +5,19 @@ import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
 import { useTheme } from '@mui/material/styles';
 import { LineChart } from '@mui/x-charts/LineChart';
+import type { AxisValueFormatterContext } from '@mui/x-charts/models';
+import GrainIcon from '@mui/icons-material/Grain';
 import { LatestValueChip } from './LatestValueChip';
-import { METRICS, PM_SERIES, RANGES, type RangeKey } from './config/chartConfig';
+import { METRICS, PM_SERIES, RANGES, type MetricConfig, type RangeKey } from './config/chartConfig';
 import { useChartData } from './hooks/useChartData';
-import { CHART_LAYOUT, computeYAxisBounds, createRelativeTimeFormatter, resolvePaletteColor } from './utils/chartUtils';
+import {
+  buildXAxisTicks,
+  CHART_LAYOUT,
+  computeYAxisBounds,
+  formatAxisTick,
+  createRelativeTimeFormatter,
+  resolvePaletteColor,
+} from './utils/chartUtils';
 
 interface MultiSeriesChartProps {
   range: RangeKey;
@@ -48,21 +57,25 @@ export function MultiSeriesChart({
     [rangeConfig.seconds]
   );
 
-  // Compute combined Y bounds for all series
-  const { min, max } = useMemo(() => {
-    const combined = seriesConfigs.flatMap((entry) => entry.chart.data);
-    return computeYAxisBounds(combined, {
-      id: 'pm25_ugm3',
-      label: 'PM',
-      unit: 'µg/m³',
-      color: 'info.main',
-      decimals: 1,
-      yMin: 0,
-      softYMax: 50,
-      source: 'state',
-      sourceField: 'pm25_ugm3',
-    });
-  }, [seriesConfigs]);
+  const combinedData = useMemo(
+    () => seriesConfigs.flatMap((entry) => entry.chart.data),
+    [seriesConfigs]
+  );
+  const pmYAxisConfig = useMemo<MetricConfig>(() => ({
+    id: 'pm25_ugm3',
+    label: 'PM',
+    unit: 'µg/m³',
+    color: 'info.main',
+    decimals: 1,
+    yMin: 0,
+    softYMax: 50,
+    source: 'state',
+    sourceField: 'pm25_ugm3',
+  }), []);
+  const { min, max } = useMemo(
+    () => computeYAxisBounds(combinedData, pmYAxisConfig),
+    [combinedData, pmYAxisConfig]
+  );
 
   // Use relative time values so the axis stays fixed at -range..0
   const dataset = useMemo(() => {
@@ -78,9 +91,10 @@ export function MultiSeriesChart({
     }
     return rows;
   }, [baseData, seriesConfigs, windowEnd]);
+  const xTicks = useMemo(() => buildXAxisTicks(rangeConfig.seconds), [rangeConfig.seconds]);
 
   // Build series configuration
-  const curve: 'catmullRom' | 'linear' = rangeConfig.seconds >= 300 ? 'catmullRom' : 'linear';
+  const curve: 'catmullRom' = 'catmullRom';
 
   const series = useMemo(() => {
     return seriesConfigs.map((entry) => ({
@@ -96,7 +110,10 @@ export function MultiSeriesChart({
     <Card>
       <CardContent>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
-          <Typography variant="subtitle1">{title}</Typography>
+          <Box display="flex" alignItems="center" gap={1}>
+            <GrainIcon sx={{ color: resolvePaletteColor(theme, pmConfig.color), fontSize: 18 }} />
+            <Typography variant="subtitle1">{title}</Typography>
+          </Box>
           <LatestValueChip metric="pm25_ugm3" />
         </Box>
         <Box sx={{ width: '100%', height: height + 10, position: 'relative' }}>
@@ -111,13 +128,19 @@ export function MultiSeriesChart({
               max: 0,
               scaleType: 'linear',
               domainLimit: 'strict',
+              tickInterval: xTicks,
               valueFormatter: axisFormatter,
             }]}
             yAxis={[{
               ...CHART_LAYOUT.yAxis,
               min,
               max,
-              valueFormatter: (v: number) => (Number.isFinite(v) ? Number(v).toFixed(pmConfig.decimals) : ''),
+              valueFormatter: (value: number, context: AxisValueFormatterContext) => {
+                if (context.location === 'tick') {
+                  return formatAxisTick(value, context.defaultTickLabel);
+                }
+                return Number.isFinite(value) ? Number(value).toFixed(pmConfig.decimals) : '';
+              },
             }]}
             series={series}
             height={height}

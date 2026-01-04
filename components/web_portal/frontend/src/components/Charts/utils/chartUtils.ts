@@ -38,6 +38,11 @@ export function createRelativeTimeFormatter(rangeSeconds: number) {
   };
 }
 
+export function formatAxisTick(value: number, defaultTickLabel: string): string {
+  if (!Number.isFinite(value)) return '';
+  return defaultTickLabel;
+}
+
 /**
  * Computes Y-axis bounds using single-pass min/max calculation.
  * Avoids spread operator which can cause stack overflow on large arrays.
@@ -60,34 +65,33 @@ export function computeYAxisBounds(
 
   const hasData = dataMin !== Infinity;
 
-  // If both bounds are fixed, use them directly
-  if (config.yMin !== undefined && config.yMax !== undefined) {
-    return { min: config.yMin, max: config.yMax };
+  if (!hasData) {
+    const min = config.yMin ?? 0;
+    const max = config.yMax ?? config.softYMax ?? 100;
+    return { min, max };
   }
 
-  let min = config.yMin ?? (hasData ? dataMin : 0);
-  let max = config.yMax ?? (hasData ? dataMax : config.softYMax ?? 100);
+  let min = dataMin;
+  let max = dataMax;
 
-  // Apply soft max if configured
-  if (config.softYMax !== undefined) {
-    max = Math.max(max, config.softYMax);
+  if (min === max) {
+    const pad = Math.max(1, Math.abs(min) * 0.05);
+    min -= pad;
+    max += pad;
+  } else {
+    const pad = (max - min) * 0.05;
+    min -= pad;
+    max += pad;
   }
 
-  // Extend bounds to include data if not fixed
-  if (config.yMin === undefined && hasData) {
-    min = Math.min(min, dataMin);
+  if (config.yMin !== undefined) {
+    min = Math.max(min, config.yMin);
   }
 
-  if (config.yMax === undefined && hasData) {
-    max = Math.max(max, dataMax);
-  }
-
-  // Add padding for visual breathing room
-  if (Number.isFinite(min) && Number.isFinite(max)) {
-    const span = Math.max(1, max - min);
-    const pad = span * 0.05;
-    if (config.yMin === undefined) min -= pad;
-    if (config.yMax === undefined && config.softYMax === undefined) max += pad;
+  if (min >= max) {
+    const fallbackMin = config.yMin ?? min;
+    const fallbackMax = fallbackMin + 1;
+    return { min: fallbackMin, max: fallbackMax };
   }
 
   return { min, max };
@@ -100,6 +104,25 @@ export function windowToRange(
 ): ChartDataPoint[] {
   const windowStart = windowEnd - rangeSeconds;
   return data.filter((point) => point.time >= windowStart && point.time <= windowEnd);
+}
+
+export function buildXAxisTicks(rangeSeconds: number): number[] | undefined {
+  if (rangeSeconds === 86400) {
+    return buildTickSeries(rangeSeconds, 7200);
+  }
+  if (rangeSeconds === 604800) {
+    return buildTickSeries(rangeSeconds, 86400);
+  }
+  return undefined;
+}
+
+function buildTickSeries(rangeSeconds: number, stepSeconds: number): number[] {
+  const ticks: number[] = [];
+  for (let t = -rangeSeconds; t <= 0; t += stepSeconds) {
+    ticks.push(t);
+  }
+  if (ticks[ticks.length - 1] !== 0) ticks.push(0);
+  return ticks;
 }
 
 export const CHART_LAYOUT = {
