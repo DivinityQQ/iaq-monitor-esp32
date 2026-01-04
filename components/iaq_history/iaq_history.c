@@ -66,9 +66,9 @@ static const uint16_t s_tier_rollup_ratio[HISTORY_TIER_COUNT] = {
 
 static const history_metric_scale_t s_metric_scale[HISTORY_METRIC_COUNT] = {
     [HIST_METRIC_TEMP] = { .scale = 100, .offset = 4000 },
-    [HIST_METRIC_HUMIDITY] = { .scale = 10, .offset = 0 },
+    [HIST_METRIC_HUMIDITY] = { .scale = 100, .offset = 0 },
     [HIST_METRIC_CO2] = { .scale = 1, .offset = 0 },
-    [HIST_METRIC_PRESSURE] = { .scale = 10, .offset = 0 },
+    [HIST_METRIC_PRESSURE] = { .scale = 20, .offset = 0 },
     [HIST_METRIC_PM1] = { .scale = 10, .offset = 0 },
     [HIST_METRIC_PM25] = { .scale = 10, .offset = 0 },
     [HIST_METRIC_PM10] = { .scale = 10, .offset = 0 },

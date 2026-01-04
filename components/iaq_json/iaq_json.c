@@ -45,14 +45,14 @@ cJSON* iaq_json_build_state(const iaq_data_t *data)
     get_publishable_sensors(can_pub);
 
     /* Fused (compensated) sensor values - gate on sensor state/cadence and validity */
-    if (can_pub[SENSOR_ID_SHT45] && data->valid.temp_c && !isnan(data->fused.temp_c)) cJSON_AddNumberToObject(root, "temp_c", round_to_1dp(data->fused.temp_c));
+    if (can_pub[SENSOR_ID_SHT45] && data->valid.temp_c && !isnan(data->fused.temp_c)) cJSON_AddNumberToObject(root, "temp_c", round_to_2dp(data->fused.temp_c));
     else cJSON_AddNullToObject(root, "temp_c");
 
-    if (can_pub[SENSOR_ID_SHT45] && data->valid.rh_pct && !isnan(data->fused.rh_pct)) cJSON_AddNumberToObject(root, "rh_pct", round_to_1dp(data->fused.rh_pct));
+    if (can_pub[SENSOR_ID_SHT45] && data->valid.rh_pct && !isnan(data->fused.rh_pct)) cJSON_AddNumberToObject(root, "rh_pct", round_to_2dp(data->fused.rh_pct));
     else cJSON_AddNullToObject(root, "rh_pct");
 
     /* Convert Pa -> hPa (1 hPa = 100 Pa) */
-    if (can_pub[SENSOR_ID_BMP280] && data->valid.pressure_pa && !isnan(data->fused.pressure_pa)) cJSON_AddNumberToObject(root, "pressure_hpa", round_to_1dp(data->fused.pressure_pa / 100.0));
+    if (can_pub[SENSOR_ID_BMP280] && data->valid.pressure_pa && !isnan(data->fused.pressure_pa)) cJSON_AddNumberToObject(root, "pressure_hpa", round_to_2dp(data->fused.pressure_pa / 100.0));
     else cJSON_AddNullToObject(root, "pressure_hpa");
 
     if (can_pub[SENSOR_ID_PMS5003] && data->valid.pm25_ugm3 && !isnan(data->fused.pm25_ugm3)) cJSON_AddNumberToObject(root, "pm25_ugm3", round_to_1dp(data->fused.pm25_ugm3));
@@ -94,20 +94,20 @@ cJSON* iaq_json_build_state(const iaq_data_t *data)
 
     /* Temperature & humidity from SHT45 */
     if (data->updated_at.sht45 > 0 && !isnan(data->fused.temp_c)) {
-        cJSON_AddNumberToObject(last, "temp_c", round_to_1dp(data->fused.temp_c));
+        cJSON_AddNumberToObject(last, "temp_c", round_to_2dp(data->fused.temp_c));
     } else {
         cJSON_AddNullToObject(last, "temp_c");
     }
 
     if (data->updated_at.sht45 > 0 && !isnan(data->fused.rh_pct)) {
-        cJSON_AddNumberToObject(last, "rh_pct", round_to_1dp(data->fused.rh_pct));
+        cJSON_AddNumberToObject(last, "rh_pct", round_to_2dp(data->fused.rh_pct));
     } else {
         cJSON_AddNullToObject(last, "rh_pct");
     }
 
     /* Pressure from BMP280 */
     if (data->updated_at.bmp280 > 0 && !isnan(data->fused.pressure_pa)) {
-        cJSON_AddNumberToObject(last, "pressure_hpa", round_to_1dp(data->fused.pressure_pa / 100.0));
+        cJSON_AddNumberToObject(last, "pressure_hpa", round_to_2dp(data->fused.pressure_pa / 100.0));
     } else {
         cJSON_AddNullToObject(last, "pressure_hpa");
     }

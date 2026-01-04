@@ -42,6 +42,7 @@ export function MetricsGrid() {
           label="Temperature"
           icon={<ThermostatIcon />}
           color="error.main"
+          precision={2}
           sensorId="sht45"
         />
       </Grid>
@@ -54,6 +55,7 @@ export function MetricsGrid() {
           label="Humidity"
           icon={<WaterDropIcon />}
           color="info.main"
+          precision={2}
           sensorId="sht45"
           subtitle={
             metrics?.comfort?.abs_humidity_gm3 != null
@@ -108,12 +110,13 @@ export function MetricsGrid() {
           label="Pressure"
           icon={<CloudIcon />}
           color="info.main"
+          precision={2}
           sensorId="bmp280"
           subtitle={(() => {
             const trend = metrics?.pressure?.trend ?? null;
             const delta =
               typeof metrics?.pressure?.delta_hpa === 'number'
-                ? `${metrics.pressure.delta_hpa >= 0 ? '+' : ''}${metrics.pressure.delta_hpa.toFixed(1)} hPa`
+                ? `${metrics.pressure.delta_hpa >= 0 ? '+' : ''}${metrics.pressure.delta_hpa.toFixed(2)} hPa`
                 : null;
             if (isCompact) return trend ?? delta ?? undefined;
             return [trend, delta].filter(Boolean).join(' · ') || undefined;
