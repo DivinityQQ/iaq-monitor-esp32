@@ -1,6 +1,6 @@
 import { useEffect, useState } from 'react';
 import { useAtom } from 'jotai';
-import { METRICS, RANGE_MAX_POINTS, RANGES, type MetricKey, type RangeKey } from '../config/chartConfig';
+import { METRICS, RANGES, type MetricKey, type RangeKey } from '../config/chartConfig';
 import { historyCacheAtom, historyLoadingAtom, type HistoryResponse } from '../../../store/historyCache';
 import { STREAM_BUFFER_SECONDS } from '../../../utils/streamBuffers';
 
@@ -9,7 +9,7 @@ const inFlightRanges = new Set<RangeKey>();
 /* Binary protocol constants */
 const HIST_BIN_MAGIC = 0x01514149;
 const SENTINEL = -32768;
-const MAX_BUCKETS = 10000; /* Sanity limit, not tied to backend config */
+const MAX_BUCKETS = 10080; /* Sanity limit, not tied to backend config */
 
 const METRIC_ID_TO_KEY: MetricKey[] = [
   'temp_c', 'rh_pct', 'co2_ppm', 'pressure_hpa',
@@ -114,7 +114,6 @@ export function useHistoryQuery(range: RangeKey | null, latestLiveTime: number |
         const params = new URLSearchParams({
           metrics: Object.keys(METRICS).join(','),
           range,
-          max_points: String(RANGE_MAX_POINTS[range]),
         });
         const res = await fetch(`/api/v1/history?${params}`);
         if (!res.ok) {

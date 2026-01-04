@@ -196,11 +196,3 @@ export const RANGES: Record<RangeKey, { seconds: number; label: string; useHisto
   '1d': { seconds: 86400, label: '1 day', useHistory: true },
   '7d': { seconds: 604800, label: '7 days', useHistory: true },
 };
-
-export const RANGE_MAX_POINTS: Record<RangeKey, number> = {
-  '1m': 300,
-  '5m': 300,
-  '1h': 1800,
-  '1d': 1440,
-  '7d': 2016,
-};

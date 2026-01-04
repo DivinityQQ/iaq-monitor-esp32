@@ -867,16 +867,6 @@ static void url_decode_inplace(char *str)
     *dst = '\0';
 }
 
-static uint16_t history_default_max_points(int64_t range_s)
-{
-    uint16_t tier1_points = CONFIG_IAQ_HISTORY_TIER1_WINDOW_S / CONFIG_IAQ_HISTORY_TIER1_RES_S;
-    uint16_t tier2_points = CONFIG_IAQ_HISTORY_TIER2_WINDOW_S / CONFIG_IAQ_HISTORY_TIER2_RES_S;
-    uint16_t tier3_points = CONFIG_IAQ_HISTORY_TIER3_WINDOW_S / CONFIG_IAQ_HISTORY_TIER3_RES_S;
-    if (range_s <= CONFIG_IAQ_HISTORY_TIER1_WINDOW_S) return tier1_points;
-    if (range_s <= CONFIG_IAQ_HISTORY_TIER2_WINDOW_S) return tier2_points;
-    return tier3_points;
-}
-
 /* ═══════════════════════════════════════════════════════════════════════════
  * Binary History Streaming
  * ═══════════════════════════════════════════════════════════════════════════ */
@@ -1023,14 +1013,6 @@ static esp_err_t api_history_get(httpd_req_t *req)
         return ESP_OK;
     }
 
-    char max_buf[16];
-    uint16_t max_points = 0;
-    if (httpd_query_key_value(query, "max_points", max_buf, sizeof(max_buf)) == ESP_OK) {
-        long mp = strtol(max_buf, NULL, 10);
-        if (mp > 0) max_points = (uint16_t)mp;
-    }
-    if (max_points == 0) max_points = history_default_max_points(end_s - start_s);
-
     /* Parse metric list */
     history_metric_id_t metrics[HISTORY_METRIC_COUNT];
     int metric_count = 0;
@@ -1083,7 +1065,7 @@ static esp_err_t api_history_get(httpd_req_t *req)
 
     esp_err_t ret = iaq_history_stream(
         metrics, metric_count,
-        start_s, end_s, max_points,
+        start_s, end_s, 0,
         scratch, HIST_STREAM_BATCH,
         hist_header_cb,
         hist_bucket_cb,
