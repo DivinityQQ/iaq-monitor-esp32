@@ -1227,13 +1227,13 @@ menu "IAQ Monitor Configuration"
             help
                 Maximum battery charge current in mA. Set to 0 to use SDK default (50 mA).
 
-        config IAQ_POWERFEATHER_CHARGING_ON_BOOT
-            bool "Enable battery charging on boot"
+        config IAQ_POWERFEATHER_CHARGING_DEFAULT_ON
+            bool "Enable battery charging by default"
             default y
             depends on IAQ_POWERFEATHER_ENABLE
             help
-                Automatically enable battery charging during initialization.
-                If disabled, charging must be enabled explicitly via console or API.
+                Default charging state when no NVS value is stored (fresh flash).
+                Once configured via console or API, the last value is restored on boot.
 
         config IAQ_POWERFEATHER_POLL_INTERVAL_MS
             int "Power poll interval (ms)"

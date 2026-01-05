@@ -1,6 +1,7 @@
 #include "power_board.h"
 
 #include "esp_log.h"
+#include "nvs.h"
 #include "sdkconfig.h"
 #include "esp_timer.h"
 #include "freertos/FreeRTOS.h"
@@ -21,6 +22,11 @@ using namespace PowerFeather;
 static const char *TAG = "POWER_BOARD";
 
 #if CONFIG_IAQ_POWERFEATHER_ENABLE
+
+#define POWER_NVS_NAMESPACE "power_cfg"
+#define POWER_NVS_KEY_CHG_EN "chg_en"
+#define POWER_NVS_KEY_CHG_MA "chg_ma"
+#define POWER_NVS_KEY_MPP_MV "mpp_mv"
 
 /* Track last-set outputs we cannot read back from the SDK */
 static bool s_en = true;
@@ -43,6 +49,83 @@ static void power_poll_task(void *arg);
 /* Poll task timing constants */
 static constexpr uint32_t POLL_BASE_INTERVAL_MS = CONFIG_IAQ_POWERFEATHER_POLL_INTERVAL_MS;
 static constexpr uint32_t POLL_MAX_BACKOFF_MS = 30000;
+
+static esp_err_t power_nvs_set_u8(const char *key, uint8_t value)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(POWER_NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+
+    err = nvs_set_u8(h, key, value);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
+static esp_err_t power_nvs_set_u16(const char *key, uint16_t value)
+{
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(POWER_NVS_NAMESPACE, NVS_READWRITE, &h);
+    if (err != ESP_OK) return err;
+
+    err = nvs_set_u16(h, key, value);
+    if (err == ESP_OK) err = nvs_commit(h);
+    nvs_close(h);
+    return err;
+}
+
+static void power_nvs_load_config(bool *charging_on, uint16_t *charge_limit_ma, uint16_t *maintain_mv)
+{
+    if (!charging_on || !charge_limit_ma || !maintain_mv) return;
+
+    nvs_handle_t h;
+    esp_err_t err = nvs_open(POWER_NVS_NAMESPACE, NVS_READONLY, &h);
+    if (err == ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGI(TAG, "No saved power config in NVS; using defaults");
+        return;
+    }
+    if (err != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to open power config NVS: %s", esp_err_to_name(err));
+        return;
+    }
+
+    bool any_loaded = false;
+    uint8_t val_u8 = 0;
+    err = nvs_get_u8(h, POWER_NVS_KEY_CHG_EN, &val_u8);
+    if (err == ESP_OK) {
+        *charging_on = (val_u8 != 0);
+        any_loaded = true;
+    } else if (err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Failed to read charging state from NVS: %s", esp_err_to_name(err));
+    }
+
+    uint16_t val_u16 = 0;
+    err = nvs_get_u16(h, POWER_NVS_KEY_CHG_MA, &val_u16);
+    if (err == ESP_OK) {
+        *charge_limit_ma = val_u16;
+        any_loaded = true;
+    } else if (err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Failed to read charge limit from NVS: %s", esp_err_to_name(err));
+    }
+
+    err = nvs_get_u16(h, POWER_NVS_KEY_MPP_MV, &val_u16);
+    if (err == ESP_OK) {
+        *maintain_mv = val_u16;
+        any_loaded = true;
+    } else if (err != ESP_ERR_NVS_NOT_FOUND) {
+        ESP_LOGW(TAG, "Failed to read maintain voltage from NVS: %s", esp_err_to_name(err));
+    }
+
+    nvs_close(h);
+
+    if (any_loaded) {
+        ESP_LOGI(TAG,
+                 "Loaded power config from NVS (charging=%s, limit_ma=%u, maintain_mv=%u)",
+                 *charging_on ? "enabled" : "disabled",
+                 (unsigned)*charge_limit_ma,
+                 (unsigned)*maintain_mv);
+    }
+}
 
 static esp_err_t pf_to_err(Result r)
 {
@@ -94,6 +177,9 @@ esp_err_t power_board_init(void)
     std::lock_guard<std::mutex> guard(s_lock);
     uint16_t capacity = CONFIG_IAQ_POWERFEATHER_BATTERY_MAH;
     Mainboard::BatteryType type = cfg_battery_type();
+    bool charging_on = CONFIG_IAQ_POWERFEATHER_CHARGING_DEFAULT_ON;
+    uint16_t charge_limit_ma = CONFIG_IAQ_POWERFEATHER_CHARGE_LIMIT_MA;
+    uint16_t maintain_mv = CONFIG_IAQ_POWERFEATHER_MAINTAIN_VOLTAGE_MV;
 
     PmNoSleepBusGuard pm;
 
@@ -107,24 +193,30 @@ esp_err_t power_board_init(void)
         return pf_to_err(r);
     }
 
-    /* Apply configured outputs/limits if provided */
-    if (CONFIG_IAQ_POWERFEATHER_MAINTAIN_VOLTAGE_MV > 0) {
-        Result rr = Board.setSupplyMaintainVoltage(CONFIG_IAQ_POWERFEATHER_MAINTAIN_VOLTAGE_MV);
+    power_nvs_load_config(&charging_on, &charge_limit_ma, &maintain_mv);
+
+    /* Apply saved outputs/limits (NVS overrides Kconfig defaults) */
+    if (maintain_mv > 0) {
+        Result rr = Board.setSupplyMaintainVoltage(maintain_mv);
         if (rr == Result::Ok) {
-            s_maintain_mv = CONFIG_IAQ_POWERFEATHER_MAINTAIN_VOLTAGE_MV;
+            s_maintain_mv = maintain_mv;
         } else {
             ESP_LOGW(TAG, "Failed to set maintain voltage: %d", static_cast<int>(rr));
             s_maintain_mv = 0;
         }
+    } else {
+        s_maintain_mv = 0;
     }
-    if (CONFIG_IAQ_POWERFEATHER_CHARGE_LIMIT_MA > 0) {
-        Result rr = Board.setBatteryChargingMaxCurrent(CONFIG_IAQ_POWERFEATHER_CHARGE_LIMIT_MA);
+    if (charge_limit_ma > 0) {
+        Result rr = Board.setBatteryChargingMaxCurrent(charge_limit_ma);
         if (rr == Result::Ok) {
-            s_charge_limit_ma = CONFIG_IAQ_POWERFEATHER_CHARGE_LIMIT_MA;
+            s_charge_limit_ma = charge_limit_ma;
         } else {
             ESP_LOGW(TAG, "Failed to set charge limit: %d", static_cast<int>(rr));
             s_charge_limit_ma = 0;
         }
+    } else {
+        s_charge_limit_ma = 0;
     }
 
     /*
@@ -133,11 +225,10 @@ esp_err_t power_board_init(void)
      * rely on SDK defaults.
      */
     {
-        bool enable_charging = CONFIG_IAQ_POWERFEATHER_CHARGING_ON_BOOT;
-        Result rr = Board.enableBatteryCharging(enable_charging);
+        Result rr = Board.enableBatteryCharging(charging_on);
         if (rr == Result::Ok) {
-            s_charging_on = enable_charging;
-            ESP_LOGI(TAG, "Charging %s on init", enable_charging ? "enabled" : "disabled");
+            s_charging_on = charging_on;
+            ESP_LOGI(TAG, "Charging %s on init", charging_on ? "enabled" : "disabled");
         } else {
             ESP_LOGW(TAG, "Failed to set charging state: %d", static_cast<int>(rr));
         }
@@ -415,29 +506,50 @@ esp_err_t power_board_enable_stat(bool enable)
 
 esp_err_t power_board_set_supply_maintain_voltage(uint16_t mv)
 {
-    return guarded_call([mv] {
+    esp_err_t err = guarded_call([mv] {
         Result r = Board.setSupplyMaintainVoltage(mv);
         if (r == Result::Ok) s_maintain_mv = mv;
         return r;
     });
+    if (err == ESP_OK) {
+        esp_err_t nvs_err = power_nvs_set_u16(POWER_NVS_KEY_MPP_MV, mv);
+        if (nvs_err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to persist maintain voltage: %s", esp_err_to_name(nvs_err));
+        }
+    }
+    return err;
 }
 
 esp_err_t power_board_enable_charging(bool enable)
 {
-    return guarded_call([enable] {
+    esp_err_t err = guarded_call([enable] {
         Result r = Board.enableBatteryCharging(enable);
         if (r == Result::Ok) s_charging_on = enable;
         return r;
     });
+    if (err == ESP_OK) {
+        esp_err_t nvs_err = power_nvs_set_u8(POWER_NVS_KEY_CHG_EN, enable ? 1U : 0U);
+        if (nvs_err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to persist charging state: %s", esp_err_to_name(nvs_err));
+        }
+    }
+    return err;
 }
 
 esp_err_t power_board_set_charge_limit(uint16_t ma)
 {
-    return guarded_call([ma] {
+    esp_err_t err = guarded_call([ma] {
         Result r = Board.setBatteryChargingMaxCurrent(ma);
         if (r == Result::Ok) s_charge_limit_ma = ma;
         return r;
     });
+    if (err == ESP_OK) {
+        esp_err_t nvs_err = power_nvs_set_u16(POWER_NVS_KEY_CHG_MA, ma);
+        if (nvs_err != ESP_OK) {
+            ESP_LOGW(TAG, "Failed to persist charge limit: %s", esp_err_to_name(nvs_err));
+        }
+    }
+    return err;
 }
 
 esp_err_t power_board_set_alarm_low_voltage(uint16_t mv)

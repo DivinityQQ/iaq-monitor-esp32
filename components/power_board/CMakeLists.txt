@@ -20,6 +20,7 @@ idf_component_register(
         driver
         iaq_data
         iaq_profiler
+        nvs_flash
         system_context
 )
 
