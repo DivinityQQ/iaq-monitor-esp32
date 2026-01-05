@@ -120,18 +120,36 @@ export function MultiSeriesChart({
 
   return (
     <Card>
-      <CardContent>
+      <CardContent sx={{ pb: 1, '&:last-child': { pb: 1 } }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
           <Box display="flex" alignItems="center" gap={1}>
             <GrainIcon sx={{ color: resolvePaletteColor(theme, pmConfig.color), fontSize: 18 }} />
             <Typography variant="subtitle1">{title}</Typography>
           </Box>
+          <Box display="flex" alignItems="center" gap={2}>
+            {seriesConfigs.map((entry) => (
+              <Box key={entry.metric} display="flex" alignItems="center" gap={0.5}>
+                <Box
+                  sx={{
+                    width: 12,
+                    height: 3,
+                    borderRadius: 1,
+                    bgcolor: resolvePaletteColor(theme, entry.config.color),
+                  }}
+                />
+                <Typography variant="caption" color="text.secondary">
+                  {entry.config.label}
+                </Typography>
+              </Box>
+            ))}
+          </Box>
           <LatestValueChip metric="pm25_ugm3" />
         </Box>
-        <Box sx={{ width: '100%', height: height + 10, position: 'relative' }}>
+        <Box sx={{ width: '100%', height, position: 'relative' }}>
           <LineChart
             skipAnimation
             disableAxisListener
+            hideLegend
             dataset={dataset}
             xAxis={[{
               ...CHART_LAYOUT.xAxis,

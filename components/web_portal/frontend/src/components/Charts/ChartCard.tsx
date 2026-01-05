@@ -156,7 +156,7 @@ export function ChartCard({ metric, range, height = 220 }: ChartCardProps) {
 
   return (
     <Card>
-      <CardContent>
+      <CardContent sx={{ pb: 1, '&:last-child': { pb: 1 } }}>
         <Box display="flex" justifyContent="space-between" alignItems="center" mb={1}>
           <Box display="flex" alignItems="center" gap={1}>
             <Icon sx={{ color: seriesColor, fontSize: 18 }} />
@@ -164,7 +164,7 @@ export function ChartCard({ metric, range, height = 220 }: ChartCardProps) {
           </Box>
           <LatestValueChip metric={metric} />
         </Box>
-        <Box sx={{ width: '100%', height: height + 10, position: 'relative' }}>
+        <Box sx={{ width: '100%', height, position: 'relative' }}>
           <LineChart
             skipAnimation
             disableAxisListener
