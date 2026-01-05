@@ -84,6 +84,9 @@ let buffersVersion = 0;
 let cachedTimes: number[] = [];
 let cachedTimesVersion = -1;
 
+/** Per-metric array cache - avoids allocating new arrays on every getBuffers call */
+const cachedSeries = new Map<MetricKey, { data: (number | null)[]; version: number }>();
+
 let cachedMetrics: { mold_risk: number | null; iaq_score: number | null } = {
   mold_risk: null,
   iaq_score: null,
@@ -149,13 +152,16 @@ export function appendStateToBuffers(s: State): void {
 
 /**
  * Get buffers as linear arrays for chart rendering
- * Returns unwrapped ring buffer contents
+ * Returns cached unwrapped ring buffer contents - do not mutate returned arrays
  */
 export function getBuffers(key: MetricKey): { x: number[]; y: (number | null)[] } {
-  return {
-    x: getTimesArray(),
-    y: seriesRings[key].toArray(),
-  };
+  const cached = cachedSeries.get(key);
+  if (cached && cached.version === buffersVersion) {
+    return { x: getTimesArray(), y: cached.data };
+  }
+  const data = seriesRings[key].toArray();
+  cachedSeries.set(key, { data, version: buffersVersion });
+  return { x: getTimesArray(), y: data };
 }
 
 /**
@@ -194,4 +200,5 @@ export function resetBuffers(): void {
   buffersVersion = 0;
   cachedTimes = [];
   cachedTimesVersion = -1;
+  cachedSeries.clear();
 }

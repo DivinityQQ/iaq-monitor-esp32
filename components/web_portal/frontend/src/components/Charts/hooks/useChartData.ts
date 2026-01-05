@@ -46,7 +46,8 @@ export function useChartData(metric: MetricKey, range: RangeKey): {
   const rangeConfig = RANGES[range];
   const mergeLiveTail = rangeConfig.useHistory && (rangeConfig.mergeLiveTail ?? true);
   const buffersVersion = useAtomValue(buffersVersionAtom);
-  const fallbackNow = useMemo(() => Math.floor(Date.now() / 1000), [buffersVersion]);
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- intentionally stable fallback
+  const fallbackNow = useMemo(() => Math.floor(Date.now() / 1000), []);
 
   const liveData = useMemo(
     () => buildLiveData(metric, rangeConfig.seconds),

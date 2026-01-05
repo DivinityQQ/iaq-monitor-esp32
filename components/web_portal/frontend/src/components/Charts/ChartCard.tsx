@@ -93,7 +93,7 @@ export function ChartCard({ metric, range, height = 220 }: ChartCardProps) {
   );
   const xTicks = useMemo(() => buildXAxisTicks(rangeConfig.seconds), [rangeConfig.seconds]);
 
-  const curve: 'catmullRom' = 'catmullRom';
+  const curve: 'monotoneX' = 'monotoneX';
   const seriesColor = resolvePaletteColor(theme, config.color);
   const bandColor = useMemo(() => alpha(seriesColor, 0.12), [seriesColor]);
   const Icon = METRIC_ICON_MAP[metric];
@@ -142,6 +142,18 @@ export function ChartCard({ metric, range, height = 220 }: ChartCardProps) {
     return [bandSeries, ...baseSeries, minSeries];
   }, [bandColor, config.decimals, curve, dataset, hasMinMax, seriesColor]);
 
+  const yAxis = useMemo(() => [{
+    ...CHART_LAYOUT.yAxis,
+    min,
+    max,
+    valueFormatter: (value: number, context: AxisValueFormatterContext) => {
+      if (context.location === 'tick') {
+        return formatAxisTick(value, context.defaultTickLabel);
+      }
+      return Number.isFinite(value) ? value.toFixed(config.decimals) : '';
+    },
+  }], [min, max, config.decimals]);
+
   return (
     <Card>
       <CardContent>
@@ -167,17 +179,7 @@ export function ChartCard({ metric, range, height = 220 }: ChartCardProps) {
               tickInterval: xTicks,
               valueFormatter: axisFormatter,
             }]}
-            yAxis={[{
-              ...CHART_LAYOUT.yAxis,
-              min,
-              max,
-              valueFormatter: (value: number, context: AxisValueFormatterContext) => {
-                if (context.location === 'tick') {
-                  return formatAxisTick(value, context.defaultTickLabel);
-                }
-                return Number.isFinite(value) ? Number(value).toFixed(config.decimals) : '';
-              },
-            }]}
+            yAxis={yAxis}
             series={series}
             height={height}
             margin={CHART_LAYOUT.margin}

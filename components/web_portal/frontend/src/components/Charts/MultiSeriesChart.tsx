@@ -94,7 +94,7 @@ export function MultiSeriesChart({
   const xTicks = useMemo(() => buildXAxisTicks(rangeConfig.seconds), [rangeConfig.seconds]);
 
   // Build series configuration
-  const curve: 'catmullRom' = 'catmullRom';
+  const curve: 'monotoneX' = 'monotoneX';
 
   const series = useMemo(() => {
     return seriesConfigs.map((entry) => ({
@@ -105,6 +105,18 @@ export function MultiSeriesChart({
       showMark: false,
     } as const));
   }, [seriesConfigs, theme, curve]);
+
+  const yAxis = useMemo(() => [{
+    ...CHART_LAYOUT.yAxis,
+    min,
+    max,
+    valueFormatter: (value: number, context: AxisValueFormatterContext) => {
+      if (context.location === 'tick') {
+        return formatAxisTick(value, context.defaultTickLabel);
+      }
+      return Number.isFinite(value) ? value.toFixed(pmConfig.decimals) : '';
+    },
+  }], [min, max, pmConfig.decimals]);
 
   return (
     <Card>
@@ -131,17 +143,7 @@ export function MultiSeriesChart({
               tickInterval: xTicks,
               valueFormatter: axisFormatter,
             }]}
-            yAxis={[{
-              ...CHART_LAYOUT.yAxis,
-              min,
-              max,
-              valueFormatter: (value: number, context: AxisValueFormatterContext) => {
-                if (context.location === 'tick') {
-                  return formatAxisTick(value, context.defaultTickLabel);
-                }
-                return Number.isFinite(value) ? Number(value).toFixed(pmConfig.decimals) : '';
-              },
-            }]}
+            yAxis={yAxis}
             series={series}
             height={height}
             margin={CHART_LAYOUT.margin}
