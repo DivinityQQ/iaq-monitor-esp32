@@ -3,7 +3,7 @@ import { logger } from './logger';
 import { STREAM_BUFFER_CAPACITY } from './constants';
 import type { MetricKey } from '../components/Charts/config/chartConfig';
 
-export const STREAM_BUFFER_SECONDS = 3600;
+export const STREAM_BUFFER_SECONDS = 300;
 
 /**
  * Ring buffer implementation for O(1) append/trim operations

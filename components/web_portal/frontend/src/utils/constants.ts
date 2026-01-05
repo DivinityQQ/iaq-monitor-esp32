@@ -4,8 +4,8 @@
  */
 
 // Stream Buffer Configuration
-/** Ring buffer capacity: 1 hour @ 1 Hz with cushion (3600 + 100) */
-export const STREAM_BUFFER_CAPACITY = 3700;
+/** Ring buffer capacity: 5 minutes @ 1 Hz with cushion (300 + 20) */
+export const STREAM_BUFFER_CAPACITY = 320;
 
 // Timeout Values (milliseconds)
 /** Default notification display duration */

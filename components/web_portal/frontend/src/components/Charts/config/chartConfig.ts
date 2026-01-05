@@ -189,10 +189,38 @@ export const PM_SERIES: MetricKey[] = ['pm1_ugm3', 'pm25_ugm3', 'pm10_ugm3'];
 
 export type RangeKey = '1m' | '5m' | '1h' | '1d' | '7d';
 
-export const RANGES: Record<RangeKey, { seconds: number; label: string; useHistory: boolean }> = {
+export const RANGES: Record<RangeKey, {
+  seconds: number;
+  label: string;
+  useHistory: boolean;
+  mergeLiveTail?: boolean;
+  historyRefreshSeconds?: number;
+  showMinMax?: boolean;
+}> = {
   '1m': { seconds: 60, label: '1 min', useHistory: false },
   '5m': { seconds: 300, label: '5 min', useHistory: false },
-  '1h': { seconds: 3600, label: '1 hour', useHistory: true },
-  '1d': { seconds: 86400, label: '1 day', useHistory: true },
-  '7d': { seconds: 604800, label: '7 days', useHistory: true },
+  '1h': {
+    seconds: 3600,
+    label: '1 hour',
+    useHistory: true,
+    mergeLiveTail: false,
+    historyRefreshSeconds: 150,
+    showMinMax: true,
+  },
+  '1d': {
+    seconds: 86400,
+    label: '1 day',
+    useHistory: true,
+    mergeLiveTail: false,
+    historyRefreshSeconds: 150,
+    showMinMax: true,
+  },
+  '7d': {
+    seconds: 604800,
+    label: '7 days',
+    useHistory: true,
+    mergeLiveTail: false,
+    historyRefreshSeconds: 150,
+    showMinMax: true,
+  },
 };

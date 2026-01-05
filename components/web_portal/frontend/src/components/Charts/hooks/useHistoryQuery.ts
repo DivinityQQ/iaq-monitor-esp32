@@ -92,13 +92,15 @@ export function useHistoryQuery(range: RangeKey | null, latestLiveTime: number |
   const [error, setError] = useState<Error | null>(null);
 
   const shouldFetch = range ? RANGES[range].useHistory : false;
+  const refreshSeconds = range ? (RANGES[range].historyRefreshSeconds ?? STREAM_BUFFER_SECONDS) : STREAM_BUFFER_SECONDS;
   const cached = range ? cache.get(range) : null;
   const isStale = !!(
     cached &&
     cached.response.end_time > 0 &&
     latestLiveTime != null &&
     Number.isFinite(latestLiveTime) &&
-    (latestLiveTime - cached.response.end_time) > STREAM_BUFFER_SECONDS
+    (latestLiveTime - cached.response.end_time) > refreshSeconds &&
+    (Date.now() - cached.fetchedAt) > refreshSeconds * 1000
   );
 
   useEffect(() => {

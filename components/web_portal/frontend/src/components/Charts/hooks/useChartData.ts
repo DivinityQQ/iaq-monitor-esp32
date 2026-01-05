@@ -44,6 +44,7 @@ export function useChartData(metric: MetricKey, range: RangeKey): {
   windowEnd: number;
 } {
   const rangeConfig = RANGES[range];
+  const mergeLiveTail = rangeConfig.useHistory && (rangeConfig.mergeLiveTail ?? true);
   const buffersVersion = useAtomValue(buffersVersionAtom);
   const fallbackNow = useMemo(() => Math.floor(Date.now() / 1000), [buffersVersion]);
 
@@ -89,8 +90,9 @@ export function useChartData(metric: MetricKey, range: RangeKey): {
     if (!rangeConfig.useHistory) return baseEnd;
     const historyEndTime = historyData?.historyEndTime;
     if (historyEndTime == null) return baseEnd;
+    if (!mergeLiveTail) return historyEndTime;
     return Math.max(historyEndTime, latestLiveTime ?? historyEndTime);
-  }, [rangeConfig.useHistory, historyData, latestLiveTime, fallbackNow]);
+  }, [rangeConfig.useHistory, historyData, latestLiveTime, fallbackNow, mergeLiveTail]);
 
   const data = useMemo(() => {
     if (!rangeConfig.useHistory) {
@@ -100,6 +102,10 @@ export function useChartData(metric: MetricKey, range: RangeKey): {
 
     if (!historyData) {
       return windowToRange(liveData, windowEnd, rangeConfig.seconds);
+    }
+
+    if (!mergeLiveTail) {
+      return windowToRange(historyData.points, windowEnd, rangeConfig.seconds);
     }
 
     // Use >= to avoid 1-point gap at boundary between history and live data
@@ -113,6 +119,7 @@ export function useChartData(metric: MetricKey, range: RangeKey): {
     rangeConfig.useHistory,
     rangeConfig.seconds,
     latestLiveTime,
+    mergeLiveTail,
     windowEnd,
   ]);
 

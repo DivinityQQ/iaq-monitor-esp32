@@ -3,8 +3,8 @@ import Box from '@mui/material/Box';
 import Card from '@mui/material/Card';
 import CardContent from '@mui/material/CardContent';
 import Typography from '@mui/material/Typography';
-import { useTheme } from '@mui/material/styles';
-import { LineChart } from '@mui/x-charts/LineChart';
+import { alpha, useTheme } from '@mui/material/styles';
+import { LineChart, type LineSeries } from '@mui/x-charts/LineChart';
 import type { AxisValueFormatterContext } from '@mui/x-charts/models';
 import ThermostatIcon from '@mui/icons-material/Thermostat';
 import WaterDropIcon from '@mui/icons-material/WaterDrop';
@@ -56,6 +56,8 @@ export function ChartCard({ metric, range, height = 220 }: ChartCardProps) {
   const rangeConfig = RANGES[range];
   const { data, isLoading, windowEnd } = useChartData(metric, range);
   const hasData = data.some((point) => point.avg != null);
+  const showMinMax = rangeConfig.useHistory && rangeConfig.showMinMax === true;
+  const hasMinMax = showMinMax && data.some((point) => point.min != null && point.max != null);
 
   // Relative time formatter for fixed axis labels
   const axisFormatter = useMemo(
@@ -63,20 +65,82 @@ export function ChartCard({ metric, range, height = 220 }: ChartCardProps) {
     [rangeConfig.seconds]
   );
 
-  const { min, max } = useMemo(() => computeYAxisBounds(data, config), [data, config]);
+  const { min, max } = useMemo(
+    () => computeYAxisBounds(data, config, hasMinMax),
+    [data, config, hasMinMax]
+  );
   // Use relative time values so the axis stays fixed at -range..0
   const dataset = useMemo(
-    () => data.map((point) => ({
-      t: point.time - windowEnd,
-      avg: point.avg,
-    })),
-    [data, windowEnd]
+    () => data.map((point) => {
+      const row: { t: number; avg: number | null; min?: number | null; band?: number | null } = {
+        t: point.time - windowEnd,
+        avg: point.avg,
+      };
+      if (hasMinMax) {
+        const minValue = typeof point.min === 'number' && Number.isFinite(point.min) ? point.min : null;
+        const maxValue = typeof point.max === 'number' && Number.isFinite(point.max) ? point.max : null;
+        row.min = minValue;
+        if (minValue != null && maxValue != null) {
+          const diff = maxValue - minValue;
+          row.band = Number.isFinite(diff) && diff >= 0 ? diff : null;
+        } else {
+          row.band = null;
+        }
+      }
+      return row;
+    }),
+    [data, hasMinMax, windowEnd]
   );
   const xTicks = useMemo(() => buildXAxisTicks(rangeConfig.seconds), [rangeConfig.seconds]);
 
   const curve: 'catmullRom' = 'catmullRom';
   const seriesColor = resolvePaletteColor(theme, config.color);
+  const bandColor = useMemo(() => alpha(seriesColor, 0.12), [seriesColor]);
   const Icon = METRIC_ICON_MAP[metric];
+  const series = useMemo<LineSeries[]>(() => {
+    const formatValue = (value: number | null) => {
+      if (value == null || !Number.isFinite(value)) return null;
+      return value.toFixed(config.decimals);
+    };
+    const baseSeries: LineSeries[] = [{
+      dataKey: 'avg',
+      label: 'Avg',
+      color: seriesColor,
+      curve,
+      showMark: false,
+      disableHighlight: false,
+      valueFormatter: (value: number | null) => formatValue(value),
+    }];
+    if (!hasMinMax) return baseSeries;
+    const bandSeries: LineSeries = {
+      dataKey: 'band',
+      stack: 'range',
+      stackOrder: 'reverse',
+      area: true,
+      color: bandColor,
+      curve,
+      showMark: false,
+      disableHighlight: true,
+      label: 'Max',
+      valueFormatter: (_value: number | null, context: { dataIndex: number }) => {
+        const row = dataset[context.dataIndex];
+        if (!row || row.min == null || row.band == null) return null;
+        const maxValue = row.min + row.band;
+        return formatValue(maxValue);
+      },
+    };
+    const minSeries: LineSeries = {
+      dataKey: 'min',
+      stack: 'range',
+      color: bandColor,
+      curve,
+      showMark: false,
+      disableHighlight: true,
+      label: 'Min',
+      valueFormatter: (value: number | null) => formatValue(value),
+    };
+    return [bandSeries, ...baseSeries, minSeries];
+  }, [bandColor, config.decimals, curve, dataset, hasMinMax, seriesColor]);
 
   return (
     <Card>
@@ -114,12 +178,7 @@ export function ChartCard({ metric, range, height = 220 }: ChartCardProps) {
                 return Number.isFinite(value) ? Number(value).toFixed(config.decimals) : '';
               },
             }]}
-            series={[{
-              dataKey: 'avg',
-              color: seriesColor,
-              curve,
-              showMark: false,
-            }]}
+            series={series}
             height={height}
             margin={CHART_LAYOUT.margin}
             hideLegend

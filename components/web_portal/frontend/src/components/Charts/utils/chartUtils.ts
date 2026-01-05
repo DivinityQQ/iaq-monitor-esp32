@@ -49,17 +49,25 @@ export function formatAxisTick(value: number, defaultTickLabel: string): string 
  */
 export function computeYAxisBounds(
   data: ChartDataPoint[],
-  config: MetricConfig
+  config: MetricConfig,
+  includeMinMax: boolean = false
 ): { min: number; max: number } {
   // Single-pass min/max calculation - O(n) without stack overflow risk
   let dataMin = Infinity;
   let dataMax = -Infinity;
 
+  const addValue = (value: number | null | undefined) => {
+    if (value == null || !Number.isFinite(value)) return;
+    if (value < dataMin) dataMin = value;
+    if (value > dataMax) dataMax = value;
+  };
+
   for (let i = 0; i < data.length; i++) {
-    const v = data[i].avg;
-    if (v != null && Number.isFinite(v)) {
-      if (v < dataMin) dataMin = v;
-      if (v > dataMax) dataMax = v;
+    const point = data[i];
+    addValue(point.avg);
+    if (includeMinMax) {
+      addValue(point.min);
+      addValue(point.max);
     }
   }
 
