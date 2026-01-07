@@ -19,7 +19,7 @@ import {
   ElectricBolt as VoltageIcon,
   ElectricalServices as CurrentIcon,
 } from '@mui/icons-material';
-import { powerAtom } from '../../store/atoms';
+import { batteryDisplayAtom } from '../../store/atoms';
 
 /**
  * Get battery level color based on charge percentage
@@ -49,9 +49,9 @@ const formatTimeRemaining = (minutes: number): string => {
  * Horizontal layout: gauge on left, metrics on right (stacks on mobile)
  */
 export function BatteryStatus() {
-  const power = useAtomValue(powerAtom);
+  const battery = useAtomValue(batteryDisplayAtom);
 
-  if (!power) {
+  if (!battery) {
     return (
       <Card sx={{ height: '100%' }}>
         <CardContent>
@@ -103,9 +103,9 @@ export function BatteryStatus() {
     );
   }
 
-  const batteryColor = getBatteryColor(power.charge_pct);
-  const isCharging = power.charging_on && power.batt_ma > 0;
-  const isDischarging = power.batt_ma < 0;
+  const batteryColor = getBatteryColor(battery.charge_pct);
+  const isCharging = battery.charging_on && battery.batt_ma > 0;
+  const isDischarging = battery.batt_ma < 0;
 
   return (
     <Card sx={{ height: '100%' }}>
@@ -136,7 +136,7 @@ export function BatteryStatus() {
             <Box position="relative" display="inline-flex">
               <CircularProgress
                 variant="determinate"
-                value={power.charge_pct}
+                value={battery.charge_pct}
                 size={100}
                 thickness={4}
                 color={batteryColor}
@@ -173,7 +173,7 @@ export function BatteryStatus() {
                 }}
               >
                 <Typography variant="h5" fontWeight={700} color={`${batteryColor}.main`}>
-                  {Math.round(power.charge_pct)}%
+                  {Math.round(battery.charge_pct)}%
                 </Typography>
               </Box>
             </Box>
@@ -219,7 +219,7 @@ export function BatteryStatus() {
                       Voltage
                     </Typography>
                     <Typography variant="body2" fontWeight={500}>
-                      {(power.batt_mv / 1000).toFixed(2)}V
+                      {(battery.batt_mv / 1000).toFixed(2)}V
                     </Typography>
                   </Box>
                 </Box>
@@ -234,7 +234,7 @@ export function BatteryStatus() {
                       Current
                     </Typography>
                     <Typography variant="body2" fontWeight={500}>
-                      {power.batt_ma > 0 ? '+' : ''}{power.batt_ma}mA
+                      {battery.batt_ma > 0 ? '+' : ''}{battery.batt_ma}mA
                     </Typography>
                   </Box>
                 </Box>
@@ -249,13 +249,13 @@ export function BatteryStatus() {
                       Health
                     </Typography>
                     <Typography variant="body2" fontWeight={500}>
-                      {power.health_pct}%
+                      {battery.health_pct}%
                     </Typography>
                     <LinearProgress
                       variant="determinate"
-                      value={power.health_pct}
+                      value={battery.health_pct}
                       sx={{ mt: 0.5, height: 4, borderRadius: 2 }}
-                      color={power.health_pct >= 80 ? 'success' : power.health_pct >= 50 ? 'warning' : 'error'}
+                      color={battery.health_pct >= 80 ? 'success' : battery.health_pct >= 50 ? 'warning' : 'error'}
                     />
                   </Box>
                 </Box>
@@ -270,7 +270,7 @@ export function BatteryStatus() {
                       Temperature
                     </Typography>
                     <Typography variant="body2" fontWeight={500}>
-                      {power.batt_temp_c.toFixed(1)}°C
+                      {battery.batt_temp_c.toFixed(1)}°C
                     </Typography>
                   </Box>
                 </Box>
@@ -285,7 +285,7 @@ export function BatteryStatus() {
                       Cycles
                     </Typography>
                     <Typography variant="body2" fontWeight={500}>
-                      {power.cycles}
+                      {battery.cycles}
                     </Typography>
                   </Box>
                 </Box>
@@ -297,14 +297,14 @@ export function BatteryStatus() {
                   <TimeIcon fontSize="small" color="action" />
                   <Box>
                     <Typography variant="caption" color="text.secondary">
-                      {power.time_left_min === 0
+                      {battery.time_left_min === 0
                         ? 'Time remaining'
-                        : power.time_left_min < 0
+                        : battery.time_left_min < 0
                           ? 'Time until empty'
                           : 'Time until full'}
                     </Typography>
                     <Typography variant="body2" fontWeight={500}>
-                      {formatTimeRemaining(power.time_left_min)}
+                      {formatTimeRemaining(battery.time_left_min)}
                     </Typography>
                   </Box>
                 </Box>

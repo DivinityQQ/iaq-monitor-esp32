@@ -10,7 +10,7 @@ import Skeleton from '@mui/material/Skeleton';
 import Switch from '@mui/material/Switch';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
-import { powerAtom } from '../../store/atoms';
+import { chargingConfigAtom } from '../../store/atoms';
 import { apiClient } from '../../api/client';
 import { useNotification } from '../../contexts/SnackbarContext';
 import { logger } from '../../utils/logger';
@@ -19,7 +19,7 @@ import { logger } from '../../utils/logger';
  * Charging configuration card with compact inline current/change settings
  */
 export function ChargingConfig() {
-  const power = useAtomValue(powerAtom);
+  const charging = useAtomValue(chargingConfigAtom);
   const { showNotification } = useNotification();
 
   // Local form state (not synced from server - user edits only)
@@ -105,7 +105,7 @@ export function ChargingConfig() {
     }
   };
 
-  if (!power) {
+  if (!charging) {
     return (
       <Card sx={{ height: '100%' }}>
         <CardContent>
@@ -143,7 +143,7 @@ export function ChargingConfig() {
             <CircularProgress size={24} />
           ) : (
             <Switch
-              checked={power.charging_on}
+              checked={charging.charging_on}
               onChange={(e) => handleToggleCharging(e.target.checked)}
               color="primary"
             />
@@ -157,7 +157,7 @@ export function ChargingConfig() {
               Charge Limit
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Current: <strong>{power.charge_limit_ma} mA</strong>
+              Current: <strong>{charging.charge_limit_ma} mA</strong>
             </Typography>
           </Box>
           <TextField
@@ -190,7 +190,7 @@ export function ChargingConfig() {
               Maintain Voltage (MPP)
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Current: <strong>{power.maintain_mv} mV</strong>
+              Current: <strong>{charging.maintain_mv} mV</strong>
             </Typography>
           </Box>
           <TextField

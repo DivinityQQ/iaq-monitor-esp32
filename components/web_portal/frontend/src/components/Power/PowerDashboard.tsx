@@ -4,7 +4,7 @@ import Box from '@mui/material/Box';
 import Container from '@mui/material/Container';
 import Grid from '@mui/material/Grid';
 import Typography from '@mui/material/Typography';
-import { powerAtom } from '../../store/atoms';
+import { powerAvailableAtom } from '../../store/atoms';
 import { BatteryStatus } from './BatteryStatus';
 import { SupplyStatus } from './SupplyStatus';
 import { PowerOutputs } from './PowerOutputs';
@@ -15,10 +15,10 @@ import { BatteryAlarms } from './BatteryAlarms';
  * Power dashboard displaying battery status, supply info, and power controls
  */
 export function PowerDashboard() {
-  const power = useAtomValue(powerAtom);
+  const powerAvailable = useAtomValue(powerAvailableAtom);
 
   // Show unavailable state when PowerFeather is disabled or uninitialized
-  if (power && !power.available) {
+  if (powerAvailable && !powerAvailable.available) {
     return (
       <Container maxWidth="xl" sx={{ py: 3, px: { xs: 2, sm: 3 } }}>
         <Box sx={{ mb: 4 }}>
@@ -31,9 +31,9 @@ export function PowerDashboard() {
         </Box>
         <Alert severity="info" sx={{ maxWidth: 600 }}>
           PowerFeather is not available on this device.
-          {power.error && (
+          {powerAvailable.error && (
             <Typography variant="body2" sx={{ mt: 1 }}>
-              {power.error}
+              {powerAvailable.error}
             </Typography>
           )}
         </Alert>

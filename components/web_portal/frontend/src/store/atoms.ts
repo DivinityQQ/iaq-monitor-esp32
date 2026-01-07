@@ -164,6 +164,22 @@ export const refreshOTAInfoAtom = atom(null, async (_get, set) => {
 // ============================================================================
 
 /**
+ * Shallow equality check for objects with primitive values.
+ * Used by selectAtom to prevent re-renders when object contents are identical.
+ */
+function shallowEqual<T extends Record<string, unknown>>(a: T | null, b: T | null): boolean {
+  if (a === b) return true;
+  if (a === null || b === null) return false;
+  const keysA = Object.keys(a);
+  const keysB = Object.keys(b);
+  if (keysA.length !== keysB.length) return false;
+  for (const key of keysA) {
+    if (a[key] !== b[key]) return false;
+  }
+  return true;
+}
+
+/**
  * Sensor status by ID atom (uses atomFamily for stable atom references)
  * Returns the status for a specific sensor from the health data
  */
@@ -172,6 +188,106 @@ export const sensorStatusAtom = atomFamily((sensorId: SensorId) =>
     const sensors = get(sensorStatusMapAtom);
     return sensors?.[sensorId] ?? null;
   })
+);
+
+// ============================================================================
+// POWER DERIVED ATOMS - Fine-grained subscriptions to reduce re-renders
+// ============================================================================
+
+/**
+ * Battery display fields (used by BatteryStatus.tsx)
+ * Optimized to only re-render when battery-specific values change
+ */
+export const batteryDisplayAtom = selectAtom(
+  powerAtom,
+  (p) => p ? {
+    charge_pct: p.charge_pct,
+    batt_mv: p.batt_mv,
+    batt_ma: p.batt_ma,
+    charging_on: p.charging_on,
+    health_pct: p.health_pct,
+    cycles: p.cycles,
+    time_left_min: p.time_left_min,
+    batt_temp_c: p.batt_temp_c,
+  } : null,
+  shallowEqual
+);
+
+/**
+ * Supply info fields (used by SupplyStatus.tsx)
+ */
+export const supplyDisplayAtom = selectAtom(
+  powerAtom,
+  (p) => p ? {
+    supply_good: p.supply_good,
+    supply_mv: p.supply_mv,
+    supply_ma: p.supply_ma,
+    maintain_mv: p.maintain_mv,
+  } : null,
+  shallowEqual
+);
+
+/**
+ * Charging config fields (used by ChargingConfig.tsx)
+ */
+export const chargingConfigAtom = selectAtom(
+  powerAtom,
+  (p) => p ? {
+    charging_on: p.charging_on,
+    charge_limit_ma: p.charge_limit_ma,
+    maintain_mv: p.maintain_mv,
+  } : null,
+  shallowEqual
+);
+
+/**
+ * Alarm config fields (used by BatteryAlarms.tsx)
+ */
+export const alarmConfigAtom = selectAtom(
+  powerAtom,
+  (p) => p ? {
+    alarm_low_v_mv: p.alarm_low_v_mv,
+    alarm_high_v_mv: p.alarm_high_v_mv,
+    alarm_low_pct: p.alarm_low_pct,
+  } : null,
+  shallowEqual
+);
+
+/**
+ * Power outputs fields (used by PowerOutputs.tsx)
+ */
+export const powerOutputsAtom = selectAtom(
+  powerAtom,
+  (p) => p ? {
+    en: p.en,
+    v3v_on: p.v3v_on,
+    vsqt_on: p.vsqt_on,
+    stat_on: p.stat_on,
+  } : null,
+  shallowEqual
+);
+
+/**
+ * Power availability (used by PowerDashboard.tsx)
+ */
+export const powerAvailableAtom = selectAtom(
+  powerAtom,
+  (p) => p ? { available: p.available, error: p.error } : null,
+  shallowEqual
+);
+
+// ============================================================================
+// STATE DERIVED ATOMS - Fine-grained subscriptions
+// ============================================================================
+
+/**
+ * MCU temperature atom (used by SystemHealth.tsx)
+ * Prevents SystemHealth from re-rendering on every state update
+ */
+export const mcuTempAtom = selectAtom(
+  stateAtom,
+  (s) => s?.mcu_temp_c ?? null,
+  (a, b) => a === b
 );
 
 /**

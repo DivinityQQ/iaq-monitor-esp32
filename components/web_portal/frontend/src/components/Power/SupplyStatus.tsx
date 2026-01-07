@@ -13,15 +13,15 @@ import {
   ElectricalServices as CurrentIcon,
   Tune as MaintainIcon,
 } from '@mui/icons-material';
-import { powerAtom } from '../../store/atoms';
+import { supplyDisplayAtom } from '../../store/atoms';
 
 /**
  * Supply status card displaying external power supply information
  */
 export function SupplyStatus() {
-  const power = useAtomValue(powerAtom);
+  const supply = useAtomValue(supplyDisplayAtom);
 
-  if (!power) {
+  if (!supply) {
     return (
       <Card sx={{ height: '100%' }}>
         <CardContent>
@@ -61,10 +61,10 @@ export function SupplyStatus() {
             Supply Status
           </Typography>
           <Chip
-            icon={power.supply_good ? <CheckIcon /> : <CloseIcon />}
-            label={power.supply_good ? 'Good' : 'Not Connected'}
-            color={power.supply_good ? 'success' : 'default'}
-            variant={power.supply_good ? 'filled' : 'outlined'}
+            icon={supply.supply_good ? <CheckIcon /> : <CloseIcon />}
+            label={supply.supply_good ? 'Good' : 'Not Connected'}
+            color={supply.supply_good ? 'success' : 'default'}
+            variant={supply.supply_good ? 'filled' : 'outlined'}
             size="small"
           />
         </Box>
@@ -79,7 +79,7 @@ export function SupplyStatus() {
                   Voltage
                 </Typography>
                 <Typography variant="body2" fontWeight={500}>
-                  {(power.supply_mv / 1000).toFixed(2)}V
+                  {(supply.supply_mv / 1000).toFixed(2)}V
                 </Typography>
               </Box>
             </Box>
@@ -94,7 +94,7 @@ export function SupplyStatus() {
                   Current
                 </Typography>
                 <Typography variant="body2" fontWeight={500}>
-                  {power.supply_ma}mA
+                  {supply.supply_ma}mA
                 </Typography>
               </Box>
             </Box>
@@ -109,7 +109,7 @@ export function SupplyStatus() {
                   Maintain (MPP)
                 </Typography>
                 <Typography variant="body2" fontWeight={500}>
-                  {power.maintain_mv}mV
+                  {supply.maintain_mv}mV
                 </Typography>
               </Box>
             </Box>

@@ -20,7 +20,7 @@ import {
   VisibilityOff as VisibilityOffIcon,
 } from '@mui/icons-material';
 import { useAtomValue, useSetAtom } from 'jotai';
-import { deviceInfoAtom, mqttStatusAtom } from '../../store/atoms';
+import { deviceInfoAtom, mqttStatusAtom, refreshMQTTStatusAtom } from '../../store/atoms';
 import { apiClient } from '../../api/client';
 import { validateMQTTUrl } from '../../utils/validation';
 import { useNotification } from '../../contexts/SnackbarContext';
@@ -29,7 +29,7 @@ import { logger } from '../../utils/logger';
 export function MQTTConfig() {
   const deviceInfo = useAtomValue(deviceInfoAtom);
   const mqttStatus = useAtomValue(mqttStatusAtom);
-  const setMqttStatus = useSetAtom(mqttStatusAtom);
+  const refreshMQTTStatus = useSetAtom(refreshMQTTStatusAtom);
   const { showNotification } = useNotification();
 
   // Form state
@@ -59,8 +59,7 @@ export function MQTTConfig() {
 
   const refreshStatus = async () => {
     try {
-      const status = await apiClient.getMQTTStatus();
-      setMqttStatus(status);
+      await refreshMQTTStatus();
     } catch (error) {
       logger.error('Failed to refresh MQTT status:', error);
     }

@@ -13,8 +13,7 @@ import {
   CloudOff as CloudOffIcon,
   Refresh as RefreshIcon,
 } from '@mui/icons-material';
-import { mqttStatusAtom } from '../../store/atoms';
-import { apiClient } from '../../api/client';
+import { mqttStatusAtom, refreshMQTTStatusAtom } from '../../store/atoms';
 import { useNotification } from '../../contexts/SnackbarContext';
 import { logger } from '../../utils/logger';
 
@@ -23,15 +22,14 @@ import { logger } from '../../utils/logger';
  */
 export function MQTTHealth() {
   const mqttStatus = useAtomValue(mqttStatusAtom);
-  const setMqttStatus = useSetAtom(mqttStatusAtom);
+  const refreshMQTTStatus = useSetAtom(refreshMQTTStatusAtom);
   const { showNotification } = useNotification();
   const [refreshing, setRefreshing] = useState(false);
 
   const handleRefresh = async () => {
     setRefreshing(true);
     try {
-      const status = await apiClient.getMQTTStatus();
-      setMqttStatus(status);
+      await refreshMQTTStatus();
       showNotification({ message: 'MQTT status refreshed', severity: 'success' });
     } catch (error) {
       logger.error('Failed to refresh MQTT status:', error);

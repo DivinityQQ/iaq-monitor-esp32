@@ -10,7 +10,7 @@ import Skeleton from '@mui/material/Skeleton';
 import TextField from '@mui/material/TextField';
 import Typography from '@mui/material/Typography';
 import { NotificationsActive as AlarmIcon } from '@mui/icons-material';
-import { powerAtom } from '../../store/atoms';
+import { alarmConfigAtom } from '../../store/atoms';
 import { apiClient } from '../../api/client';
 import { useNotification } from '../../contexts/SnackbarContext';
 import { logger } from '../../utils/logger';
@@ -19,7 +19,7 @@ import { logger } from '../../utils/logger';
  * Battery alarms configuration card with compact inline current/change settings
  */
 export function BatteryAlarms() {
-  const power = useAtomValue(powerAtom);
+  const alarms = useAtomValue(alarmConfigAtom);
   const { showNotification } = useNotification();
 
   // Local form state (not synced from server - user edits only)
@@ -104,7 +104,7 @@ export function BatteryAlarms() {
     return value === 0 ? 'Disabled' : `${value} ${unit}`;
   };
 
-  if (!power) {
+  if (!alarms) {
     return (
       <Card sx={{ height: '100%' }}>
         <CardContent>
@@ -140,7 +140,7 @@ export function BatteryAlarms() {
               Low Voltage Alarm
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Current: <strong>{formatAlarmValue(power.alarm_low_v_mv, 'mV')}</strong>
+              Current: <strong>{formatAlarmValue(alarms.alarm_low_v_mv, 'mV')}</strong>
             </Typography>
           </Box>
           <TextField
@@ -169,7 +169,7 @@ export function BatteryAlarms() {
               High Voltage Alarm
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Current: <strong>{formatAlarmValue(power.alarm_high_v_mv, 'mV')}</strong>
+              Current: <strong>{formatAlarmValue(alarms.alarm_high_v_mv, 'mV')}</strong>
             </Typography>
           </Box>
           <TextField
@@ -198,7 +198,7 @@ export function BatteryAlarms() {
               Low Percentage Alarm
             </Typography>
             <Typography variant="body2" color="text.secondary">
-              Current: <strong>{formatAlarmValue(power.alarm_low_pct, '%')}</strong>
+              Current: <strong>{formatAlarmValue(alarms.alarm_low_pct, '%')}</strong>
             </Typography>
           </Box>
           <TextField

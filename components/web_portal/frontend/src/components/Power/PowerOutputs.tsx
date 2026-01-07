@@ -7,7 +7,7 @@ import CircularProgress from '@mui/material/CircularProgress';
 import Skeleton from '@mui/material/Skeleton';
 import Switch from '@mui/material/Switch';
 import Typography from '@mui/material/Typography';
-import { powerAtom } from '../../store/atoms';
+import { powerOutputsAtom } from '../../store/atoms';
 import { apiClient } from '../../api/client';
 import { useNotification } from '../../contexts/SnackbarContext';
 import { ConfirmDialog } from '../Common/ConfirmDialog';
@@ -57,7 +57,7 @@ const OUTPUT_CONFIGS: OutputConfig[] = [
  * Power outputs card with toggles for power rails
  */
 export function PowerOutputs() {
-  const power = useAtomValue(powerAtom);
+  const outputs = useAtomValue(powerOutputsAtom);
   const { showNotification } = useNotification();
 
   // Loading states for each output
@@ -119,7 +119,7 @@ export function PowerOutputs() {
     setConfirmDialog({ open: false, config: null, newValue: false });
   };
 
-  if (!power) {
+  if (!outputs) {
     return (
       <Card sx={{ height: '100%' }}>
         <CardContent>
@@ -169,7 +169,7 @@ export function PowerOutputs() {
                 <CircularProgress size={24} sx={{ mr: 1.5 }} />
               ) : (
                 <Switch
-                  checked={power[config.key]}
+                  checked={outputs[config.key]}
                   onChange={(e) => handleToggle(config.key, e.target.checked)}
                   color="primary"
                 />

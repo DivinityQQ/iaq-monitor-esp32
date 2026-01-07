@@ -15,7 +15,7 @@ import {
   Schedule as TimeIcon,
   Router as NetworkIcon,
 } from '@mui/icons-material';
-import { healthAtom, stateAtom, deviceInfoAtom } from '../../store/atoms';
+import { healthAtom, mcuTempAtom, deviceInfoAtom } from '../../store/atoms';
 import { formatUptime, formatBytes, formatEpoch, calculatePercentage } from '../../utils/formatting';
 import { getSignalStrength, getSignalStrengthLabel, getSignalStrengthColor } from '../../utils/validation';
 
@@ -24,7 +24,7 @@ import { getSignalStrength, getSignalStrengthLabel, getSignalStrengthColor } fro
  */
 export function SystemHealth() {
   const health = useAtomValue(healthAtom);
-  const state = useAtomValue(stateAtom);
+  const mcuTemp = useAtomValue(mcuTempAtom);
   const deviceInfo = useAtomValue(deviceInfoAtom);
 
   if (!health || !deviceInfo) {
@@ -186,7 +186,7 @@ export function SystemHealth() {
           </Grid>
 
           {/* MCU Temperature */}
-          {state?.mcu_temp_c != null && (
+          {mcuTemp != null && (
             <Grid size={{ xs: 6 }}>
               <Box display="flex" alignItems="center" gap={1}>
                 <ThermostatIcon fontSize="small" color="action" />
@@ -195,7 +195,7 @@ export function SystemHealth() {
                     MCU Temp
                   </Typography>
                   <Typography variant="body2" fontWeight={500}>
-                    {state.mcu_temp_c.toFixed(1)}°C
+                    {mcuTemp.toFixed(1)}°C
                   </Typography>
                 </Box>
               </Box>
