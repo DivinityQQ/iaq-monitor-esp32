@@ -1299,6 +1299,15 @@ menu "IAQ Monitor Configuration"
             help
                 Total duration stored at Tier 3 resolution.
 
+        config IAQ_HISTORY_TIME_JUMP_TOLERANCE_S
+            int "Maximum backward time jump tolerance (seconds)"
+            range 10 300
+            default 60
+            help
+                Maximum backward time jump (in seconds) that will be handled by
+                shifting bucket timestamps instead of resetting history.
+                Typical NTP adjustments are under 10 seconds; 60s provides margin.
+
     endmenu
 
 endmenu

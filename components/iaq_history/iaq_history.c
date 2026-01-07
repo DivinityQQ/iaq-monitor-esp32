@@ -152,6 +152,24 @@ static void reset_history(int64_t now_s)
     s_tier_state[0].size = 1;
 }
 
+/**
+ * Shift all tier bucket_start_s by a delta to handle small time jumps.
+ * Must be called with s_history_mutex held.
+ */
+static void shift_tier_timestamps(int64_t delta_s)
+{
+    for (int tier = 0; tier < HISTORY_TIER_COUNT; tier++) {
+        if (s_tier_state[tier].bucket_start_s > 0) {
+            s_tier_state[tier].bucket_start_s += delta_s;
+            if (s_tier_state[tier].bucket_start_s < 0) {
+                s_tier_state[tier].bucket_start_s = 0;
+            }
+        }
+    }
+    ESP_LOGW(TAG, "Time adjusted: shifted history timestamps by %lld s",
+             (long long)delta_s);
+}
+
 static int16_t quantize_value(float value, const history_metric_scale_t *scale)
 {
     if (!isfinite(value)) return HISTORY_SENTINEL;
@@ -321,10 +339,31 @@ void iaq_history_append(const iaq_data_t *data)
     if (!s_history_mutex) return;
     xSemaphoreTake(s_history_mutex, portMAX_DELAY);
 
-    if (s_tier_state[0].bucket_start_s == 0 || now_s < s_tier_state[0].bucket_start_s) {
+    /* Handle uninitialized state */
+    if (s_tier_state[0].bucket_start_s == 0) {
         reset_history(now_s);
+        goto append_data;
     }
 
+    /* Detect backward time jump */
+    if (now_s < s_tier_state[0].bucket_start_s) {
+        int64_t jump_s = s_tier_state[0].bucket_start_s - now_s;
+
+        if (jump_s <= CONFIG_IAQ_HISTORY_TIME_JUMP_TOLERANCE_S) {
+            /* Small jump: shift timestamps to preserve data */
+            int64_t delta = now_s - s_tier_state[0].bucket_start_s;
+            shift_tier_timestamps(delta);
+            s_tier_state[0].bucket_start_s = align_time(now_s, s_tier_resolution_s[0]);
+        } else {
+            /* Large jump: reset to avoid corruption */
+            ESP_LOGW(TAG, "Large time jump (%lld s), resetting history",
+                     (long long)jump_s);
+            reset_history(now_s);
+            goto append_data;
+        }
+    }
+
+append_data:
     advance_tier1(now_s);
 
     uint16_t head = s_tier_state[0].head;
