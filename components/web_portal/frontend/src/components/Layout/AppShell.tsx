@@ -7,16 +7,16 @@ import { lazy, Suspense, useCallback, useState } from 'react';
 import { useAtomValue } from 'jotai';
 import { AppBar } from './AppBar';
 import { NavDrawer } from './NavDrawer';
-import { Dashboard } from '../Dashboard/Dashboard';
 import { bootstrapErrorAtom } from '../../store/atoms';
+import { Dashboard } from '../Dashboard/Dashboard';
+import { HealthDashboard } from '../Health/HealthDashboard';
+import { ConfigView } from '../Config/ConfigView';
+import { PowerDashboard } from '../Power/PowerDashboard';
+import { OTADashboard } from '../OTA/OTADashboard';
+import { ConsoleDashboard } from '../Console/ConsoleDashboard';
 
-// Lazy-load route components
+// Only lazy-load ChartContainer to keep @mui/x-charts out of initial bundle
 const ChartContainer = lazy(() => import('../Charts/ChartContainer').then(m => ({ default: m.ChartContainer })));
-const HealthDashboard = lazy(() => import('../Health/HealthDashboard').then(m => ({ default: m.HealthDashboard })));
-const ConfigView = lazy(() => import('../Config/ConfigView').then(m => ({ default: m.ConfigView })));
-const PowerDashboard = lazy(() => import('../Power/PowerDashboard').then(m => ({ default: m.PowerDashboard })));
-const OTADashboard = lazy(() => import('../OTA/OTADashboard').then(m => ({ default: m.OTADashboard })));
-const ConsoleDashboard = lazy(() => import('../Console/ConsoleDashboard').then(m => ({ default: m.ConsoleDashboard })));
 
 export function AppShell() {
   const [drawerOpen, setDrawerOpen] = useState(false);

@@ -57,15 +57,15 @@ export default defineConfig({
 
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'jotai'],
-          'vendor-mui': [
-            '@mui/material',
-            '@mui/icons-material',
-            '@emotion/react',
-            '@emotion/styled',
-          ],
-          'vendor-charts': ['@mui/x-charts'],
+        manualChunks: (id) => {
+          // Charts library - only loaded when visiting /charts route
+          if (id.includes('@mui/x-charts')) {
+            return 'vendor-charts';
+          }
+          // Bundle all other node_modules together
+          if (id.includes('node_modules')) {
+            return 'vendor';
+          }
         },
       },
     },
