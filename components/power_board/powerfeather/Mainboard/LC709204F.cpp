@@ -161,6 +161,7 @@ namespace PowerFeather
         if (_readReg(Registers::TSENSE1, value))
         {
             temperature = Util::fromRaw(value, 0.1, 0x0DCC) + 80.0f;
+            return true;
         }
         return false;
     }

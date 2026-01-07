@@ -657,9 +657,9 @@ namespace PowerFeather
         static constexpr uint16_t _batfetCtrlWaitTime = 30; // 30 ms actual
 
 #ifdef ARDUINO
-        ArduinoMasterI2C _i2c{_i2cPort, Pin::SDA1, Pin::SCL1, _i2cFreq};
+        ArduinoMasterI2C _i2c{_i2cPort, Pin::SDA1, Pin::SCL1, _i2cFreq, _i2cTimeout};
 #else
-        MasterI2C _i2c{_i2cPort, Pin::SDA1, Pin::SCL1, _i2cFreq};
+        MasterI2C _i2c{_i2cPort, Pin::SDA1, Pin::SCL1, _i2cFreq, _i2cTimeout};
 #endif
 
         BQ2562x _charger{_i2c};
@@ -670,7 +670,7 @@ namespace PowerFeather
         uint16_t _batteryCapacity{0};
         uint16_t _terminationCurrent{0};
         BatteryType _batteryType{BatteryType::Generic_3V7};
-        Mutex _mutex{100};
+        Mutex _mutex{200};
 
         bool _isFirst();
         bool _initInternalDigitalPin(gpio_num_t pin, gpio_mode_t mode);
@@ -679,6 +679,7 @@ namespace PowerFeather
         bool _setRTCPin(gpio_num_t pin, bool value);
         Result _initFuelGauge();
         Result _udpateChargerADC();
+        Result _getBatteryCurrent(int16_t &current); // internal helper, caller must hold lock
     };
 
     extern Mainboard &Board; // singleton instance of Mainboard

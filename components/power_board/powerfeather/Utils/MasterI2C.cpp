@@ -83,12 +83,17 @@ namespace PowerFeather
             return false;
         }
 
-        uint8_t buf2[len + sizeof(reg)];
-        memcpy(buf2, &reg, sizeof(reg));
-        memcpy(&(buf2[sizeof(reg)]), buf, len);
+        if (len + sizeof(reg) > MaxWriteLen) {
+            ESP_LOGE(TAG, "Write payload too large: %d > %d", len + sizeof(reg), MaxWriteLen);
+            return false;
+        }
+
+        uint8_t buf2[MaxWriteLen];
+        buf2[0] = reg;
+        memcpy(&buf2[1], buf, len);
         ESP_LOGV(TAG, "Write address: %02x, reg: %02x, buf: %p, len: %d.", address, reg, buf, len);
         ESP_LOG_BUFFER_HEX_LEVEL(TAG, buf, len, ESP_LOG_VERBOSE);
-        esp_err_t err = i2c_master_transmit(dev, buf2, sizeof(buf2), 1000);
+        esp_err_t err = i2c_master_transmit(dev, buf2, len + 1, _timeout);
         if (err != ESP_OK) {
             ESP_LOGD(TAG, "Write failed: %s", esp_err_to_name(err));
         }
@@ -103,7 +108,7 @@ namespace PowerFeather
         }
 
         ESP_LOGV(TAG, "Read address: %02x, reg: %02x, buf: %p, len: %d.", address, reg, buf, len);
-        esp_err_t res = i2c_master_transmit_receive(dev, &reg, sizeof(reg), buf, len, 1000);
+        esp_err_t res = i2c_master_transmit_receive(dev, &reg, sizeof(reg), buf, len, _timeout);
         ESP_LOG_BUFFER_HEX_LEVEL(TAG, buf, len, ESP_LOG_VERBOSE);
         if (res != ESP_OK) {
             ESP_LOGD(TAG, "Read failed: %s", esp_err_to_name(res));

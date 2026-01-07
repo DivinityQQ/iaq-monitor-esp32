@@ -99,7 +99,10 @@ namespace PowerFeather
     bool Mainboard::_isFuelGaugeEnabled()
     {
         bool enabled = false;
-        getFuelGauge().getOperationMode(enabled); // failure here means false is returned
+        if (!getFuelGauge().getOperationMode(enabled))
+        {
+            ESP_LOGD(TAG, "Failed to read fuel gauge operation mode.");
+        }
         return enabled;
     }
 
@@ -454,9 +457,9 @@ namespace PowerFeather
         return Result::Ok;
     }
 
-    Result Mainboard::getBatteryCurrent(int16_t &current)
+    Result Mainboard::_getBatteryCurrent(int16_t &current)
     {
-        TRY_LOCK(_mutex);
+        // Internal helper - caller must hold lock
         RET_IF_FALSE(_initDone, Result::InvalidState);
         RET_IF_FALSE(_sqtEnabled, Result::InvalidState);
         RET_IF_FALSE(_batteryCapacity, Result::InvalidState);
@@ -464,6 +467,12 @@ namespace PowerFeather
         RET_IF_FALSE(getCharger().getIBAT(current), Result::Failure);
         ESP_LOGD(TAG, "Measured battery current: %d mA.", current);
         return Result::Ok;
+    }
+
+    Result Mainboard::getBatteryCurrent(int16_t &current)
+    {
+        TRY_LOCK(_mutex);
+        return _getBatteryCurrent(current);
     }
 
     Result Mainboard::getBatteryCharge(uint8_t &percent)
@@ -515,7 +524,7 @@ namespace PowerFeather
         // Negative means from battery to the board (discharge), positive
         // means from board to battery (charge).
         int16_t ibat = 0;
-        RET_IF_ERR(getBatteryCurrent(ibat));
+        RET_IF_ERR(_getBatteryCurrent(ibat));
         bool discharging = ibat < 0;
 
         // Get the time-to-empty or time-to-full depending on battery is charging

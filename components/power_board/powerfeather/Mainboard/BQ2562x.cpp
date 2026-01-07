@@ -76,25 +76,34 @@ namespace PowerFeather
         assert(reg.end <= last);
 
         uint16_t data = 0;
+        bool isFullRegister = (reg.start == 0 && reg.end == last);
 
-        if (_readReg(Register{reg.address, reg.size, 0, last}, data))
+        // Skip read-modify-write for full register writes
+        if (isFullRegister)
+        {
+            data = static_cast<uint16_t>(value);
+        }
+        else if (!_readReg(Register{reg.address, reg.size, 0, last}, data))
+        {
+            return false;
+        }
+        else
         {
             uint8_t bits = reg.end - reg.start + 1;
             uint16_t mask = ((1 << bits) - 1) << reg.start;
             data = (data & ~mask) | ((value << reg.start) & mask);
-            bool res = _i2c.write(_i2cAddress, reg.address, reinterpret_cast<uint8_t *>(&data), reg.size);
-            if (res)
-            {
-                ESP_LOGD(TAG, "Write bit%d to bit%d on %d-byte register %02x, value = %04x.", reg.start, reg.end, reg.size, reg.address, data);
-            }
-            else
-            {
-                ESP_LOGD(TAG, "Write bit%d to bit%d on %d-byte register %02x failed.", reg.start, reg.end, reg.size, reg.address);
-            }
-            return res;
         }
 
-        return false;
+        bool res = _i2c.write(_i2cAddress, reg.address, reinterpret_cast<uint8_t *>(&data), reg.size);
+        if (res)
+        {
+            ESP_LOGD(TAG, "Write bit%d to bit%d on %d-byte register %02x, value = %04x.", reg.start, reg.end, reg.size, reg.address, data);
+        }
+        else
+        {
+            ESP_LOGD(TAG, "Write bit%d to bit%d on %d-byte register %02x failed.", reg.start, reg.end, reg.size, reg.address);
+        }
+        return res;
     }
 
     bool BQ2562x::getWD(bool &enabled)

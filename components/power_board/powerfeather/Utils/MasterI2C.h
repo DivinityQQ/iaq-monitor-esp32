@@ -42,8 +42,10 @@ namespace PowerFeather
     class MasterI2C
     {
     public:
-        MasterI2C(uint8_t port, uint8_t sdaPin, uint8_t sclPin, uint32_t freq) :
-                  _port(static_cast<i2c_port_t>(port)), _sdaPin(sdaPin), _sclPin(sclPin), _freq(freq) {};
+        static constexpr size_t MaxWriteLen = 8; // Max payload size for write operations
+
+        MasterI2C(uint8_t port, uint8_t sdaPin, uint8_t sclPin, uint32_t freq, uint32_t timeout = 1000) :
+                  _port(static_cast<i2c_port_t>(port)), _sdaPin(sdaPin), _sclPin(sclPin), _freq(freq), _timeout(timeout) {};
 
         virtual bool start();
         virtual bool end();
@@ -55,6 +57,7 @@ namespace PowerFeather
         uint8_t _sdaPin;
         uint8_t _sclPin;
         uint32_t _freq;
+        uint32_t _timeout;
         i2c_master_bus_handle_t _bus{nullptr};
         static constexpr size_t _maxDevices = 4;
         i2c_master_dev_handle_t _devs[_maxDevices]{};

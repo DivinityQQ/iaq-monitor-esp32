@@ -55,7 +55,7 @@ namespace PowerFeather
             bool _locked;
         };
 
-        Mutex(uint32_t timeout) : _timeout(timeout) {}
+        Mutex(uint32_t timeout) : _sem(nullptr), _timeout(timeout) {}
 
         void init();
         bool lock();
