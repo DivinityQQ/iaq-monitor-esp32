@@ -173,6 +173,25 @@ static uint16_t calculate_aqi_subindex(float concentration, const aqi_breakpoint
     return 0;  /* Below lowest breakpoint */
 }
 
+/* EPA AQI requires truncation (not rounding) before breakpoint lookup. */
+static float truncate_pm25(float concentration)
+{
+    if (isnan(concentration) || concentration < 0.0f) {
+        return concentration;
+    }
+    /* Truncate to 0.1 ug/m3. */
+    return floorf(concentration * 10.0f) / 10.0f;
+}
+
+static float truncate_pm10(float concentration)
+{
+    if (isnan(concentration) || concentration < 0.0f) {
+        return concentration;
+    }
+    /* Truncate to 1 ug/m3. */
+    return floorf(concentration);
+}
+
 /**
  * Map AQI value to category string.
  */
@@ -199,14 +218,16 @@ static void calculate_aqi(iaq_data_t *data)
     uint16_t pm10_aqi = UINT16_MAX;
 
     if (data->valid.pm25_ugm3) {
-        pm25_aqi = calculate_aqi_subindex(data->fused.pm25_ugm3, pm25_breakpoints, PM25_BREAKPOINT_COUNT);
+        float pm25 = truncate_pm25(data->fused.pm25_ugm3);
+        pm25_aqi = calculate_aqi_subindex(pm25, pm25_breakpoints, PM25_BREAKPOINT_COUNT);
         data->metrics.aqi_pm25_subindex = (float)pm25_aqi;
     } else {
         data->metrics.aqi_pm25_subindex = NAN;
     }
 
     if (data->valid.pm10_ugm3) {
-        pm10_aqi = calculate_aqi_subindex(data->fused.pm10_ugm3, pm10_breakpoints, PM10_BREAKPOINT_COUNT);
+        float pm10 = truncate_pm10(data->fused.pm10_ugm3);
+        pm10_aqi = calculate_aqi_subindex(pm10, pm10_breakpoints, PM10_BREAKPOINT_COUNT);
         data->metrics.aqi_pm10_subindex = (float)pm10_aqi;
     } else {
         data->metrics.aqi_pm10_subindex = NAN;
