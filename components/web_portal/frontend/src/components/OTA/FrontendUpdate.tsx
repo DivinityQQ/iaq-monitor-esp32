@@ -81,12 +81,13 @@ export function FrontendUpdate() {
     }
   };
 
-  // Show WebSocket progress if frontend update is in progress
-  const showWsProgress = isFrontendUpdate && isOtaBusy;
-  const showLocalProgress = isUploading && !showWsProgress;
+  // During upload, always show local progress (browser's upload progress).
+  // Only show WebSocket progress when not actively uploading from this client.
+  const showLocalProgress = isUploading;
+  const showWsProgress = !isUploading && isFrontendUpdate && isOtaBusy;
 
   return (
-    <Card sx={{ height: '100%' }}>
+    <Card>
       <CardContent>
         <Typography variant="h6" gutterBottom>
           Frontend Update
