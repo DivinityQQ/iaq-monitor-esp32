@@ -4,6 +4,26 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog, and the project adheres to Semantic Versioning.
 
+## [0.12.0] - 2026-01-16
+
+History + dashboard release: on-device metric history streaming, expanded portal insights, and chart/performance polish.
+
+Added:
+- On-device metric history storage with a binary streaming endpoint for portal charts.
+- Mold Risk and NOx index tiles on the dashboard with clearer subtitles.
+- Runtime log level adjustments via the console.
+- PowerFeather charger enable/current/MPP settings persisted to NVS and restored on boot.
+
+Changed:
+- Web portal charts reworked for history streaming, dynamic Y scales, min/max bands, tuned defaults, and performance tweaks.
+- Portal UX polish: bundled size reductions, less lazy loading, refined atom usage, and local upload progress feedback.
+- Increased temperature, humidity, and pressure precision in telemetry.
+
+Fixed:
+- AQI category calculation due to no PM data truncation.
+- History retention now tolerates time jumps without wiping the whole dataset.
+- PowerFeather library correctness fixes.
+
 ## [0.11.10] - 2025-12-22
 
 Stability + telemetry release: refined memory reporting, stale data handling, MQTT/OTA fixes, and portal performance polish.
