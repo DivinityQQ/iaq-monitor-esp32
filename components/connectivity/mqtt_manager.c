@@ -27,7 +27,6 @@
 #include "iaq_config.h"
 #include "sensor_coordinator.h"
 #include "esp_timer.h"
-#include "esp_task_wdt.h"
 #include "time_sync.h"
 #include "power_board.h"
 #include "iaq_profiler.h"
@@ -103,6 +102,7 @@ static void mqtt_power_timer_callback(void *arg);
 #endif
 static void mqtt_publish_worker_task(void *arg);
 static esp_err_t ensure_publish_timers_started(void);
+static void stop_publish_timers(void);
 static bool enqueue_publish_event(mqtt_publish_event_t event);
 static esp_err_t start_periodic_timer(esp_timer_handle_t *handle, const esp_timer_create_args_t *args, uint64_t period_us);
 static bool parse_co2_calibration_payload(const char *payload, int *ppm_out);
@@ -397,12 +397,6 @@ esp_err_t mqtt_manager_init(iaq_system_context_t *ctx)
         iaq_profiler_register_task("mqtt_publish", s_publish_task_handle, TASK_STACK_MQTT_MANAGER);
     }
 
-    esp_err_t timer_ret = ensure_publish_timers_started();
-    if (timer_ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to start MQTT timers: %s", esp_err_to_name(timer_ret));
-        return timer_ret;
-    }
-
     esp_err_t client_ret = ESP_OK;
     if (is_valid_broker_url(s_broker_url)) {
         client_ret = create_mqtt_client();
@@ -435,12 +429,6 @@ esp_err_t mqtt_manager_start(void)
         return ESP_ERR_INVALID_STATE;
     }
 
-    esp_err_t timer_ret = ensure_publish_timers_started();
-    if (timer_ret != ESP_OK) {
-        ESP_LOGE(TAG, "Failed to ensure MQTT timers running: %s", esp_err_to_name(timer_ret));
-        return timer_ret;
-    }
-
     if (s_mqtt_client == NULL) {
         if (!is_valid_broker_url(s_broker_url)) {
             ESP_LOGW(TAG, "MQTT not started: disabled or invalid broker. Use console to configure.");
@@ -464,6 +452,7 @@ esp_err_t mqtt_manager_stop(void)
     }
 
     ESP_LOGI(TAG, "Stopping MQTT client");
+    stop_publish_timers();
 
     /* Drain publish queue to prevent stale bursts after reconnect */
     if (s_publish_queue) {
@@ -788,6 +777,12 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             IAQ_DATA_WITH_LOCK() { iaq_data_get()->system.mqtt_connected = true; }
             xEventGroupSetBits(s_system_ctx->event_group, MQTT_CONNECTED_BIT);
             {
+                esp_err_t timer_ret = ensure_publish_timers_started();
+                if (timer_ret != ESP_OK) {
+                    ESP_LOGW(TAG, "Failed to start publish timers on connect: %s", esp_err_to_name(timer_ret));
+                }
+            }
+            {
                 int msg_id = esp_mqtt_client_subscribe(client, TOPIC_COMMAND, CONFIG_IAQ_MQTT_CRITICAL_QOS);
                 ESP_LOGD(TAG, "Subscribing to %s, msg_id=%d", TOPIC_COMMAND, msg_id);
             }
@@ -799,6 +794,7 @@ static void mqtt_event_handler(void *handler_args, esp_event_base_t base, int32_
             s_mqtt_connected = false;
             IAQ_DATA_WITH_LOCK() { iaq_data_get()->system.mqtt_connected = false; }
             xEventGroupClearBits(s_system_ctx->event_group, MQTT_CONNECTED_BIT);
+            stop_publish_timers();
 
             /* Drain publish queue to prevent stale bursts after reconnect */
             if (s_publish_queue) {
@@ -874,7 +870,7 @@ static void mqtt_state_timer_callback(void *arg)
     enqueue_publish_event(MQTT_PUBLISH_EVENT_STATE);
 
     /* After first one-shot trigger, switch to periodic mode */
-    if (s_state_timer && !esp_timer_is_active(s_state_timer)) {
+    if (mqtt_manager_is_connected() && s_state_timer && !esp_timer_is_active(s_state_timer)) {
         esp_timer_start_periodic(s_state_timer, CONFIG_MQTT_STATE_PUBLISH_INTERVAL_SEC * 1000000ULL);
     }
 }
@@ -890,7 +886,7 @@ static void mqtt_metrics_timer_callback(void *arg)
     enqueue_publish_event(MQTT_PUBLISH_EVENT_METRICS);
 
     /* After first one-shot trigger, switch to periodic mode */
-    if (s_metrics_timer && !esp_timer_is_active(s_metrics_timer)) {
+    if (mqtt_manager_is_connected() && s_metrics_timer && !esp_timer_is_active(s_metrics_timer)) {
         esp_timer_start_periodic(s_metrics_timer, CONFIG_MQTT_METRICS_PUBLISH_INTERVAL_SEC * 1000000ULL);
     }
 }
@@ -907,7 +903,7 @@ static void mqtt_diagnostics_timer_callback(void *arg)
     enqueue_publish_event(MQTT_PUBLISH_EVENT_DIAGNOSTICS);
 
     /* After first one-shot trigger, switch to periodic mode */
-    if (s_diagnostics_timer && !esp_timer_is_active(s_diagnostics_timer)) {
+    if (mqtt_manager_is_connected() && s_diagnostics_timer && !esp_timer_is_active(s_diagnostics_timer)) {
         esp_timer_start_periodic(s_diagnostics_timer, CONFIG_MQTT_DIAGNOSTICS_PUBLISH_INTERVAL_SEC * 1000000ULL);
     }
 }
@@ -923,7 +919,7 @@ static void mqtt_power_timer_callback(void *arg)
     (void)arg;
     enqueue_publish_event(MQTT_PUBLISH_EVENT_POWER);
 
-    if (s_power_timer && !esp_timer_is_active(s_power_timer)) {
+    if (mqtt_manager_is_connected() && s_power_timer && !esp_timer_is_active(s_power_timer)) {
         esp_timer_start_periodic(s_power_timer, CONFIG_MQTT_STATE_PUBLISH_INTERVAL_SEC * 1000000ULL);
     }
 }
@@ -1002,9 +998,8 @@ static esp_err_t start_periodic_timer(esp_timer_handle_t *handle,
 
 static esp_err_t ensure_publish_timers_started(void)
 {
-    /* Stagger timer starts by 5 seconds each to prevent simultaneous firing
-     * and flatten CPU/network bursts. Health fires immediately, state after 5s,
-     * metrics after 10s, diagnostics after 15s. */
+    /* Start publish timers only while MQTT is connected.
+     * Stagger topic timers to flatten CPU/network bursts after connect. */
 
     esp_err_t ret;
 
@@ -1099,32 +1094,38 @@ static esp_err_t ensure_publish_timers_started(void)
     return ESP_OK;
 }
 
+static void stop_publish_timers(void)
+{
+    if (s_health_timer) {
+        (void)esp_timer_stop(s_health_timer);
+    }
+    if (s_state_timer) {
+        (void)esp_timer_stop(s_state_timer);
+    }
+    if (s_metrics_timer) {
+        (void)esp_timer_stop(s_metrics_timer);
+    }
+#ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
+    if (s_diagnostics_timer) {
+        (void)esp_timer_stop(s_diagnostics_timer);
+    }
+#endif
+#ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
+    if (s_power_timer) {
+        (void)esp_timer_stop(s_power_timer);
+    }
+#endif
+}
+
 static void mqtt_publish_worker_task(void *arg)
 {
     (void)arg;
     mqtt_publish_event_t event;
     iaq_data_t snapshot;
 
-    /* Subscribe this task to the Task Watchdog Timer for deadlock detection */
-    esp_err_t wdt_ret = esp_task_wdt_add(NULL);
-    if (wdt_ret != ESP_OK) {
-        ESP_LOGW(TAG, "Failed to add MQTT worker to TWDT: %s", esp_err_to_name(wdt_ret));
-    }
-
     while (true) {
-        /* Reset watchdog - confirms task is still running */
-        if (wdt_ret == ESP_OK) {
-            esp_task_wdt_reset();
-        }
-
-        /* Block on first event with timeout to prevent permanent blocking */
-        if (xQueueReceive(s_publish_queue, &event, pdMS_TO_TICKS(5000)) != pdTRUE) {
-            continue;  /* Timeout or error - loop to reset watchdog */
-        }
-
-        /* Reset watchdog after receiving event */
-        if (wdt_ret == ESP_OK) {
-            esp_task_wdt_reset();
+        if (xQueueReceive(s_publish_queue, &event, portMAX_DELAY) != pdTRUE) {
+            continue;
         }
 
         if (!mqtt_manager_is_connected()) {
@@ -1149,33 +1150,28 @@ static void mqtt_publish_worker_task(void *arg)
             iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_MQTT_HEALTH);
             mqtt_publish_status(&snapshot);
             iaq_prof_end(p);
-            if (wdt_ret == ESP_OK) esp_task_wdt_reset();
         }
         if (pending_events & (1 << MQTT_PUBLISH_EVENT_STATE)) {
             iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_MQTT_STATE);
             mqtt_publish_state(&snapshot);
             iaq_prof_end(p);
-            if (wdt_ret == ESP_OK) esp_task_wdt_reset();
         }
         if (pending_events & (1 << MQTT_PUBLISH_EVENT_METRICS)) {
             iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_MQTT_METRICS);
             mqtt_publish_metrics(&snapshot);
             iaq_prof_end(p);
-            if (wdt_ret == ESP_OK) esp_task_wdt_reset();
         }
 #ifdef CONFIG_MQTT_PUBLISH_DIAGNOSTICS
         if (pending_events & (1 << MQTT_PUBLISH_EVENT_DIAGNOSTICS)) {
             iaq_prof_ctx_t p = iaq_prof_start(IAQ_METRIC_MQTT_DIAG);
-        mqtt_publish_diagnostics(&snapshot);
-        iaq_prof_end(p);
-        if (wdt_ret == ESP_OK) esp_task_wdt_reset();
-    }
+            mqtt_publish_diagnostics(&snapshot);
+            iaq_prof_end(p);
+        }
 #endif
 #ifdef CONFIG_IAQ_MQTT_PUBLISH_POWER
-    if (pending_events & (1 << MQTT_PUBLISH_EVENT_POWER)) {
-        mqtt_publish_power();
-        if (wdt_ret == ESP_OK) esp_task_wdt_reset();
-    }
+        if (pending_events & (1 << MQTT_PUBLISH_EVENT_POWER)) {
+            mqtt_publish_power();
+        }
 #endif
     }
 }
