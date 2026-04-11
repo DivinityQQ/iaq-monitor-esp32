@@ -4,6 +4,20 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog, and the project adheres to Semantic Versioning.
 
+## [0.12.1] - 2026-04-11
+
+Maintenance release: MQTT lifecycle hardening, Wi‑Fi reconnect backoff, websocket cleanup, and PMS5003 filtering improvements.
+
+Changed:
+- Portal and MQTT/Home Assistant device metadata now report model `IAQ Monitor` and manufacturer `DivinityQQ`.
+- Wi‑Fi reconnects in normal STA/APSTA operation now use bounded exponential backoff instead of immediate retry loops.
+- PMS5003 filtering now maintains the rolling median window incrementally before applying EWMA smoothing, reducing per-sample work.
+
+Fixed:
+- MQTT publish timers now start and stop with broker connection state so they do not outlive the active session.
+- MQTT JSON serialization now happens outside the client lock to prevent head-of-line blocking between topics.
+- Failed WebSocket broadcasts, direct sends, and PINGs now remove dead clients immediately instead of repeatedly targeting broken sockets.
+
 ## [0.12.0] - 2026-01-16
 
 History + dashboard release: on-device metric history streaming, expanded portal insights, and chart/performance polish.

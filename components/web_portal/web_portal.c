@@ -708,8 +708,8 @@ static esp_err_t api_info_get(httpd_req_t *req)
     /* Device metadata */
     cJSON *device = cJSON_CreateObject();
     cJSON_AddStringToObject(device, "name", "IAQ Monitor");
-    cJSON_AddStringToObject(device, "model", "ESP32-S3 DIY");
-    cJSON_AddStringToObject(device, "manufacturer", "Homemade");
+    cJSON_AddStringToObject(device, "model", "IAQ Monitor");
+    cJSON_AddStringToObject(device, "manufacturer", "DivinityQQ");
     cJSON_AddItemToObject(root, "device", device);
 
     /* Firmware + frontend information (single source of truth from ota_manager) */

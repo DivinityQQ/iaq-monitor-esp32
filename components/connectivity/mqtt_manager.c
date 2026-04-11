@@ -501,8 +501,8 @@ static void mqtt_publish_ha_discovery(void)
     }
     cJSON *ids = cJSON_CreateArray(); if (ids) { cJSON_AddItemToArray(ids, cJSON_CreateString(CONFIG_IAQ_DEVICE_ID)); cJSON_AddItemToObject(device, "identifiers", ids); } else { cJSON_AddStringToObject(device, "identifiers", CONFIG_IAQ_DEVICE_ID); }
     cJSON_AddStringToObject(device, "name", "IAQ Monitor");
-    cJSON_AddStringToObject(device, "model", "ESP32-S3 DIY");
-    cJSON_AddStringToObject(device, "manufacturer", "Homemade");
+    cJSON_AddStringToObject(device, "model", "IAQ Monitor");
+    cJSON_AddStringToObject(device, "manufacturer", "DivinityQQ");
     char sw_version[32];
     snprintf(sw_version, sizeof(sw_version), "%d.%d.%d", IAQ_VERSION_MAJOR, IAQ_VERSION_MINOR, IAQ_VERSION_PATCH);
     cJSON_AddStringToObject(device, "sw_version", sw_version);
