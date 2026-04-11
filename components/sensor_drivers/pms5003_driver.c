@@ -38,10 +38,48 @@ static int64_t s_last_update_us = 0;
 /* Signal for RX task to clear its internal parser buffer (e.g., after reset) */
 static volatile bool s_rx_clear_requested = false;
 
-static int cmp_f(const void *a, const void *b)
+typedef struct {
+    float ring[CONFIG_IAQ_PMS5003_RING_SIZE];
+    float sorted[CONFIG_IAQ_PMS5003_RING_SIZE];
+} pms_filter_series_t;
+
+static int pms_filter_find_insert_index(const float *sorted, int count, float value)
 {
-    float fa = *(const float *)a, fb = *(const float *)b;
-    return (fa > fb) - (fa < fb);
+    int idx = 0;
+    while (idx < count && sorted[idx] < value) {
+        idx++;
+    }
+    return idx;
+}
+
+static int pms_filter_find_value_index(const float *sorted, int count, float value)
+{
+    for (int i = 0; i < count; ++i) {
+        if (sorted[i] == value) {
+            return i;
+        }
+    }
+    return -1;
+}
+
+static void pms_filter_insert_value(pms_filter_series_t *series, int count, float value)
+{
+    int idx = pms_filter_find_insert_index(series->sorted, count, value);
+    if (idx < count) {
+        memmove(&series->sorted[idx + 1], &series->sorted[idx], (size_t)(count - idx) * sizeof(float));
+    }
+    series->sorted[idx] = value;
+}
+
+static void pms_filter_remove_value(pms_filter_series_t *series, int count, float value)
+{
+    int idx = pms_filter_find_value_index(series->sorted, count, value);
+    if (idx < 0) {
+        return;
+    }
+    if (idx + 1 < count) {
+        memmove(&series->sorted[idx], &series->sorted[idx + 1], (size_t)(count - idx - 1) * sizeof(float));
+    }
 }
 
 static float parse_alpha(void)
@@ -75,29 +113,38 @@ static void update_smoothed(float pm1, float pm25, float pm10)
 /* Add a new PM sample, compute median over recent window, then update EWMA. */
 static void pms_filter_add_sample(float pm1, float pm25, float pm10)
 {
-    /* Ring buffers and indices for median calculation */
-    static float ring1[CONFIG_IAQ_PMS5003_RING_SIZE];
-    static float ring25[CONFIG_IAQ_PMS5003_RING_SIZE];
-    static float ring10[CONFIG_IAQ_PMS5003_RING_SIZE];
+    static pms_filter_series_t series1 = {0};
+    static pms_filter_series_t series25 = {0};
+    static pms_filter_series_t series10 = {0};
     static int ring_idx = 0;
     static int ring_count = 0;
 
-    ring1[ring_idx] = pm1;
-    ring25[ring_idx] = pm25;
-    ring10[ring_idx] = pm10;
-    ring_idx = (ring_idx + 1) % CONFIG_IAQ_PMS5003_RING_SIZE;
-    if (ring_count < CONFIG_IAQ_PMS5003_RING_SIZE) ring_count++;
+    bool overwrite_oldest = (ring_count == CONFIG_IAQ_PMS5003_RING_SIZE);
+    int insert_count = ring_count;
 
-    float s1[CONFIG_IAQ_PMS5003_RING_SIZE];
-    float s25[CONFIG_IAQ_PMS5003_RING_SIZE];
-    float s10[CONFIG_IAQ_PMS5003_RING_SIZE];
-    for (int k = 0; k < ring_count; ++k) { s1[k] = ring1[k]; s25[k] = ring25[k]; s10[k] = ring10[k]; }
-    qsort(s1, ring_count, sizeof(float), cmp_f);
-    qsort(s25, ring_count, sizeof(float), cmp_f);
-    qsort(s10, ring_count, sizeof(float), cmp_f);
-    float med1 = s1[ring_count/2];
-    float med25 = s25[ring_count/2];
-    float med10 = s10[ring_count/2];
+    if (overwrite_oldest) {
+        pms_filter_remove_value(&series1, ring_count, series1.ring[ring_idx]);
+        pms_filter_remove_value(&series25, ring_count, series25.ring[ring_idx]);
+        pms_filter_remove_value(&series10, ring_count, series10.ring[ring_idx]);
+        insert_count = ring_count - 1;
+    }
+
+    series1.ring[ring_idx] = pm1;
+    series25.ring[ring_idx] = pm25;
+    series10.ring[ring_idx] = pm10;
+
+    pms_filter_insert_value(&series1, insert_count, pm1);
+    pms_filter_insert_value(&series25, insert_count, pm25);
+    pms_filter_insert_value(&series10, insert_count, pm10);
+
+    ring_idx = (ring_idx + 1) % CONFIG_IAQ_PMS5003_RING_SIZE;
+    if (!overwrite_oldest) {
+        ring_count++;
+    }
+
+    float med1 = series1.sorted[ring_count / 2];
+    float med25 = series25.sorted[ring_count / 2];
+    float med10 = series10.sorted[ring_count / 2];
 
     portENTER_CRITICAL(&s_pm_lock);
     update_smoothed(med1, med25, med10);
