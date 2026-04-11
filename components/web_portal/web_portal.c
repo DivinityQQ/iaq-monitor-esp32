@@ -230,7 +230,8 @@ static void ws_broadcast_json(const char *type, cJSON *payload)
     for (int i = 0; i < active_count; ++i) {
         esp_err_t er = httpd_ws_send_frame_async(s_server, active_socks[i], &frame);
         if (er != ESP_OK) {
-            ESP_LOGW(TAG, "WS: enqueue broadcast to %d failed: %s", active_socks[i], esp_err_to_name(er));
+            ESP_LOGW(TAG, "WS: broadcast to %d failed: %s, removing client", active_socks[i], esp_err_to_name(er));
+            ws_clients_remove(active_socks[i]);
         }
     }
 
@@ -260,7 +261,8 @@ static void ws_send_json_to_fd(int fd, const char *type, cJSON *payload)
     httpd_ws_frame_t frame = { .type = HTTPD_WS_TYPE_TEXT, .payload = (uint8_t*)txt, .len = strlen(txt) };
     esp_err_t er = httpd_ws_send_frame_async(s_server, fd, &frame);
     if (er != ESP_OK) {
-        ESP_LOGW(TAG, "WS: enqueue send to %d failed: %s", fd, esp_err_to_name(er));
+        ESP_LOGW(TAG, "WS: send to %d failed: %s, removing client", fd, esp_err_to_name(er));
+        ws_clients_remove(fd);
     }
     free(txt);
 }
@@ -407,7 +409,8 @@ static void ws_ping_and_prune(void)
     for (int i = 0; i < ping_count; ++i) {
         esp_err_t pr = httpd_ws_send_frame_async(s_server, ping_socks[i], &ping);
         if (pr != ESP_OK) {
-            ESP_LOGW(TAG, "WS: failed to enqueue PING to %d: %s", ping_socks[i], esp_err_to_name(pr));
+            ESP_LOGW(TAG, "WS: failed to send PING to %d: %s, removing client", ping_socks[i], esp_err_to_name(pr));
+            ws_clients_remove(ping_socks[i]);
         } else {
             ESP_LOGD(TAG, "WS: sent PING to %d", ping_socks[i]);
         }
