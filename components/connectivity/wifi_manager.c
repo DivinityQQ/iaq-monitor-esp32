@@ -4,6 +4,7 @@
 #include "freertos/task.h"
 #include "freertos/event_groups.h"
 #include "esp_system.h"
+#include "esp_timer.h"
 #include "esp_wifi.h"
 #include "esp_event.h"
 #include "esp_log.h"
@@ -32,8 +33,11 @@ static char s_password[65] = {0};
 static bool s_has_nvs_credentials = false;
 static wifi_mode_t s_current_mode = WIFI_MODE_NULL;
 static int s_connect_retries = 0;
+static uint32_t s_reconnect_backoff_attempt = 0;
 static bool s_pending_provisioning = false;   /* true after credentials are set until first successful IP */
 static bool s_ever_connected = false;         /* persisted across boots */
+static bool s_reconnect_allowed = false;      /* false during intentional stop/reconfigure */
+static esp_timer_handle_t s_reconnect_timer = NULL;
 
 /* Kconfig defaults for SoftAP */
 #ifndef CONFIG_IAQ_AP_SSID
@@ -51,9 +55,16 @@ static bool s_ever_connected = false;         /* persisted across boots */
 #ifndef CONFIG_IAQ_WIFI_CONNECT_MAX_RETRY
 #define CONFIG_IAQ_WIFI_CONNECT_MAX_RETRY 10
 #endif
+#define WIFI_RECONNECT_BACKOFF_INITIAL_MS 1000U
+#define WIFI_RECONNECT_BACKOFF_MAX_MS     30000U
 
 /* Additional NVS keys */
 #define NVS_KEY_CONNECTED_ONCE "connected_once"
+
+static void wifi_reconnect_timer_callback(void *arg);
+static void wifi_cancel_reconnect(void);
+static uint32_t wifi_reconnect_backoff_ms(uint32_t attempt);
+static void wifi_schedule_reconnect(int reason);
 
 static void wifi_manager_apply_ps(wifi_mode_t mode)
 {
@@ -90,6 +101,83 @@ static void wifi_manager_apply_ps(wifi_mode_t mode)
     }
 }
 
+static void wifi_reconnect_timer_callback(void *arg)
+{
+    (void)arg;
+    if (!s_reconnect_allowed) {
+        return;
+    }
+    if (s_current_mode != WIFI_MODE_STA && s_current_mode != WIFI_MODE_APSTA) {
+        return;
+    }
+
+    esp_err_t ret = esp_wifi_connect();
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Delayed WiFi reconnect failed to start: %s", esp_err_to_name(ret));
+    }
+}
+
+static void wifi_cancel_reconnect(void)
+{
+    if (s_reconnect_timer) {
+        (void)esp_timer_stop(s_reconnect_timer);
+    }
+}
+
+static uint32_t wifi_reconnect_backoff_ms(uint32_t attempt)
+{
+    if (attempt == 0) {
+        return 0;
+    }
+
+    uint32_t delay_ms = WIFI_RECONNECT_BACKOFF_INITIAL_MS;
+    for (uint32_t i = 1; i < attempt && delay_ms < WIFI_RECONNECT_BACKOFF_MAX_MS; ++i) {
+        if (delay_ms > (WIFI_RECONNECT_BACKOFF_MAX_MS / 2U)) {
+            delay_ms = WIFI_RECONNECT_BACKOFF_MAX_MS;
+            break;
+        }
+        delay_ms *= 2U;
+    }
+    return delay_ms;
+}
+
+static void wifi_schedule_reconnect(int reason)
+{
+    if (!s_reconnect_allowed) {
+        ESP_LOGI(TAG, "WiFi disconnected (reason=%d), reconnect suppressed during reconfigure/stop", reason);
+        return;
+    }
+    if (s_current_mode != WIFI_MODE_STA && s_current_mode != WIFI_MODE_APSTA) {
+        return;
+    }
+
+    wifi_cancel_reconnect();
+
+    uint32_t attempt = s_reconnect_backoff_attempt++;
+    uint32_t delay_ms = wifi_reconnect_backoff_ms(attempt);
+
+    if (delay_ms == 0) {
+        ESP_LOGI(TAG, "WiFi disconnected (reason=%d), reconnecting immediately", reason);
+        esp_err_t ret = esp_wifi_connect();
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Immediate WiFi reconnect failed to start: %s", esp_err_to_name(ret));
+        }
+        return;
+    }
+
+    ESP_LOGI(TAG, "WiFi disconnected (reason=%d), reconnect attempt %u in %u ms",
+             reason, (unsigned)(attempt + 1U), (unsigned)delay_ms);
+
+    esp_err_t ret = esp_timer_start_once(s_reconnect_timer, (uint64_t)delay_ms * 1000ULL);
+    if (ret != ESP_OK) {
+        ESP_LOGW(TAG, "Failed to schedule WiFi reconnect: %s; retrying immediately", esp_err_to_name(ret));
+        ret = esp_wifi_connect();
+        if (ret != ESP_OK) {
+            ESP_LOGW(TAG, "Fallback WiFi reconnect failed to start: %s", esp_err_to_name(ret));
+        }
+    }
+}
+
 /* WiFi event handler */
 static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                                int32_t event_id, void* event_data)
@@ -97,6 +185,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
     if (event_base == WIFI_EVENT) {
         switch (event_id) {
             case WIFI_EVENT_STA_START:
+                wifi_cancel_reconnect();
+                s_reconnect_allowed = true;
                 esp_wifi_connect();
                 ESP_LOGI(TAG, "WiFi station started, connecting...");
                 break;
@@ -120,19 +210,21 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
                     if (s_pending_provisioning) {
                         if (s_connect_retries < CONFIG_IAQ_WIFI_CONNECT_MAX_RETRY) {
                             s_connect_retries++;
+                            wifi_cancel_reconnect();
                             esp_wifi_connect();
                         } else {
                             ESP_LOGW(TAG, "Provisioning connect failed after %d retries; starting SoftAP for re-entry", CONFIG_IAQ_WIFI_CONNECT_MAX_RETRY);
                             (void)wifi_manager_start_ap();
                         }
                     } else {
-                        /* Normal operation: keep retrying indefinitely, do not fall back to AP */
-                        esp_wifi_connect();
+                        /* Normal operation: retry indefinitely with bounded backoff, do not fall back to AP. */
+                        wifi_schedule_reconnect(disc ? disc->reason : -1);
                     }
                 }
                 break;
                 
             case WIFI_EVENT_STA_CONNECTED:
+                wifi_cancel_reconnect();
                 ESP_LOGI(TAG, "Connected to AP");
                 break;
             case WIFI_EVENT_AP_START:
@@ -164,6 +256,8 @@ static void wifi_event_handler(void* arg, esp_event_base_t event_base,
 
                     /* Reset retry counter on success */
                     s_connect_retries = 0;
+                    s_reconnect_backoff_attempt = 0;
+                    wifi_cancel_reconnect();
 
                     /* Mark first success after last credential change and persist */
                     if (s_pending_provisioning || !s_ever_connected) {
@@ -353,6 +447,16 @@ esp_err_t wifi_manager_init(iaq_system_context_t *ctx)
         return ret;
     }
 
+    const esp_timer_create_args_t reconnect_timer_args = {
+        .callback = wifi_reconnect_timer_callback,
+        .name = "wifi_reconnect",
+    };
+    ret = esp_timer_create(&reconnect_timer_args, &s_reconnect_timer);
+    if (ret != ESP_OK) {
+        ESP_LOGE(TAG, "Failed to create WiFi reconnect timer: %s", esp_err_to_name(ret));
+        return ret;
+    }
+
     /* Load WiFi credentials from NVS */
     load_wifi_credentials();
 
@@ -380,6 +484,9 @@ esp_err_t wifi_manager_start(void)
 esp_err_t wifi_manager_stop(void)
 {
     ESP_LOGI(TAG, "Stopping WiFi");
+    s_reconnect_allowed = false;
+    s_reconnect_backoff_attempt = 0;
+    wifi_cancel_reconnect();
     esp_err_t ret = esp_wifi_stop();
     if (ret != ESP_OK) {
         ESP_LOGE(TAG, "Failed to stop WiFi: %s", esp_err_to_name(ret));
@@ -420,6 +527,9 @@ esp_err_t wifi_manager_start_sta(void)
     wifi_mode_t target = keep_ap ? WIFI_MODE_APSTA : WIFI_MODE_STA;
 
     /* Ensure a clean start */
+    s_reconnect_allowed = false;
+    s_reconnect_backoff_attempt = 0;
+    wifi_cancel_reconnect();
     (void) esp_wifi_stop();
 
     esp_err_t ret = esp_wifi_set_mode(target);
@@ -512,6 +622,9 @@ esp_err_t wifi_manager_start_ap(void)
     }
 
     /* Ensure a clean start */
+    s_reconnect_allowed = false;
+    s_reconnect_backoff_attempt = 0;
+    wifi_cancel_reconnect();
     (void) esp_wifi_stop();
     esp_err_t ret = esp_wifi_set_mode(WIFI_MODE_AP);
     if (ret != ESP_OK) {
