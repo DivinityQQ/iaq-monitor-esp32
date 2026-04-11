@@ -564,39 +564,44 @@ esp_err_t mqtt_publish_status(const iaq_data_t *data)
 static esp_err_t publish_json(const char *topic, cJSON *obj)
 {
     if (!obj || !topic) { if (obj) cJSON_Delete(obj); return ESP_FAIL; }
-    if (!s_mqtt_client_lock) { cJSON_Delete(obj); return ESP_FAIL; }
+
+    /* Serialize before taking the client lock so one publish does not block
+     * unrelated topics on cJSON work. The lock still protects client teardown
+     * and the enqueue itself. */
+    pm_guard_lock_cpu();
+    char *json_string = cJSON_PrintUnformatted(obj);
+    pm_guard_unlock_cpu();
+    cJSON_Delete(obj);
+
+    if (!json_string) {
+        ESP_LOGW(TAG, "Failed to serialize JSON (topic=%s)", topic);
+        return ESP_ERR_NO_MEM;
+    }
+
+    if (!s_mqtt_client_lock) {
+        free(json_string);
+        return ESP_FAIL;
+    }
     if (xSemaphoreTake(s_mqtt_client_lock, pdMS_TO_TICKS(1000)) != pdTRUE) {
-        cJSON_Delete(obj);
+        free(json_string);
         return ESP_ERR_TIMEOUT;
     }
     if (!s_mqtt_connected || s_mqtt_client == NULL) {
         xSemaphoreGive(s_mqtt_client_lock);
-        cJSON_Delete(obj);
+        free(json_string);
         return ESP_FAIL;
     }
-    pm_guard_lock_cpu();
-    char *json_string = cJSON_PrintUnformatted(obj);
-    if (!json_string) {
-        ESP_LOGW(TAG, "Failed to serialize JSON (topic=%s)", topic);
-        pm_guard_unlock_cpu();
-        xSemaphoreGive(s_mqtt_client_lock);
-        cJSON_Delete(obj);
-        return ESP_ERR_NO_MEM;
-    }
+
     int msg_id = esp_mqtt_client_enqueue(s_mqtt_client, topic, json_string, 0, CONFIG_IAQ_MQTT_TELEMETRY_QOS, 0, true);
     if (msg_id < 0) {
         ESP_LOGW(TAG, "MQTT enqueue failed (topic=%s, msg_id=%d), dropping message", topic, msg_id);
         free(json_string);
-        pm_guard_unlock_cpu();
         xSemaphoreGive(s_mqtt_client_lock);
-        cJSON_Delete(obj);
         return ESP_FAIL;
     }
     ESP_LOGD(TAG, "Enqueued %s, msg_id=%d", topic, msg_id);
     free(json_string);
-    pm_guard_unlock_cpu();
     xSemaphoreGive(s_mqtt_client_lock);
-    cJSON_Delete(obj);
     return ESP_OK;
 }
 
