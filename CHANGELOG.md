@@ -4,6 +4,27 @@ All notable changes to this project are documented in this file.
 
 The format follows Keep a Changelog, and the project adheres to Semantic Versioning.
 
+## [0.13.0] - 2026-04-18
+
+ESP-IDF 6.0 migration release: updated build/toolchain baseline, explicit managed-component manifests, and PicolibC compatibility fixes for the console stack.
+
+Added:
+- Checked in `dependencies.lock` plus component manifests for `connectivity` and `iaq_json` to pin the ESP-IDF Component Manager resolutions for MQTT, cJSON, and LittleFS.
+
+Changed:
+- Project baseline moved to ESP-IDF 6.0, including the split `esp_driver_*` dependencies and the renamed sdkconfig defaults required by the new framework.
+- Default libc switched to PicolibC to match the ESP-IDF 6.0 toolchain.
+- README build/setup guidance now targets the ESP-IDF 6.0 export path and managed-components workflow.
+
+Fixed:
+- Console REPL initialization now seeds per-thread stdio correctly under PicolibC so USB/UART console startup remains reliable.
+- Web console log capture now uses the correct `_write_r` signature for the 6.0/PicolibC toolchain.
+- PowerFeather vendor code now includes the missing standard header needed to build cleanly with the updated toolchain.
+
+Upgrade notes:
+- When moving an existing checkout from ESP-IDF 5.5.x, export ESP-IDF 6.0 and run `idf.py fullclean` once before rebuilding.
+- The first configure/build resolves the pinned managed components into `managed_components/`.
+
 ## [0.12.1] - 2026-04-11
 
 Maintenance release: MQTT lifecycle hardening, Wi‑Fi reconnect backoff, websocket cleanup, and PMS5003 filtering improvements.
