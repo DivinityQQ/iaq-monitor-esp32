@@ -4,7 +4,6 @@
 #include <string.h>
 #include <stdbool.h>
 #include <unistd.h>
-#include <sys/reent.h>
 #include "sdkconfig.h"
 #include "esp_log.h"
 #include "esp_err.h"
@@ -19,6 +18,8 @@
 
 static const char *TAG = "WC_LOG";
 #define LOG_SEND_BATCH_SIZE   CONFIG_IAQ_WEB_CONSOLE_LOG_BUFFER_SIZE
+
+struct _reent;
 
 typedef struct {
     char *buffer;
@@ -392,9 +393,9 @@ next_cycle:
 
 /* Linker-wrapped _write_r to tee stdout/stderr into log ring.
  * Captures from very first printf/ESP_LOG - early boot is single-threaded so no mutex needed. */
-extern int __real__write_r(struct _reent *r, int fd, const void *data, size_t size);
+extern ssize_t __real__write_r(struct _reent *r, int fd, const void *data, size_t size);
 
-int __wrap__write_r(struct _reent *r, int fd, const void *data, size_t size)
+ssize_t __wrap__write_r(struct _reent *r, int fd, const void *data, size_t size)
 {
     /* Call the original _write_r first to preserve behavior. */
     ssize_t ret = __real__write_r(r, fd, data, size);
@@ -412,7 +413,7 @@ int __wrap__write_r(struct _reent *r, int fd, const void *data, size_t size)
             (void)xQueueSend(s_notify_queue, &dummy, 0);
         }
     }
-    return (int)ret;
+    return ret;
 }
 
 esp_err_t web_console_log_init(void)

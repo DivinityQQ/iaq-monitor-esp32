@@ -17,8 +17,9 @@ CONFIG_SPIRAM=y
 CONFIG_FREERTOS_HZ=100
 CONFIG_FREERTOS_UNICORE=n
 
-# Keep the legacy/newlib libc for console/log wrapping compatibility
-CONFIG_LIBC_NEWLIB=y
+# ESP-IDF 6.0 ships PicolibC as the default libc.
+CONFIG_IDF_EXPERIMENTAL_FEATURES=y
+CONFIG_LIBC_PICOLIBC=y
 
 # WiFi
 CONFIG_ESP_WIFI_STATIC_RX_BUFFER_NUM=16

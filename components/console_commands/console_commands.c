@@ -29,6 +29,39 @@
 
 static const char *TAG = "CONSOLE_CMD";
 
+#if CONFIG_LIBC_PICOLIBC && !CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY
+extern __thread FILE *linenoise_stdin;
+extern __thread FILE *linenoise_stdout;
+
+typedef struct {
+    FILE *stdin_prev;
+    FILE *stdout_prev;
+} console_stdio_tls_guard_t;
+
+static console_stdio_tls_guard_t console_prepare_stdio_for_repl_init(void)
+{
+    console_stdio_tls_guard_t guard = {
+        .stdin_prev = linenoise_stdin,
+        .stdout_prev = linenoise_stdout,
+    };
+
+    /* esp_console_setup_prompt() probes the active terminal on the caller
+     * thread. Seed linenoise TLS from the global stdio streams so PicolibC
+     * has valid stdin/stdout during that probe, regardless of console backend.
+     */
+    linenoise_stdin = stdin;
+    linenoise_stdout = stdout;
+
+    return guard;
+}
+
+static void console_restore_stdio_after_repl_init(console_stdio_tls_guard_t guard)
+{
+    linenoise_stdin = guard.stdin_prev;
+    linenoise_stdout = guard.stdout_prev;
+}
+#endif
+
 /* Helper: parse one possibly-quoted argument from argv[idx].
  * If argv[idx] begins with a double quote, concatenates subsequent tokens until
  * a token ending with a double quote is found, inserting single spaces between tokens.
@@ -1462,16 +1495,27 @@ esp_err_t console_commands_init(void)
 #endif
 
     /* Start console REPL on the selected console backend */
+#if CONFIG_LIBC_PICOLIBC && !CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY
+    console_stdio_tls_guard_t stdio_guard = console_prepare_stdio_for_repl_init();
+#endif
+
+    esp_err_t repl_err;
 #if CONFIG_ESP_CONSOLE_USB_SERIAL_JTAG
     esp_console_dev_usb_serial_jtag_config_t hw_config = ESP_CONSOLE_DEV_USB_SERIAL_JTAG_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_console_new_repl_usb_serial_jtag(&hw_config, &repl_config, &repl));
+    repl_err = esp_console_new_repl_usb_serial_jtag(&hw_config, &repl_config, &repl);
 #elif CONFIG_ESP_CONSOLE_USB_CDC
     esp_console_dev_usb_cdc_config_t hw_config = ESP_CONSOLE_DEV_CDC_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_console_new_repl_usb_cdc(&hw_config, &repl_config, &repl));
+    repl_err = esp_console_new_repl_usb_cdc(&hw_config, &repl_config, &repl);
 #else
     esp_console_dev_uart_config_t hw_config = ESP_CONSOLE_DEV_UART_CONFIG_DEFAULT();
-    ESP_ERROR_CHECK(esp_console_new_repl_uart(&hw_config, &repl_config, &repl));
+    repl_err = esp_console_new_repl_uart(&hw_config, &repl_config, &repl);
 #endif
+
+#if CONFIG_LIBC_PICOLIBC && !CONFIG_LIBC_PICOLIBC_NEWLIB_COMPATIBILITY
+    console_restore_stdio_after_repl_init(stdio_guard);
+#endif
+
+    ESP_ERROR_CHECK(repl_err);
     ESP_ERROR_CHECK(esp_console_start_repl(repl));
 
     ESP_LOGI(TAG, "Console initialized. Press Enter to activate. Type 'help' for commands.");
