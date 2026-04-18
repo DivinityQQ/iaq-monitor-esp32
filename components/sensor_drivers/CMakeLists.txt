@@ -17,5 +17,5 @@ endif()
 idf_component_register(
     SRCS ${SRCS}
     INCLUDE_DIRS "include"
-    REQUIRES driver esp_timer sensirion iaq_profiler system_context
+    REQUIRES esp_driver_gpio esp_driver_i2c esp_driver_tsens esp_driver_uart esp_timer sensirion iaq_profiler system_context
 )

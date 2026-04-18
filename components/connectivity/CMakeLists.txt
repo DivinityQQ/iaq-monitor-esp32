@@ -10,8 +10,6 @@ idf_component_register(
         esp_wifi
         esp_netif
         nvs_flash
-        mqtt
-        json
         iaq_data
         iaq_json
         iaq_profiler
@@ -22,7 +20,6 @@ idf_component_register(
         power_board
     PRIV_REQUIRES
         esp_timer
-        driver
         esp_event
 )
 

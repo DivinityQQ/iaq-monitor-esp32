@@ -7,7 +7,6 @@ idf_component_register(
         "."
     REQUIRES
         display_oled
-        driver
         nvs_flash
         esp_wifi
         esp_netif

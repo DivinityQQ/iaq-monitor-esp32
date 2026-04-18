@@ -17,7 +17,8 @@ idf_component_register(
         ${PF_ROOT}
     PRIV_REQUIRES
         app_config
-        driver
+        esp_driver_gpio
+        esp_driver_i2c
         iaq_data
         iaq_profiler
         nvs_flash

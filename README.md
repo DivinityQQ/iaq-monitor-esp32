@@ -1,5 +1,5 @@
 # IAQ Monitor (ESP32-S3, ESP-IDF)
-Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 5.5+. Modular components, runtime power management, a built‑in web portal, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery. Optional PowerFeather board support adds charger/fuel‑gauge telemetry and power rail control.
+Indoor Air Quality (IAQ) monitor firmware for ESP32‑S3 built on ESP‑IDF 6.0+. Modular components, runtime power management, a built‑in web portal, and a friendly console. Integrates with Home Assistant via MQTT auto‑discovery. Optional PowerFeather board support adds charger/fuel‑gauge telemetry and power rail control.
 Current version: 0.12.1
 ## Features
 - Connectivity & automation: Wi‑Fi station mode with NVS‑stored credentials, captive‑portal provisioning that lands on the dashboard, MQTT 5.0 with HA auto‑discovery, HTTP/S REST API + WebSocket streaming with OTA firmware/frontend uploads, and a console for on‑device setup (plus token‑protected web console + log streaming in the portal).
@@ -10,8 +10,9 @@ Current version: 0.12.1
 - Reliability & observability: Central data model with explicit "no data" sentinels, per‑sensor cadences/warm‑up countdowns, staggered timers, error recovery, time sync events, watchdog integration, profiling hooks, non‑blocking MQTT publishing with queue coalescing, and automatic rollback after boot‑loops.
 ## Hardware/Software
 - Target: ESP32‑S3 (DevKit and PowerFeather board)
-- SDK: ESP‑IDF v5.5.1+
+- SDK: ESP‑IDF v6.0+
 - Tooling: idf.py (CMake + Ninja)
+- Managed components: `espressif/mqtt`, `espressif/cjson`, and `joltwallet/littlefs` via the IDF Component Manager. `dependencies.lock` pins the resolved versions; use `idf.py update-dependencies` only when you want to refresh them.
 - Optional power board: PowerFeather integration via the official SDK (power rails, charger, fuel gauge, alarms). The SDK license permits use on official PowerFeather hardware.
 ### Supported Sensors
 **Fully Supported (real drivers):**
@@ -28,15 +29,22 @@ All sensors also support simulation mode for testing without hardware (enable vi
 - Control endpoints for rails/charger/alarms/ship/shutdown when running on a PowerFeather.
 - Licensed for official PowerFeather hardware only (see `components/power_board/powerfeather/LICENSE`).
 ## Quick Start
-```
+Linux/macOS (ESP-IDF 6.0 installed with the Espressif Installation Manager to the default path):
+```bash
+source ~/.espressif/v6.0/esp-idf/export.sh
 idf.py build
-# Linux/macOS (USB Serial/JTAG default):
+```
+If you are switching an existing checkout from ESP-IDF 5.5.x to 6.0, run `idf.py fullclean` once before the first 6.0 build to clear cached bootloader paths from the old framework checkout.
+
+Flash/monitor:
+```
 idf.py -p /dev/ttyACM0 flash
 idf.py -p /dev/ttyACM0 monitor
 # Windows:
 idf.py -p \\.\COM3 flash
 idf.py -p \\.\COM3 monitor
 ```
+The first configure/build downloads the managed components into `managed_components/` using the versions pinned in `dependencies.lock`.
 ## First Boot + Configuration
 - Open the serial console and type `help`.
 - Set Wi‑Fi credentials and reconnect:

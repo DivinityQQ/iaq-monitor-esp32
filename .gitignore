@@ -25,8 +25,7 @@ size_info_*.txt
 # pytest-embedded log folder
 pytest_embedded_log/
 
-# idf-component-manager output
-dependencies.lock
+# idf-component-manager cache
 managed_components/
 
 CLAUDE.md

@@ -12,7 +12,8 @@ idf_component_register(
         "."
     REQUIRES
         freertos
-        driver
+        esp_driver_gpio
+        esp_driver_i2c
         esp_event
         esp_timer
         system_context
